@@ -1,0 +1,164 @@
+const std = @import("std");
+const testing = std.testing;
+const token = @import("token.zig");
+const Token = token.Token;
+
+/// Lexer reads the source code and turns it into tokens
+const Lexer = struct {
+    source: []const u8,
+    position: usize = 0,
+    read_position: usize = 0,
+    char: u8 = 0,
+
+    /// Creates a new lexer using the given source code
+    pub fn init(source: []const u8) Lexer {
+        var lexer = Lexer{ .source = source };
+        lexer.readChar();
+        return lexer;
+    }
+
+    /// Parses the source and returns the next token found
+    pub fn next(self: *Lexer) Token {
+        self.skipWhitespace();
+
+        const char = self.char;
+        const token_type: Token.TokenType = switch (self.char) {
+            '=' => .assign,
+            '(' => .left_parenthesis,
+            ')' => .right_parenthesis,
+            ',' => .comma,
+            '+' => .plus,
+            '{' => .left_brace,
+            '}' => .right_brace,
+            0 => .eof,
+            else => |c| if (isLetter(c)) {
+                const ident = self.readIdentifier();
+                return Token{ .type = token.findType(ident), .literal = ident };
+            } else if (isDigit(c)) {
+                return Token{ .type = .integer, .literal = self.readNumber() };
+            } else .illegal,
+        };
+        // read the next character so we don't read our last character
+        // again when nexToken is called.
+        defer self.readChar();
+        return Token{
+            .type = token_type,
+            .literal = &[_]u8{char},
+        };
+    }
+
+    /// Reads exactly one character
+    fn readChar(self: *Lexer) void {
+        self.char = if (self.read_position >= self.source.len) 0 else self.source[self.read_position];
+        self.position = self.read_position;
+        self.read_position += 1;
+    }
+
+    /// Skips whitespace until a character is found
+    fn skipWhitespace(self: *Lexer) void {
+        while (isWhitespace(self.char)) {
+            self.readChar();
+        }
+    }
+
+    /// Reads the next characters as identifier
+    fn readIdentifier(self: *Lexer) []const u8 {
+        const pos = self.position;
+        while (isLetter(self.char)) {
+            self.readChar();
+        }
+        return self.source[pos..self.position];
+    }
+
+    /// Reads the next characters as number
+    fn readNumber(self: *Lexer) []const u8 {
+        const pos = self.position;
+        while (isDigit(self.char)) {
+            self.readChar();
+        }
+        return self.source[pos..self.position];
+    }
+};
+
+/// Sharhand function to create a token
+fn newToken(token_type: Token.TokenType, char: u8) Token {
+    return Token{ .type = token_type, .literal = &[_]u8{char} };
+}
+
+/// Returns true if the given character is considered whitespace
+fn isWhitespace(char: u8) bool {
+    return switch (char) {
+        ' ', '\t', '\n', '\r' => true,
+        else => false,
+    };
+}
+
+/// Returns true if the given character is a digit
+fn isDigit(char: u8) bool {
+    return switch (char) {
+        '0'...'9' => true,
+        else => false,
+    };
+}
+
+/// Returns true if the given character is a letter
+fn isLetter(char: u8) bool {
+    return switch (char) {
+        'a'...'z', 'A'...'Z', '_' => true,
+        else => false,
+    };
+}
+
+test "Retrieving next token" {
+    const input =
+        \\const five = 5
+        \\const ten = 10
+        \\const add = fn(x, y) {
+        \\  x + y    
+        \\}
+        \\
+        \\const result = add(five, ten)
+    ;
+
+    const tests = &[_]Token{
+        .{ .type = .constant, .literal = "const" },
+        .{ .type = .identifier, .literal = "five" },
+        .{ .type = .assign, .literal = "=" },
+        .{ .type = .integer, .literal = "5" },
+        .{ .type = .constant, .literal = "const" },
+        .{ .type = .identifier, .literal = "ten" },
+        .{ .type = .assign, .literal = "=" },
+        .{ .type = .integer, .literal = "10" },
+        .{ .type = .constant, .literal = "const" },
+        .{ .type = .identifier, .literal = "add" },
+        .{ .type = .assign, .literal = "=" },
+        .{ .type = .function, .literal = "fn" },
+        .{ .type = .left_parenthesis, .literal = "(" },
+        .{ .type = .identifier, .literal = "x" },
+        .{ .type = .comma, .literal = "," },
+        .{ .type = .identifier, .literal = "y" },
+        .{ .type = .right_parenthesis, .literal = ")" },
+        .{ .type = .left_brace, .literal = "{" },
+        .{ .type = .identifier, .literal = "x" },
+        .{ .type = .plus, .literal = "+" },
+        .{ .type = .identifier, .literal = "y" },
+        .{ .type = .right_brace, .literal = "}" },
+        .{ .type = .constant, .literal = "const" },
+        .{ .type = .identifier, .literal = "result" },
+        .{ .type = .assign, .literal = "=" },
+        .{ .type = .identifier, .literal = "add" },
+        .{ .type = .left_parenthesis, .literal = "(" },
+        .{ .type = .identifier, .literal = "five" },
+        .{ .type = .comma, .literal = "," },
+        .{ .type = .identifier, .literal = "ten" },
+    };
+
+    var lexer = Lexer.init(input);
+
+    for (tests) |unit| {
+        const current_token = lexer.next();
+
+        testing.expectEqualSlices(u8, unit.literal, current_token.literal);
+        testing.expectEqual(unit.type, current_token.type);
+    }
+}
