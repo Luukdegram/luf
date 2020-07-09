@@ -80,11 +80,6 @@ const Lexer = struct {
     }
 };
 
-/// Sharhand function to create a token
-fn newToken(token_type: Token.TokenType, char: u8) Token {
-    return Token{ .type = token_type, .literal = &[_]u8{char} };
-}
-
 /// Returns true if the given character is considered whitespace
 fn isWhitespace(char: u8) bool {
     return switch (char) {

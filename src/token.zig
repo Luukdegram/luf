@@ -33,10 +33,6 @@ pub const Token = struct {
         .{ "mut", .mutable },
         .{ "const", .constant },
     });
-
-    pub fn init(token_type: Token.TokenType, char: u8) Token {
-        return Token{ .type = token_type, .literal = &[_]u8{char} };
-    }
 };
 
 /// Returns the correct type of the identifier.
