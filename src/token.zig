@@ -1,4 +1,5 @@
 const std = @import("std");
+const testing = std.testing;
 
 /// Type Luf uses to define a token in the language
 pub const Token = struct {
@@ -59,4 +60,31 @@ pub const Token = struct {
 /// if no keyword is found, returns `.identifier`.
 pub fn findType(identifier: []const u8) Token.TokenType {
     return Token.Keywords.get(identifier) orelse .identifier;
+}
+
+test "Keywords" {
+    const keywords = &[_][]const u8{
+        "fn",
+        "mut",
+        "const",
+        "true",
+        "if",
+        "else",
+        "return",
+    };
+
+    for (keywords) |keyword| {
+        testing.expect(findType(keyword) != .identifier);
+    }
+}
+
+test "Identifiers" {
+    const identifiers = &[_][]const u8{
+        "a",
+        "word",
+        "random",
+    };
+    for (identifiers) |identifier| {
+        testing.expect(findType(identifier) == .identifier);
+    }
 }

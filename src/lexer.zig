@@ -4,7 +4,7 @@ const token = @import("token.zig");
 const Token = token.Token;
 
 /// Lexer reads the source code and turns it into tokens
-const Lexer = struct {
+pub const Lexer = struct {
     source: []const u8,
     position: usize = 0,
     read_position: usize = 0,
@@ -21,7 +21,7 @@ const Lexer = struct {
     pub fn next(self: *Lexer) Token {
         self.skipWhitespace();
 
-        const char = self.char;
+        const char = (&self.char).*;
         const token_type: Token.TokenType = switch (self.char) {
             '=' => if (self.peekChar() == '=') {
                 self.readChar();
@@ -52,12 +52,16 @@ const Lexer = struct {
                 return Token{ .type = .integer, .literal = self.readNumber() };
             } else .illegal,
         };
+
+        const literal = &[_]u8{char};
+
         // read the next character so we don't read our last character
         // again when nexToken is called.
-        defer self.readChar();
+        self.readChar();
+
         return Token{
             .type = token_type,
-            .literal = &[_]u8{char},
+            .literal = literal,
         };
     }
 
