@@ -3,13 +3,14 @@
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-const Lexer = @import("luf").Lexer;
-const Token = @import("luf").Token;
+const Lexer = @import("lexer.zig").Lexer;
+const Token = @import("token.zig").Token;
 const prompt = ">> ";
 
 /// Runs the REPL, reads from the reader stream and outputs
 /// to the writer stream.
 pub fn run(allocator: *Allocator, reader: var, writer: var) !void {
+    try writer.writeAll("---------======= Luf REPL =======---------\n");
     while (true) {
         // write our prompt
         try writer.writeAll(prompt);

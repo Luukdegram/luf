@@ -18,6 +18,6 @@ pub fn build(b: *Builder) void {
 
     const repl_runner = repl.run();
     repl_runner.step.dependOn(b.getInstallStep());
-    const repl_step = b.step("luf", "Run Luf's REPL");
+    const repl_step = b.step("repl", "Run Luf's REPL");
     repl_step.dependOn(&repl_runner.step);
 }
