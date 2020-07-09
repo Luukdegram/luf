@@ -15,6 +15,14 @@ pub const Token = struct {
         // operators
         assign,
         plus,
+        minus,
+        bang,
+        asterisk,
+        slash,
+        less_than,
+        greater_than,
+        equal,
+        not_equal,
         // delimiters
         comma,
         left_parenthesis,
@@ -25,6 +33,12 @@ pub const Token = struct {
         function,
         mutable,
         constant,
+        // underscores because reserved words in Zig
+        _true,
+        _false,
+        _if,
+        _else,
+        _return,
     };
 
     /// Lookup 'table' to check if an identifier is a keyword
@@ -32,6 +46,11 @@ pub const Token = struct {
         .{ "fn", .function },
         .{ "mut", .mutable },
         .{ "const", .constant },
+        .{ "true", ._true },
+        .{ "false", ._false },
+        .{ "if", ._if },
+        .{ "else", ._else },
+        .{ "return", ._return },
     });
 };
 

@@ -23,11 +23,25 @@ const Lexer = struct {
 
         const char = self.char;
         const token_type: Token.TokenType = switch (self.char) {
-            '=' => .assign,
+            '=' => if (self.peekChar() == '=') {
+                self.readChar();
+                self.readChar(); // So we don't read '=' token again
+                return Token{ .type = .equal, .literal = "==" };
+            } else .assign,
             '(' => .left_parenthesis,
             ')' => .right_parenthesis,
             ',' => .comma,
             '+' => .plus,
+            '-' => .minus,
+            '!' => if (self.peekChar() == '=') {
+                self.readChar();
+                self.readChar(); // So we don't read '=' token again
+                return Token{ .type = .not_equal, .literal = "!=" };
+            } else .illegal,
+            '/' => .slash,
+            '*' => .asterisk,
+            '<' => .less_than,
+            '>' => .greater_than,
             '{' => .left_brace,
             '}' => .right_brace,
             0 => .eof,
@@ -52,6 +66,14 @@ const Lexer = struct {
         self.char = if (self.read_position >= self.source.len) 0 else self.source[self.read_position];
         self.position = self.read_position;
         self.read_position += 1;
+    }
+
+    /// Returns the character but does not increase the position
+    fn peekChar(self: Lexer) u8 {
+        return if (self.read_position >= self.source.len)
+            0
+        else
+            self.source[self.read_position];
     }
 
     /// Skips whitespace until a character is found
@@ -104,7 +126,7 @@ fn isLetter(char: u8) bool {
     };
 }
 
-test "Retrieving next token" {
+test "All supported tokens" {
     const input =
         \\const five = 5
         \\const ten = 10
@@ -113,6 +135,17 @@ test "Retrieving next token" {
         \\}
         \\
         \\const result = add(five, ten)
+        \\!-/*5
+        \\5 < 10 > 5
+        \\
+        \\if (5 < 10) {
+        \\  return true
+        \\} else {
+        \\  return false
+        \\}
+        \\
+        \\10 == 10
+        \\10 != 9
     ;
 
     const tests = &[_]Token{
@@ -146,6 +179,39 @@ test "Retrieving next token" {
         .{ .type = .identifier, .literal = "five" },
         .{ .type = .comma, .literal = "," },
         .{ .type = .identifier, .literal = "ten" },
+        .{ .type = .right_parenthesis, .literal = ")" },
+        .{ .type = .illegal, .literal = "!" },
+        .{ .type = .minus, .literal = "-" },
+        .{ .type = .slash, .literal = "/" },
+        .{ .type = .asterisk, .literal = "*" },
+        .{ .type = .integer, .literal = "5" },
+        //.{ .type = .minus, .literal = "-" },
+        .{ .type = .integer, .literal = "5" },
+        .{ .type = .less_than, .literal = "<" },
+        .{ .type = .integer, .literal = "10" },
+        .{ .type = .greater_than, .literal = ">" },
+        .{ .type = .integer, .literal = "5" },
+        .{ .type = ._if, .literal = "if" },
+        .{ .type = .left_parenthesis, .literal = "(" },
+        .{ .type = .integer, .literal = "5" },
+        .{ .type = .less_than, .literal = "<" },
+        .{ .type = .integer, .literal = "10" },
+        .{ .type = .right_parenthesis, .literal = ")" },
+        .{ .type = .left_brace, .literal = "{" },
+        .{ .type = ._return, .literal = "return" },
+        .{ .type = ._true, .literal = "true" },
+        .{ .type = .right_brace, .literal = "}" },
+        .{ .type = ._else, .literal = "else" },
+        .{ .type = .left_brace, .literal = "{" },
+        .{ .type = ._return, .literal = "return" },
+        .{ .type = ._false, .literal = "false" },
+        .{ .type = .right_brace, .literal = "}" },
+        .{ .type = .integer, .literal = "10" },
+        .{ .type = .equal, .literal = "==" },
+        .{ .type = .integer, .literal = "10" },
+        .{ .type = .integer, .literal = "10" },
+        .{ .type = .not_equal, .literal = "!=" },
+        .{ .type = .integer, .literal = "9" },
     };
 
     var lexer = Lexer.init(input);
