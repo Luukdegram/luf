@@ -52,7 +52,7 @@ pub const Parser = struct {
         var nodes = ArrayList(Node).init(self.allocator);
         defer nodes.deinit();
 
-        while (self.index < self.tokens.len - 1) : (self.next()) {
+        while (self.index < self.tokens.len) : (self.next()) {
             if (try self.parseStatement()) |node| {
                 try nodes.append(node);
             }
@@ -64,12 +64,18 @@ pub const Parser = struct {
         };
     }
 
-    /// Parses the tokens founds by the lexer and assesses whether it's a statement or not
+    /// Parses the statement into a node
     fn parseStatement(self: *Parser) !?Node {
-        if (!self.currentIsType(.constant) and !self.currentIsType(.mutable)) {
-            return null;
-        }
-        const tmp_token = (&self.current_token).*;
+        return switch (self.current_token.type) {
+            .constant, .mutable => self.parseDeclaration(),
+            ._return => self.parseReturn(),
+            else => null,
+        };
+    }
+
+    /// Parses a declaration
+    fn parseDeclaration(self: *Parser) !?Node {
+        const tmp_token = self.current_token;
 
         if (!self.expectPeek(.identifier)) {
             return null;
@@ -80,14 +86,21 @@ pub const Parser = struct {
             return null;
         }
 
-        const statement = try self.allocator.create(Node.Statement);
-        statement.* = .{
+        const decl = try self.allocator.create(Node.Declaration);
+        decl.* = .{
             .token = tmp_token,
             .name = name,
             .value = null,
         };
 
-        return Node{ .statement = statement };
+        return Node{ .declaration = decl };
+    }
+
+    /// Parses a return statement
+    fn parseReturn(self: *Parser) !?Node {
+        const ret = try self.allocator.create(Node.Return);
+        ret.* = .{ .token = self.current_token, .value = null };
+        return Node{ ._return = ret };
     }
 
     /// Determines if the next token is the expected token or not.
@@ -111,7 +124,7 @@ pub const Parser = struct {
     }
 };
 
-test "Parse Statement" {
+test "Parse Delcaration" {
     const input =
         \\const x = 5
         \\mut y = 54
@@ -132,7 +145,27 @@ test "Parse Statement" {
     for (identifiers) |id, i| {
         const node: Node = tree.nodes[i];
 
-        testing.expectEqualSlices(u8, node.statement.name.value, id);
-        testing.expectEqualSlices(u8, node.statement.name.token.literal, node.statement.name.value);
+        testing.expectEqualSlices(u8, node.declaration.name.value, id);
+        testing.expectEqualSlices(u8, node.declaration.name.token.literal, node.declaration.name.value);
+    }
+}
+
+test "Parse Return statment" {
+    const input =
+        \\return 5
+        \\return 10
+        \\return 13957
+    ;
+
+    var allocator = testing.allocator;
+    var lexer = Lexer.init(input);
+    var parser = try Parser.init(allocator, &lexer);
+    const tree = try parser.parse();
+    defer tree.deinit();
+
+    testing.expect(tree.nodes.len == 3);
+
+    for (tree.nodes) |node| {
+        testing.expectEqualSlices(u8, node._return.token.literal, "return");
     }
 }
