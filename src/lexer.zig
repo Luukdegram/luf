@@ -65,6 +65,18 @@ pub const Lexer = struct {
         };
     }
 
+    /// Tokenizes all tokens found in the input source
+    pub fn tokenize(self: *Lexer, allocator: *std.mem.Allocator) ![]const Token {
+        var token_list = std.ArrayList(Token).init(allocator);
+        while (true) {
+            const tok: *Token = try token_list.addOne();
+            tok.* = self.next();
+            if (tok.type == .eof) {
+                return token_list.toOwnedSlice();
+            }
+        }
+    }
+
     /// Reads exactly one character
     fn readChar(self: *Lexer) void {
         self.char = if (self.read_position >= self.source.len) 0 else self.source[self.read_position];
