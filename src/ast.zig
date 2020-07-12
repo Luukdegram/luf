@@ -10,15 +10,7 @@ pub const Tree = struct {
     /// Frees all memory
     pub fn deinit(self: Tree) void {
         for (self.nodes) |node| {
-            switch (node) {
-                .declaration => |decl| self.allocator.destroy(decl),
-                .identifier => |id| self.allocator.destroy(id),
-                ._return => |ret| self.allocator.destroy(ret),
-                .prefix => |pref| self.allocator.destroy(pref),
-                .infix => |inf| self.allocator.destroy(inf),
-                .int_lit => |int| self.allocator.destroy(int),
-                .expression => |exp| self.allocator.destroy(exp),
-            }
+            node.deinit(self.allocator);
         }
         self.allocator.free(self.nodes);
         self.allocator.free(self.tokens);
@@ -35,6 +27,24 @@ pub const Node = union(NodeType) {
     infix: *Infix,
     int_lit: *IntegerLiteral,
     expression: *Expression,
+
+    pub fn deinit(self: Node, allocator: *Allocator) void {
+        switch (self) {
+            .declaration => |decl| {
+                decl.value.deinit(allocator);
+                allocator.destroy(decl);
+            },
+            .identifier => |id| allocator.destroy(id),
+            ._return => |ret| allocator.destroy(ret),
+            .prefix => |pref| allocator.destroy(pref),
+            .infix => |inf| allocator.destroy(inf),
+            .int_lit => |int| allocator.destroy(int),
+            .expression => |exp| {
+                exp.expression.deinit(allocator);
+                allocator.destroy(exp);
+            },
+        }
+    }
 
     /// Possible Nodes which are supported
     pub const NodeType = enum {
