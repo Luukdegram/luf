@@ -103,6 +103,13 @@ pub const Parser = struct {
         return Node{ ._return = ret };
     }
 
+    /// Parses the current token as an Identifier
+    fn parseIdentifier(self: *Parser) !Node {
+        const identifier = try self.allocator.create(Node.Identifier);
+        identifier.* = .{ .token = self.current_token, .value = self.current_token.literal };
+        return Node{ .identifier = identifier };
+    }
+
     /// Determines if the next token is the expected token or not.
     /// Incase the next token is the wanted token, retun true and retrieve next token.
     fn expectPeek(self: *Parser, token_type: Token.TokenType) bool {
