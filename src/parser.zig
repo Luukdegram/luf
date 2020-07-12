@@ -90,7 +90,7 @@ pub const Parser = struct {
         decl.* = .{
             .token = tmp_token,
             .name = name,
-            .value = null,
+            .value = undefined,
         };
 
         return Node{ .declaration = decl };
@@ -99,7 +99,7 @@ pub const Parser = struct {
     /// Parses a return statement
     fn parseReturn(self: *Parser) !?Node {
         const ret = try self.allocator.create(Node.Return);
-        ret.* = .{ .token = self.current_token, .value = null };
+        ret.* = .{ .token = self.current_token, .value = undefined };
         return Node{ ._return = ret };
     }
 
@@ -108,6 +108,50 @@ pub const Parser = struct {
         const identifier = try self.allocator.create(Node.Identifier);
         identifier.* = .{ .token = self.current_token, .value = self.current_token.literal };
         return Node{ .identifier = identifier };
+    }
+
+    /// Parses an expression statement, determines which expression to parse based on the token
+    fn parseExpressionStatement(self: *Parser) !Node {
+        const statement = try self.allocator.create(Node.Expression);
+        statement.* = .{ .token = self.current_token, .expression = try self.parseExpression() };
+        return Node{ .expression = statement };
+    }
+
+    /// Determines the correct expression type based on the current token type
+    fn parseExpression(self: *Parser) !Node {
+        return switch (self.current_token.type) {
+            .identifier => self.parseIdentifier(),
+            .integer => self.parseIntegerLiteral(),
+            else => self.parsePrefixExpression(),
+        };
+    }
+
+    /// Parses the current token into a prefix, errors if current token is not a prefix token
+    fn parsePrefixExpression(self: *Parser) !Node {
+        const prefix: Node.Prefix.Operator = switch (self.current_token.type) {
+            .minus => .minus,
+            .plus => .plus,
+            .not_equal => .bool_not,
+            else => return error.UnexpectedToken,
+        };
+
+        const expression = try self.allocator.create(Node.Prefix);
+        expression.* = .{ .token = self.current_token, .operator = prefix };
+
+        self.next();
+
+        expression.right = try self.parseExpression();
+
+        return Node{ .prefix = expression };
+    }
+
+    /// Parses the current token into an integer literal node
+    fn parseIntegerLiteral(self: *Parser) !Node {
+        const literal = try self.allocator.create(Node.IntegerLiteral);
+        const value = try std.fmt.parseInt(usize, self.current_token.literal, 10);
+
+        literal.* = .{ .token = self.current_token, .value = value };
+        return Node{ .int_lit = literal };
     }
 
     /// Determines if the next token is the expected token or not.
