@@ -201,7 +201,6 @@ test "All supported tokens" {
         .{ .type = .slash, .literal = "/" },
         .{ .type = .asterisk, .literal = "*" },
         .{ .type = .integer, .literal = "5" },
-        //.{ .type = .minus, .literal = "-" },
         .{ .type = .integer, .literal = "5" },
         .{ .type = .less_than, .literal = "<" },
         .{ .type = .integer, .literal = "10" },

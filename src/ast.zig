@@ -36,7 +36,10 @@ pub const Node = union(NodeType) {
             },
             .identifier => |id| allocator.destroy(id),
             ._return => |ret| allocator.destroy(ret),
-            .prefix => |pref| allocator.destroy(pref),
+            .prefix => |pref| {
+                pref.right.deinit(allocator);
+                allocator.destroy(pref);
+            },
             .infix => |inf| allocator.destroy(inf),
             .int_lit => |int| allocator.destroy(int),
             .expression => |exp| {

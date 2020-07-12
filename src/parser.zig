@@ -255,3 +255,45 @@ test "Parse identifier expression" {
     testing.expect(identifier.token.type == .identifier);
     testing.expectEqualSlices(u8, identifier.value, input);
 }
+
+test "Parse integer literal" {
+    const input = "124";
+    var allocator = testing.allocator;
+    var lexer = Lexer.init(input);
+    var parser = try Parser.init(allocator, &lexer);
+    const tree = try parser.parse();
+    defer tree.deinit();
+
+    testing.expect(tree.nodes.len == 1);
+    const literal = tree.nodes[0].expression.expression.int_lit;
+    testing.expect(literal.token.type == .integer);
+    testing.expect(literal.value == 124);
+}
+
+test "Parse prefix expressions" {
+    const TestCase = struct {
+        input: []const u8,
+        operator: Node.Prefix.Operator,
+        expected: usize,
+    };
+    const test_cases = &[_]TestCase{
+        .{ .input = "-5", .operator = .minus, .expected = 5 },
+        .{ .input = "+25", .operator = .plus, .expected = 25 },
+    };
+
+    const allocator = testing.allocator;
+    for (test_cases) |case| {
+        var lexer = Lexer.init(case.input);
+        var parser = try Parser.init(allocator, &lexer);
+        const tree = try parser.parse();
+        defer tree.deinit();
+
+        testing.expect(tree.nodes.len == 1);
+
+        const prefix = tree.nodes[0].expression.expression.prefix;
+        const literal = prefix.right.int_lit;
+
+        testing.expect(case.operator == prefix.operator);
+        testing.expect(case.expected == literal.value);
+    }
+}
