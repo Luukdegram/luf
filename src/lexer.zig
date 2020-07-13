@@ -21,12 +21,12 @@ pub const Lexer = struct {
     pub fn next(self: *Lexer) Token {
         self.skipWhitespace();
 
-        const char = (&self.char).*;
         const token_type: Token.TokenType = switch (self.char) {
             '=' => if (self.peekChar() == '=') {
+                const start = self.position;
                 self.readChar();
                 self.readChar(); // So we don't read '=' token again
-                return Token{ .type = .equal, .literal = "==" };
+                return Token{ .type = .equal, .start = start, .end = self.position };
             } else .assign,
             '(' => .left_parenthesis,
             ')' => .right_parenthesis,
@@ -34,10 +34,11 @@ pub const Lexer = struct {
             '+' => .plus,
             '-' => .minus,
             '!' => if (self.peekChar() == '=') {
+                const start = self.position;
                 self.readChar();
                 self.readChar(); // So we don't read '=' token again
-                return Token{ .type = .not_equal, .literal = "!=" };
-            } else .illegal,
+                return Token{ .type = .not_equal, .start = start, .end = self.position };
+            } else .bang,
             '/' => .slash,
             '*' => .asterisk,
             '<' => .less_than,
@@ -46,22 +47,24 @@ pub const Lexer = struct {
             '}' => .right_brace,
             0 => .eof,
             else => |c| if (isLetter(c)) {
+                const start = self.position;
                 const ident = self.readIdentifier();
-                return Token{ .type = token.findType(ident), .literal = ident };
+                return Token{ .type = token.findType(ident), .start = start, .end = self.position };
             } else if (isDigit(c)) {
-                return Token{ .type = .integer, .literal = self.readNumber() };
+                const start = self.position;
+                _ = self.readNumber();
+                return Token{ .type = .integer, .start = start, .end = self.position };
             } else .illegal,
         };
 
-        const literal = &[_]u8{char};
-
         // read the next character so we don't read our last character
         // again when nexToken is called.
-        self.readChar();
+        defer self.readChar();
 
         return Token{
             .type = token_type,
-            .literal = literal,
+            .start = self.position,
+            .end = self.read_position,
         };
     }
 
@@ -165,68 +168,68 @@ test "All supported tokens" {
     ;
 
     const tests = &[_]Token{
-        .{ .type = .constant, .literal = "const" },
-        .{ .type = .identifier, .literal = "five" },
-        .{ .type = .assign, .literal = "=" },
-        .{ .type = .integer, .literal = "5" },
-        .{ .type = .constant, .literal = "const" },
-        .{ .type = .identifier, .literal = "ten" },
-        .{ .type = .assign, .literal = "=" },
-        .{ .type = .integer, .literal = "10" },
-        .{ .type = .constant, .literal = "const" },
-        .{ .type = .identifier, .literal = "add" },
-        .{ .type = .assign, .literal = "=" },
-        .{ .type = .function, .literal = "fn" },
-        .{ .type = .left_parenthesis, .literal = "(" },
-        .{ .type = .identifier, .literal = "x" },
-        .{ .type = .comma, .literal = "," },
-        .{ .type = .identifier, .literal = "y" },
-        .{ .type = .right_parenthesis, .literal = ")" },
-        .{ .type = .left_brace, .literal = "{" },
-        .{ .type = .identifier, .literal = "x" },
-        .{ .type = .plus, .literal = "+" },
-        .{ .type = .identifier, .literal = "y" },
-        .{ .type = .right_brace, .literal = "}" },
-        .{ .type = .constant, .literal = "const" },
-        .{ .type = .identifier, .literal = "result" },
-        .{ .type = .assign, .literal = "=" },
-        .{ .type = .identifier, .literal = "add" },
-        .{ .type = .left_parenthesis, .literal = "(" },
-        .{ .type = .identifier, .literal = "five" },
-        .{ .type = .comma, .literal = "," },
-        .{ .type = .identifier, .literal = "ten" },
-        .{ .type = .right_parenthesis, .literal = ")" },
-        .{ .type = .illegal, .literal = "!" },
-        .{ .type = .minus, .literal = "-" },
-        .{ .type = .slash, .literal = "/" },
-        .{ .type = .asterisk, .literal = "*" },
-        .{ .type = .integer, .literal = "5" },
-        .{ .type = .integer, .literal = "5" },
-        .{ .type = .less_than, .literal = "<" },
-        .{ .type = .integer, .literal = "10" },
-        .{ .type = .greater_than, .literal = ">" },
-        .{ .type = .integer, .literal = "5" },
-        .{ .type = ._if, .literal = "if" },
-        .{ .type = .left_parenthesis, .literal = "(" },
-        .{ .type = .integer, .literal = "5" },
-        .{ .type = .less_than, .literal = "<" },
-        .{ .type = .integer, .literal = "10" },
-        .{ .type = .right_parenthesis, .literal = ")" },
-        .{ .type = .left_brace, .literal = "{" },
-        .{ .type = ._return, .literal = "return" },
-        .{ .type = ._true, .literal = "true" },
-        .{ .type = .right_brace, .literal = "}" },
-        .{ .type = ._else, .literal = "else" },
-        .{ .type = .left_brace, .literal = "{" },
-        .{ .type = ._return, .literal = "return" },
-        .{ .type = ._false, .literal = "false" },
-        .{ .type = .right_brace, .literal = "}" },
-        .{ .type = .integer, .literal = "10" },
-        .{ .type = .equal, .literal = "==" },
-        .{ .type = .integer, .literal = "10" },
-        .{ .type = .integer, .literal = "10" },
-        .{ .type = .not_equal, .literal = "!=" },
-        .{ .type = .integer, .literal = "9" },
+        .{ .type = .constant, .start = 0, .end = 5 },
+        .{ .type = .identifier, .start = 6, .end = 10 },
+        .{ .type = .assign, .start = 11, .end = 12 },
+        .{ .type = .integer, .start = 13, .end = 14 },
+        .{ .type = .constant, .start = 15, .end = 20 },
+        .{ .type = .identifier, .start = 21, .end = 24 },
+        .{ .type = .assign, .start = 25, .end = 26 },
+        .{ .type = .integer, .start = 27, .end = 29 },
+        .{ .type = .constant, .start = 30, .end = 35 },
+        .{ .type = .identifier, .start = 36, .end = 39 },
+        .{ .type = .assign, .start = 40, .end = 41 },
+        .{ .type = .function, .start = 42, .end = 44 },
+        .{ .type = .left_parenthesis, .start = 44, .end = 45 },
+        .{ .type = .identifier, .start = 45, .end = 46 },
+        .{ .type = .comma, .start = 46, .end = 47 },
+        .{ .type = .identifier, .start = 48, .end = 49 },
+        .{ .type = .right_parenthesis, .start = 49, .end = 50 },
+        .{ .type = .left_brace, .start = 51, .end = 52 },
+        .{ .type = .identifier, .start = 55, .end = 56 },
+        .{ .type = .plus, .start = 57, .end = 58 },
+        .{ .type = .identifier, .start = 59, .end = 60 },
+        .{ .type = .right_brace, .start = 65, .end = 66 },
+        .{ .type = .constant, .start = 68, .end = 73 },
+        .{ .type = .identifier, .start = 74, .end = 80 },
+        .{ .type = .assign, .start = 81, .end = 82 },
+        .{ .type = .identifier, .start = 83, .end = 86 },
+        .{ .type = .left_parenthesis, .start = 86, .end = 87 },
+        .{ .type = .identifier, .start = 87, .end = 91 },
+        .{ .type = .comma, .start = 91, .end = 92 },
+        .{ .type = .identifier, .start = 93, .end = 96 },
+        .{ .type = .right_parenthesis, .start = 96, .end = 97 },
+        .{ .type = .bang, .start = 98, .end = 99 },
+        .{ .type = .minus, .start = 99, .end = 100 },
+        .{ .type = .slash, .start = 100, .end = 101 },
+        .{ .type = .asterisk, .start = 101, .end = 102 },
+        .{ .type = .integer, .start = 102, .end = 103 },
+        .{ .type = .integer, .start = 104, .end = 105 },
+        .{ .type = .less_than, .start = 106, .end = 107 },
+        .{ .type = .integer, .start = 108, .end = 110 },
+        .{ .type = .greater_than, .start = 111, .end = 112 },
+        .{ .type = .integer, .start = 113, .end = 114 },
+        .{ .type = ._if, .start = 116, .end = 118 },
+        .{ .type = .left_parenthesis, .start = 119, .end = 120 },
+        .{ .type = .integer, .start = 120, .end = 121 },
+        .{ .type = .less_than, .start = 122, .end = 123 },
+        .{ .type = .integer, .start = 124, .end = 126 },
+        .{ .type = .right_parenthesis, .start = 126, .end = 127 },
+        .{ .type = .left_brace, .start = 128, .end = 129 },
+        .{ .type = ._return, .start = 132, .end = 138 },
+        .{ .type = ._true, .start = 139, .end = 143 },
+        .{ .type = .right_brace, .start = 144, .end = 145 },
+        .{ .type = ._else, .start = 146, .end = 150 },
+        .{ .type = .left_brace, .start = 151, .end = 152 },
+        .{ .type = ._return, .start = 155, .end = 161 },
+        .{ .type = ._false, .start = 162, .end = 167 },
+        .{ .type = .right_brace, .start = 168, .end = 169 },
+        .{ .type = .integer, .start = 171, .end = 173 },
+        .{ .type = .equal, .start = 174, .end = 176 },
+        .{ .type = .integer, .start = 177, .end = 179 },
+        .{ .type = .integer, .start = 180, .end = 182 },
+        .{ .type = .not_equal, .start = 183, .end = 185 },
+        .{ .type = .integer, .start = 186, .end = 187 },
     };
 
     var lexer = Lexer.init(input);
@@ -234,7 +237,8 @@ test "All supported tokens" {
     for (tests) |unit| {
         const current_token = lexer.next();
 
-        testing.expectEqualSlices(u8, unit.literal, current_token.literal);
+        testing.expectEqual(unit.start, current_token.start);
+        testing.expectEqual(unit.end, current_token.end);
         testing.expectEqual(unit.type, current_token.type);
     }
 }

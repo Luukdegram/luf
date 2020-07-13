@@ -8,6 +8,36 @@ const ast = @import("ast.zig");
 const Node = ast.Node;
 const Tree = ast.Tree;
 
+/// Precendence represent the order of importance
+/// The higher the value, the earlier it will be executed
+/// This means a function call will be executed before a prefix,
+/// and the product will be calculated before the sum.
+const Precedence = enum {
+    lowest,
+    equals,
+    less_greater,
+    sum,
+    product,
+    prefix,
+    call,
+
+    /// Returns the integer value of the enum
+    fn val(self: Precedence) usize {
+        return @enumToInt(self);
+    }
+};
+
+/// Determines the Precendence based on the given Token Type
+fn findPrecedence(token_type: Token.TokenType) Precedence {
+    return switch (token_type) {
+        .equal, .not_equal => .equals,
+        .less_than, .greater_than => .less_greater,
+        .plus, .minus => .sum,
+        .slash, .asterisk => .product,
+        else => .lowest,
+    };
+}
+
 /// Parser retrieves tokens from our Lexer and turns them into
 /// nodes to create an AST.
 pub const Parser = struct {
@@ -16,6 +46,7 @@ pub const Parser = struct {
     allocator: *Allocator,
     tokens: []const Token,
     index: u32,
+    source: []const u8,
 
     pub const Error = error{ParserError} || std.mem.Allocator.Error || std.fmt.ParseIntError;
 
@@ -23,13 +54,13 @@ pub const Parser = struct {
     /// Sets the current and peek token.
     pub fn init(allocator: *Allocator, lexer: *Lexer) !Parser {
         const tokens = try lexer.tokenize(allocator);
-
         var parser = Parser{
             .current_token = undefined,
             .peek_token = undefined,
             .allocator = allocator,
             .tokens = tokens,
             .index = 2,
+            .source = lexer.source,
         };
 
         // set current and peek token
@@ -52,18 +83,14 @@ pub const Parser = struct {
         var nodes = ArrayList(Node).init(self.allocator);
         defer nodes.deinit();
 
-        while (true) {
-            if (self.parseStatement()) |node| {
-                try nodes.append(node);
+        while (!self.currentIsType(.eof)) {
+            const node = try self.parseStatement();
+            try nodes.append(node);
 
-                if (!self.peekIsType(.eof)) {
-                    self.next();
-                } else {
-                    break;
-                }
-            } else |err| {
-                std.debug.print("Err: {}\n", .{err});
-                return err;
+            if (!self.peekIsType(.eof)) {
+                self.next();
+            } else {
+                break;
             }
         }
 
@@ -91,7 +118,8 @@ pub const Parser = struct {
             return error.ParserError;
         }
 
-        const name = Node.Identifier{ .token = self.current_token, .value = self.current_token.literal };
+        const val = self.source[self.current_token.start..self.current_token.end];
+        const name = Node.Identifier{ .token = self.current_token, .value = val };
         if (!self.expectPeek(.assign)) {
             return error.ParserError;
         }
@@ -102,7 +130,7 @@ pub const Parser = struct {
         decl.* = .{
             .token = tmp_token,
             .name = name,
-            .value = try self.parseExpression(),
+            .value = try self.parseExpression(.lowest),
         };
 
         return Node{ .declaration = decl };
@@ -118,49 +146,69 @@ pub const Parser = struct {
     /// Parses the current token as an Identifier
     fn parseIdentifier(self: *Parser) Error!Node {
         const identifier = try self.allocator.create(Node.Identifier);
-        identifier.* = .{ .token = self.current_token, .value = self.current_token.literal };
+        const val = self.source[self.current_token.start..self.current_token.end];
+        identifier.* = .{ .token = self.current_token, .value = val };
         return Node{ .identifier = identifier };
     }
 
     /// Parses an expression statement, determines which expression to parse based on the token
     fn parseExpressionStatement(self: *Parser) Error!Node {
         const statement = try self.allocator.create(Node.Expression);
-        statement.* = .{ .token = self.current_token, .expression = try self.parseExpression() };
+        statement.* = .{ .token = self.current_token, .expression = try self.parseExpression(.lowest) };
         return Node{ .expression = statement };
     }
 
     /// Determines the correct expression type based on the current token type
-    fn parseExpression(self: *Parser) Error!Node {
+    fn parseExpression(self: *Parser, prec: Precedence) Error!Node {
         return switch (self.current_token.type) {
             .identifier => self.parseIdentifier(),
             .integer => self.parseIntegerLiteral(),
-            else => self.parsePrefixExpression(),
+            else => blk: {
+                var left = try self.parsePrefixExpression();
+
+                if (prec.val() < findPrecedence(self.peek_token.type).val()) {
+                    self.next();
+                    left = try self.parseInfixExpression(left);
+                }
+                break :blk left;
+            },
         };
     }
 
     /// Parses the current token into a prefix, errors if current token is not a prefix token
     fn parsePrefixExpression(self: *Parser) Error!Node {
-        const prefix: Node.Prefix.Operator = switch (self.current_token.type) {
-            .minus => .minus,
-            .plus => .plus,
-            .not_equal => .bool_not,
-            else => return error.ParserError,
-        };
-
         const temp = self.current_token;
 
         self.next();
 
         const expression = try self.allocator.create(Node.Prefix);
-        expression.* = .{ .token = temp, .operator = prefix, .right = try self.parseExpression() };
+        expression.* = .{ .token = temp, .operator = temp.string(), .right = try self.parseExpression(.prefix) };
 
         return Node{ .prefix = expression };
+    }
+
+    /// Parses the current token into an infix expression
+    fn parseInfixExpression(self: *Parser, left: Node) Error!Node {
+        const expression = try self.allocator.create(Node.Infix);
+        expression.* = .{
+            .token = self.current_token,
+            .operator = self.current_token.string(),
+            .left = left,
+            .right = undefined,
+        };
+
+        const prec = findPrecedence(self.current_token.type);
+        self.next();
+        expression.right = try self.parseExpression(prec);
+
+        return Node{ .infix = expression };
     }
 
     /// Parses the current token into an integer literal node
     fn parseIntegerLiteral(self: *Parser) Error!Node {
         const literal = try self.allocator.create(Node.IntegerLiteral);
-        const value = try std.fmt.parseInt(usize, self.current_token.literal, 10);
+        const string_number = self.source[self.current_token.start..self.current_token.end];
+        const value = try std.fmt.parseInt(usize, string_number, 10);
 
         literal.* = .{ .token = self.current_token, .value = value };
         return Node{ .int_lit = literal };
@@ -213,7 +261,6 @@ test "Parse Delcaration" {
             index += 1;
 
             testing.expectEqualSlices(u8, id, node.declaration.name.value);
-            testing.expectEqualSlices(u8, node.declaration.name.value, node.declaration.name.token.literal);
         }
     }
 }
@@ -235,7 +282,7 @@ test "Parse Return statment" {
 
     for (tree.nodes) |node| {
         if (node == ._return) {
-            testing.expectEqualSlices(u8, node._return.token.literal, "return");
+            testing.expectEqualSlices(u8, node._return.token.string(), "return");
         }
     }
 }
@@ -273,12 +320,12 @@ test "Parse integer literal" {
 test "Parse prefix expressions" {
     const TestCase = struct {
         input: []const u8,
-        operator: Node.Prefix.Operator,
+        operator: []const u8,
         expected: usize,
     };
     const test_cases = &[_]TestCase{
-        .{ .input = "-5", .operator = .minus, .expected = 5 },
-        .{ .input = "+25", .operator = .plus, .expected = 25 },
+        .{ .input = "-5", .operator = "-", .expected = 5 },
+        .{ .input = "+25", .operator = "+", .expected = 25 },
     };
 
     const allocator = testing.allocator;
@@ -293,7 +340,11 @@ test "Parse prefix expressions" {
         const prefix = tree.nodes[0].expression.expression.prefix;
         const literal = prefix.right.int_lit;
 
-        testing.expect(case.operator == prefix.operator);
+        testing.expectEqualSlices(u8, case.operator, prefix.operator);
         testing.expect(case.expected == literal.value);
     }
+}
+
+test "Parse infix expressions" {
+    
 }

@@ -3,5 +3,5 @@ pub const Token = @import("token.zig").Token;
 pub const repl = @import("repl.zig");
 
 test "All tests" {
-    _ = @import("lexer.zig");
+    _ = @import("parser.zig");
 }

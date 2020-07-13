@@ -82,37 +82,14 @@ pub const Node = union(NodeType) {
     /// Prefix node, used to determine order -> x + y * 5
     pub const Prefix = struct {
         token: Token,
-        operator: Operator,
+        operator: []const u8,
         right: Node,
-
-        pub const Operator = enum {
-            bool_not,
-            minus,
-            plus,
-        };
     };
 
     /// Infix node, used to determine order
     pub const Infix = struct {
         token: Token,
-        operator: enum {
-            bool_or,
-            bool_and,
-            equal,
-            not_equal,
-            add,
-            sub,
-            mul,
-            pow,
-            div,
-
-            assign,
-            add_assign,
-            sub_assign,
-            mul_assign,
-            pow_assign,
-            div_assign,
-        },
+        operator: []const u8,
         right: Node,
         left: Node,
     };
