@@ -31,7 +31,7 @@ pub const Node = union(NodeType) {
     pub fn deinit(self: Node, allocator: *Allocator) void {
         switch (self) {
             .declaration => |decl| {
-                decl.value.deinit(allocator);
+                //decl.value.deinit(allocator);
                 allocator.destroy(decl);
             },
             .identifier => |id| allocator.destroy(id),
@@ -40,7 +40,11 @@ pub const Node = union(NodeType) {
                 pref.right.deinit(allocator);
                 allocator.destroy(pref);
             },
-            .infix => |inf| allocator.destroy(inf),
+            .infix => |inf| {
+                inf.right.deinit(allocator);
+                inf.left.deinit(allocator);
+                allocator.destroy(inf);
+            },
             .int_lit => |int| allocator.destroy(int),
             .expression => |exp| {
                 exp.expression.deinit(allocator);

@@ -120,17 +120,16 @@ pub const Parser = struct {
 
         const val = self.source[self.current_token.start..self.current_token.end];
         const name = Node.Identifier{ .token = self.current_token, .value = val };
+
         if (!self.expectPeek(.assign)) {
             return error.ParserError;
         }
-
-        self.next();
 
         const decl = try self.allocator.create(Node.Declaration);
         decl.* = .{
             .token = tmp_token,
             .name = name,
-            .value = try self.parseExpression(.lowest),
+            .value = undefined,
         };
 
         return Node{ .declaration = decl };
@@ -160,29 +159,28 @@ pub const Parser = struct {
 
     /// Determines the correct expression type based on the current token type
     fn parseExpression(self: *Parser, prec: Precedence) Error!Node {
-        return switch (self.current_token.type) {
-            .identifier => self.parseIdentifier(),
-            .integer => self.parseIntegerLiteral(),
-            else => blk: {
-                var left = try self.parsePrefixExpression();
-
-                if (prec.val() < findPrecedence(self.peek_token.type).val()) {
-                    self.next();
-                    left = try self.parseInfixExpression(left);
-                }
-                break :blk left;
-            },
+        var left = switch (self.current_token.type) {
+            .identifier => try self.parseIdentifier(),
+            .integer => try self.parseIntegerLiteral(),
+            else => try self.parsePrefixExpression(),
         };
+
+        if (prec.val() < findPrecedence(self.peek_token.type).val()) {
+            self.next();
+            left = try self.parseInfixExpression(left);
+        }
+
+        return left;
     }
 
     /// Parses the current token into a prefix, errors if current token is not a prefix token
     fn parsePrefixExpression(self: *Parser) Error!Node {
-        const temp = self.current_token;
+        const expression = try self.allocator.create(Node.Prefix);
+        expression.* = .{ .token = self.current_token, .operator = self.current_token.string(), .right = undefined };
 
         self.next();
 
-        const expression = try self.allocator.create(Node.Prefix);
-        expression.* = .{ .token = temp, .operator = temp.string(), .right = try self.parseExpression(.prefix) };
+        expression.right = try self.parseExpression(.prefix);
 
         return Node{ .prefix = expression };
     }
@@ -248,7 +246,7 @@ test "Parse Delcaration" {
     const tree = try parser.parse();
     defer tree.deinit();
 
-    testing.expect(tree.nodes.len == 3);
+    testing.expect(tree.nodes.len == 6);
 
     const identifiers = &[_][]const u8{
         "x", "y", "z",
@@ -346,5 +344,36 @@ test "Parse prefix expressions" {
 }
 
 test "Parse infix expressions" {
-    
+    const TestCase = struct {
+        input: []const u8,
+        left: usize,
+        operator: []const u8,
+        right: usize,
+    };
+
+    const test_cases = &[_]TestCase{
+        .{ .input = "10 + 10", .left = 10, .operator = "+", .right = 10 },
+        .{ .input = "10 - 10", .left = 10, .operator = "-", .right = 10 },
+        .{ .input = "10 * 10", .left = 10, .operator = "*", .right = 10 },
+        .{ .input = "10 / 10", .left = 10, .operator = "/", .right = 10 },
+        .{ .input = "10 > 10", .left = 10, .operator = ">", .right = 10 },
+        .{ .input = "10 < 10", .left = 10, .operator = "<", .right = 10 },
+        .{ .input = "10 == 10", .left = 10, .operator = "==", .right = 10 },
+        .{ .input = "10 != 10", .left = 10, .operator = "!=", .right = 10 },
+    };
+
+    const allocator = testing.allocator;
+    for (test_cases) |case| {
+        var lexer = Lexer.init(case.input);
+        var parser = try Parser.init(allocator, &lexer);
+        const tree = try parser.parse();
+        defer tree.deinit();
+
+        testing.expect(tree.nodes.len == 1);
+        const node: Node = tree.nodes[0];
+        const infix: *Node.Infix = node.expression.expression.infix;
+        testing.expectEqualSlices(u8, case.operator, infix.operator);
+        testing.expectEqual(case.left, infix.left.int_lit.value);
+        testing.expectEqual(case.right, infix.right.int_lit.value);
+    }
 }
