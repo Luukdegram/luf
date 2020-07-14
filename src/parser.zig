@@ -34,6 +34,7 @@ fn findPrecedence(token_type: Token.TokenType) Precedence {
         .less_than, .greater_than => .less_greater,
         .plus, .minus => .sum,
         .slash, .asterisk => .product,
+        .left_parenthesis => .call,
         else => .lowest,
     };
 }
@@ -129,7 +130,7 @@ pub const Parser = struct {
         decl.* = .{
             .token = tmp_token,
             .name = name,
-            .value = undefined,
+            .value = try self.parseExpression(.lowest),
         };
 
         return Node{ .declaration = decl };
@@ -162,6 +163,10 @@ pub const Parser = struct {
         var left = switch (self.current_token.type) {
             .identifier => try self.parseIdentifier(),
             .integer => try self.parseIntegerLiteral(),
+            ._true, ._false => try self.parseBoolean(),
+            ._if => try self.parseIfExpression(),
+            .left_parenthesis => try self.parseGroupedExpression(),
+            .function => try self.parseFunctionLiteral(),
             else => try self.parsePrefixExpression(),
         };
 
@@ -210,6 +215,180 @@ pub const Parser = struct {
 
         literal.* = .{ .token = self.current_token, .value = value };
         return Node{ .int_lit = literal };
+    }
+
+    /// Parses an expression into a boolean node
+    fn parseBoolean(self: *Parser) !Node {
+        const boolean = try self.allocator.create(Node.Bool);
+        boolean.* = .{
+            .token = self.current_token,
+            .value = self.currentIsType(._true),
+        };
+        return Node{ .boolean = boolean };
+    }
+
+    /// Parses expressions into a grouped expression
+    fn parseGroupedExpression(self: *Parser) Error!Node {
+        self.next();
+        const exp = try self.parseExpression(.lowest);
+        if (!self.expectPeek(.right_parenthesis)) {
+            return error.ParserError;
+        }
+        return exp;
+    }
+
+    /// Parses the expression into an if expression,
+    /// captures the condition and block statements.
+    fn parseIfExpression(self: *Parser) Error!Node {
+        const exp = try self.allocator.create(Node.IfExpression);
+        exp.* = .{
+            .token = self.current_token,
+            .condition = undefined,
+            .true_pong = undefined,
+            .false_pong = undefined,
+        };
+        if (!self.expectPeek(.left_parenthesis)) {
+            return error.ParserError;
+        }
+
+        self.next();
+        exp.condition = try self.parseExpression(.lowest);
+
+        if (!self.expectPeek(.right_parenthesis)) {
+            return error.ParserError;
+        }
+
+        if (!self.expectPeek(.left_brace)) {
+            return error.ParserError;
+        }
+
+        exp.true_pong = try self.parseBlockStatement();
+
+        if (self.peekIsType(._else)) {
+            self.next();
+
+            if (!self.peekIsType(.left_brace)) {
+                return null;
+            }
+
+            exp.false_pong = try self.parseBlockStatement();
+        }
+
+        return Node{ .if_expression = exp };
+    }
+
+    /// Parses the tokens into a `Node.BlockStatement` until a right brace is found
+    fn parseBlockStatement(self: *Parser) !Node {
+        const block = try self.allocator.create(Node.BlockStatement);
+        block.* = .{
+            .token = self.current_token,
+            .nodes = undefined,
+        };
+        var list = ArrayList(Node).init(self.allocator);
+        errdefer list.deinit();
+
+        while (!self.currentIsType(.right_brace) and !self.currentIsType(.eof)) {
+            const exp = try self.parseStatement();
+            try list.append(exp);
+            self.next();
+        }
+
+        block.nodes = list.toOwnedSlice();
+
+        return Node{ .block_statement = block };
+    }
+
+    /// Parses current tokens into a function literal.
+    /// Returns errors if no left parenthesis or brace is found.
+    fn parseFunctionLiteral(self: *Parser) Error!Node {
+        const func = try self.allocator.create(Node.FunctionLiteral);
+        func.* = .{
+            .token = self.current_token,
+            .params = undefined,
+            .body = undefined,
+        };
+
+        if (!self.expectPeek(.left_parenthesis)) {
+            return error.ParserError;
+        }
+
+        func.params = try self.parseFunctionParameters();
+
+        if (!self.expectPeek(.left_brace)) {
+            return error.ParserError;
+        }
+
+        func.body = try self.parseBlockStatement();
+
+        return func;
+    }
+
+    /// Parses the tokens into a list of nodes representing the parameters
+    /// of a function literal.
+    fn parseFunctionParameters(self: *Parser) Error![]Node {
+        var list = ArrayList(Node).init(self.allocator);
+        errdefer list.deinit();
+
+        if (self.peekIsType(.right_parenthesis)) {
+            self.next();
+            return list.toOwnedSlice();
+        }
+
+        self.next();
+
+        try list.append(try self.parseIdentifier());
+
+        while (self.peekIsType(.comma)) {
+            self.next();
+            self.next();
+            try list.append(try self.parseIdentifier());
+        }
+
+        if (!self.peekIsType(.right_parenthesis)) {
+            return error.ParserError;
+        }
+
+        return list.toOwnedSlice();
+    }
+
+    /// Parses the current token into a call expression
+    /// Accepts a function node
+    fn parseCallExpression(self: *Parser, func: Node) Error!Node {
+        std.debug.assert(func == .func_lit);
+        const call = try self.allocator.create(Node.CallExpression);
+        call.* = .{
+            .token = self.current_token,
+            .function = func,
+            .arguments = try self.parseCallArguments(),
+        };
+        return Node{ .call_expression = call };
+    }
+
+    /// Parses the next set of tokens into argument nodes
+    fn parseCallArguments(self: *Parser) Error![]Node {
+        var list = ArrayList(Node).init(self.allocator);
+        errdefer list.deinit();
+
+        // no arguments
+        if (self.peekIsType(.right_parenthesis)) {
+            self.next();
+            return list.toOwnedSlice();
+        }
+
+        self.next();
+        try list.append(self.parseExpression(.lowest));
+
+        while (self.peekIsType(.comma)) {
+            self.next();
+            self.next();
+            try list.append(try self.parseExpression(.lowest));
+        }
+
+        if (!self.expectPeek(.right_parenthesis)) {
+            return error.ParserError;
+        }
+
+        return list.toOwnedSlice();
     }
 
     /// Determines if the next token is the expected token or not.

@@ -27,11 +27,16 @@ pub const Node = union(NodeType) {
     infix: *Infix,
     int_lit: *IntegerLiteral,
     expression: *Expression,
+    block_statement: *BlockStatement,
+    boolean: *Bool,
+    if_expression: *IfExpression,
+    func_lit: *FunctionLiteral,
+    call_expression: *CallExpression,
 
     pub fn deinit(self: Node, allocator: *Allocator) void {
         switch (self) {
             .declaration => |decl| {
-                //decl.value.deinit(allocator);
+                decl.value.deinit(allocator);
                 allocator.destroy(decl);
             },
             .identifier => |id| allocator.destroy(id),
@@ -50,6 +55,11 @@ pub const Node = union(NodeType) {
                 exp.expression.deinit(allocator);
                 allocator.destroy(exp);
             },
+            .block_statement => |blk| {},
+            .boolean => |boolean| {},
+            .if_expression => |if_exp| {},
+            .func_lit => |fn_lit| {},
+            .call_expression => |call_exp| {},
         }
     }
 
@@ -62,6 +72,11 @@ pub const Node = union(NodeType) {
         infix,
         int_lit,
         expression,
+        block_statement,
+        boolean,
+        if_expression,
+        func_lit,
+        call_expression,
     };
 
     /// Statement node -> const x = 5
@@ -105,8 +120,46 @@ pub const Node = union(NodeType) {
     };
 
     /// Node to represent an expression, could be anything
+    /// `.expression` contains the root node of the expression
     pub const Expression = struct {
         token: Token,
         expression: Node,
+    };
+
+    /// Node representing a block statement
+    /// Nodes contains a slice of Nodes
+    pub const BlockStatement = struct {
+        token: Token,
+        nodes: []Node,
+    };
+
+    /// Node representing a boolean
+    pub const Bool = struct {
+        token: Token,
+        value: bool,
+    };
+
+    /// Represents an 'If' node
+    pub const IfExpression = struct {
+        token: Token,
+        condition: Node,
+        true_pong: Node,
+        false_pong: Node,
+    };
+
+    /// Node representing a literal function which holds the function's
+    /// parameters and the body of the function as a `BlockStatement`
+    pub const FunctionLiteral = struct {
+        token: Token,
+        params: []*Identifier,
+        body: Node,
+    };
+
+    /// Node representing a call expression and holds the function to be called
+    /// and also the arguments to its function
+    pub const CallExpression = struct {
+        token: Token,
+        function: Node,
+        arguments: []Node,
     };
 };
