@@ -281,12 +281,15 @@ pub const Parser = struct {
     /// Parses the tokens into a `Node.BlockStatement` until a right brace is found
     fn parseBlockStatement(self: *Parser) !Node {
         const block = try self.allocator.create(Node.BlockStatement);
+        errdefer self.allocator.destroy(block);
         block.* = .{
             .token = self.current_token,
             .nodes = undefined,
         };
         var list = ArrayList(Node).init(self.allocator);
         errdefer list.deinit();
+
+        self.next(); //skip '{' token
 
         while (!self.currentIsType(.right_brace) and !self.currentIsType(.eof)) {
             const exp = try self.parseStatement();
@@ -303,6 +306,7 @@ pub const Parser = struct {
     /// Returns errors if no left parenthesis or brace is found.
     fn parseFunctionLiteral(self: *Parser) Error!Node {
         const func = try self.allocator.create(Node.FunctionLiteral);
+        errdefer self.allocator.destroy(func);
         func.* = .{
             .token = self.current_token,
             .params = undefined,
@@ -357,6 +361,7 @@ pub const Parser = struct {
     fn parseCallExpression(self: *Parser, func: Node) Error!Node {
         std.debug.assert(func == .func_lit);
         const call = try self.allocator.create(Node.CallExpression);
+        errdefer self.allocator.free(call);
         call.* = .{
             .token = self.current_token,
             .function = func,
@@ -434,12 +439,10 @@ test "Parse Delcaration" {
 
     var index: usize = 0;
     for (tree.nodes) |node| {
-        if (node == .declaration) {
-            const id = identifiers[index];
-            index += 1;
+        const id = identifiers[index];
+        index += 1;
 
-            testing.expectEqualSlices(u8, id, node.declaration.name.identifier.value);
-        }
+        testing.expectEqualSlices(u8, id, node.declaration.name.identifier.value);
     }
 }
 
@@ -496,14 +499,23 @@ test "Parse integer literal" {
 }
 
 test "Parse prefix expressions" {
+    const VarValue = union {
+        int: usize,
+        string: []const u8,
+        boolean: bool,
+    };
     const TestCase = struct {
         input: []const u8,
         operator: []const u8,
-        expected: usize,
+        expected: VarValue,
     };
     const test_cases = &[_]TestCase{
-        .{ .input = "-5", .operator = "-", .expected = 5 },
-        .{ .input = "+25", .operator = "+", .expected = 25 },
+        .{ .input = "-5", .operator = "-", .expected = VarValue{ .int = 5 } },
+        .{ .input = "+25", .operator = "+", .expected = VarValue{ .int = 25 } },
+        .{ .input = "!foobar", .operator = "!", .expected = VarValue{ .string = "foobar" } },
+        .{ .input = "-foobar", .operator = "-", .expected = VarValue{ .string = "foobar" } },
+        .{ .input = "!true", .operator = "!", .expected = VarValue{ .boolean = true } },
+        .{ .input = "!false", .operator = "!", .expected = VarValue{ .boolean = false } },
     };
 
     const allocator = testing.allocator;
@@ -516,14 +528,18 @@ test "Parse prefix expressions" {
         testing.expect(tree.nodes.len == 1);
 
         const prefix = tree.nodes[0].expression.expression.prefix;
-        const literal = prefix.right.int_lit;
+        switch (prefix.right) {
+            .int_lit => |int| testing.expect(case.expected.int == int.value),
+            .identifier => |id| testing.expectEqualSlices(u8, case.expected.string, id.value),
+            .boolean => |boolean| testing.expect(case.expected.boolean == boolean.value),
+            else => @panic("Unexpected Node"),
+        }
 
         testing.expectEqualSlices(u8, case.operator, prefix.operator);
-        testing.expect(case.expected == literal.value);
     }
 }
 
-test "Parse infix expressions" {
+test "Parse infix expressions - integer" {
     const TestCase = struct {
         input: []const u8,
         left: usize,
@@ -556,4 +572,67 @@ test "Parse infix expressions" {
         testing.expectEqual(case.left, infix.left.int_lit.value);
         testing.expectEqual(case.right, infix.right.int_lit.value);
     }
+}
+
+test "Parse infix expressions - identifier" {
+    const allocator = testing.allocator;
+    const string_test = "foobar + foobarz";
+    var lexer = Lexer.init(string_test);
+    var parser = try Parser.init(allocator, &lexer);
+    const tree = try parser.parse();
+    defer tree.deinit();
+
+    testing.expect(tree.nodes.len == 1);
+    const node: Node = tree.nodes[0];
+    const infix: *Node.Infix = node.expression.expression.infix;
+    testing.expectEqualSlices(u8, "foobar", infix.left.identifier.value);
+    testing.expectEqualSlices(u8, "foobarz", infix.right.identifier.value);
+    testing.expectEqualSlices(u8, "+", infix.operator);
+}
+
+test "Parse infix expressions - boolean" {
+    const allocator = testing.allocator;
+    const boolean_test = "true == true";
+    var lexer = Lexer.init(boolean_test);
+    var parser = try Parser.init(allocator, &lexer);
+    const tree = try parser.parse();
+    defer tree.deinit();
+
+    testing.expect(tree.nodes.len == 1);
+    const node: Node = tree.nodes[0];
+    const infix: *Node.Infix = node.expression.expression.infix;
+    testing.expectEqual(true, infix.left.boolean.value);
+    testing.expectEqual(true, infix.right.boolean.value);
+    testing.expectEqualSlices(u8, "==", infix.operator);
+}
+
+test "Boolean expression" {
+    const allocator = testing.allocator;
+    const boolean_test = "true";
+    var lexer = Lexer.init(boolean_test);
+    var parser = try Parser.init(allocator, &lexer);
+    const tree = try parser.parse();
+    defer tree.deinit();
+
+    testing.expect(tree.nodes.len == 1);
+    testing.expect(tree.nodes[0].expression.expression == .boolean);
+}
+
+test "If expression" {
+    const allocator = testing.allocator;
+    const boolean_test = "if (x < y) { x }";
+    var lexer = Lexer.init(boolean_test);
+    var parser = try Parser.init(allocator, &lexer);
+    const tree = try parser.parse();
+    defer tree.deinit();
+
+    testing.expect(tree.nodes.len == 1);
+    const if_exp = tree.nodes[0].expression.expression.if_expression;
+    testing.expect(if_exp.true_pong != null);
+    testing.expect(if_exp.true_pong.?.block_statement.nodes[0] == .expression);
+    testing.expectEqualSlices(
+        u8,
+        if_exp.true_pong.?.block_statement.nodes[0].expression.expression.identifier.value,
+        "x",
+    );
 }

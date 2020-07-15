@@ -33,6 +33,9 @@ pub const Node = union(NodeType) {
     func_lit: *FunctionLiteral,
     call_expression: *CallExpression,
 
+    /// Frees memory of a node and all of its connected nodes.
+    /// Altho this can be used to free the memory of all nodes,
+    /// using an arena allocator will be much more performant.
     pub fn deinit(self: Node, allocator: *Allocator) void {
         switch (self) {
             .declaration => |decl| {
@@ -56,11 +59,36 @@ pub const Node = union(NodeType) {
                 exp.expression.deinit(allocator);
                 allocator.destroy(exp);
             },
-            .block_statement => |blk| {},
-            .boolean => |boolean| {},
-            .if_expression => |if_exp| {},
-            .func_lit => |fn_lit| {},
-            .call_expression => |call_exp| {},
+            .boolean => |boolean| allocator.destroy(boolean),
+            .block_statement => |blk| {
+                for (blk.nodes) |n| {
+                    n.deinit(allocator);
+                }
+                allocator.free(blk.nodes);
+                allocator.destroy(blk);
+            },
+            .if_expression => |if_exp| {
+                if_exp.condition.deinit(allocator);
+                if (if_exp.true_pong) |pong| pong.deinit(allocator);
+                if (if_exp.false_pong) |pong| pong.deinit(allocator);
+                allocator.destroy(if_exp);
+            },
+            .func_lit => |fn_lit| {
+                for (fn_lit.params) |param| {
+                    param.deinit(allocator);
+                }
+                allocator.free(fn_lit.params);
+                fn_lit.body.deinit(allocator);
+                allocator.destroy(fn_lit);
+            },
+            .call_expression => |call_exp| {
+                call_exp.function.deinit(allocator);
+                for (call_exp.arguments) |arg| {
+                    arg.deinit(allocator);
+                }
+                allocator.free(call_exp.arguments);
+                allocator.destroy(call_exp);
+            },
         }
     }
 
@@ -144,8 +172,8 @@ pub const Node = union(NodeType) {
     pub const IfExpression = struct {
         token: Token,
         condition: Node,
-        true_pong: Node,
-        false_pong: Node,
+        true_pong: ?Node = null,
+        false_pong: ?Node = null,
     };
 
     /// Node representing a literal function which holds the function's
