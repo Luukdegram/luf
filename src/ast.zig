@@ -36,6 +36,7 @@ pub const Node = union(NodeType) {
     pub fn deinit(self: Node, allocator: *Allocator) void {
         switch (self) {
             .declaration => |decl| {
+                decl.name.deinit(allocator);
                 decl.value.deinit(allocator);
                 allocator.destroy(decl);
             },
@@ -82,7 +83,7 @@ pub const Node = union(NodeType) {
     /// Statement node -> const x = 5
     pub const Declaration = struct {
         token: Token,
-        name: Identifier,
+        name: Node,
         value: Node,
     };
 
@@ -151,7 +152,7 @@ pub const Node = union(NodeType) {
     /// parameters and the body of the function as a `BlockStatement`
     pub const FunctionLiteral = struct {
         token: Token,
-        params: []*Identifier,
+        params: []Node,
         body: Node,
     };
 

@@ -120,7 +120,8 @@ pub const Parser = struct {
         }
 
         const val = self.source[self.current_token.start..self.current_token.end];
-        const name = Node.Identifier{ .token = self.current_token, .value = val };
+        const name = try self.allocator.create(Node.Identifier);
+        name.* = .{ .token = self.current_token, .value = val };
 
         if (!self.expectPeek(.assign)) {
             return error.ParserError;
@@ -129,7 +130,7 @@ pub const Parser = struct {
         const decl = try self.allocator.create(Node.Declaration);
         decl.* = .{
             .token = tmp_token,
-            .name = name,
+            .name = Node{ .identifier = name },
             .value = try self.parseExpression(.lowest),
         };
 
@@ -268,7 +269,7 @@ pub const Parser = struct {
             self.next();
 
             if (!self.peekIsType(.left_brace)) {
-                return null;
+                return error.ParserError;
             }
 
             exp.false_pong = try self.parseBlockStatement();
@@ -320,7 +321,7 @@ pub const Parser = struct {
 
         func.body = try self.parseBlockStatement();
 
-        return func;
+        return Node{ .func_lit = func };
     }
 
     /// Parses the tokens into a list of nodes representing the parameters
@@ -425,7 +426,7 @@ test "Parse Delcaration" {
     const tree = try parser.parse();
     defer tree.deinit();
 
-    testing.expect(tree.nodes.len == 6);
+    testing.expect(tree.nodes.len == 3);
 
     const identifiers = &[_][]const u8{
         "x", "y", "z",
@@ -437,7 +438,7 @@ test "Parse Delcaration" {
             const id = identifiers[index];
             index += 1;
 
-            testing.expectEqualSlices(u8, id, node.declaration.name.value);
+            testing.expectEqualSlices(u8, id, node.declaration.name.identifier.value);
         }
     }
 }
