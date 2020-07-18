@@ -351,7 +351,7 @@ pub const Parser = struct {
             try list.append(try self.parseIdentifier());
         }
 
-        if (!self.peekIsType(.right_parenthesis)) {
+        if (!self.expectPeek(.right_parenthesis)) {
             return error.ParserError;
         }
 
@@ -668,4 +668,50 @@ test "If else expression" {
         if_exp.false_pong.?.block_statement.nodes[0].expression.expression.identifier.value,
         "y",
     );
+}
+
+test "Function literal" {
+    const input = "fn(x, y) { x + y }";
+    var lexer = Lexer.init(input);
+    var parser = try Parser.init(testing.allocator, &lexer);
+    const tree = try parser.parse();
+    defer tree.deinit();
+
+    testing.expect(tree.nodes.len == 1);
+
+    const func = tree.nodes[0].expression.expression.func_lit;
+    testing.expect(func.params.len == 2);
+
+    testing.expectEqualSlices(u8, func.params[0].identifier.value, "x");
+    testing.expectEqualSlices(u8, func.params[1].identifier.value, "y");
+
+    const body = func.body.block_statement.nodes[0];
+    const infix = body.expression.expression.infix;
+    testing.expectEqualSlices(u8, infix.operator, "+");
+    testing.expectEqualSlices(u8, infix.left.identifier.value, "x");
+    testing.expectEqualSlices(u8, infix.right.identifier.value, "y");
+}
+
+test "Function parameters" {
+    const test_cases = .{
+        .{ .input = "fn() {}", .expected = &[_][]const u8{} },
+        .{ .input = "fn(x) {}", .expected = &[_][]const u8{"x"} },
+        .{ .input = "fn(x, y, z) {}", .expected = &[_][]const u8{ "x", "y", "z" } },
+    };
+
+    inline for (test_cases) |case| {
+        var lexer = Lexer.init(case.input);
+        var parser = try Parser.init(testing.allocator, &lexer);
+        const tree = try parser.parse();
+        defer tree.deinit();
+
+        testing.expect(tree.nodes.len == 1);
+
+        const func = tree.nodes[0].expression.expression.func_lit;
+        testing.expect(func.params.len == case.expected.len);
+
+        inline for (case.expected) |exp, i| {
+            testing.expectEqualSlices(u8, exp, func.params[i].identifier.value);
+        }
+    }
 }
