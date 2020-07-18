@@ -669,13 +669,3 @@ test "If else expression" {
         "y",
     );
 }
-
-test "Function literal" {
-    const input = "fn(x, y) { x + y }";
-    var lexer = Lexer.init(input);
-    var parser = try Parser.init(testing.allocator, &lexer);
-    const tree = parser.parse();
-    defer tree.deinit();
-
-    testing.expect(tree.nodes.len == 1);
-}
