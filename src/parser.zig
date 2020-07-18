@@ -141,6 +141,8 @@ pub const Parser = struct {
     fn parseReturn(self: *Parser) Error!Node {
         const ret = try self.allocator.create(Node.Return);
         ret.* = .{ .token = self.current_token, .value = undefined };
+        self.next();
+        ret.value = try self.parseExpression(.lowest);
         return Node{ ._return = ret };
     }
 
@@ -447,23 +449,28 @@ test "Parse Delcaration" {
 }
 
 test "Parse Return statment" {
-    const input =
-        \\return 5
-        \\return 10
-        \\return 13957
-    ;
+    const test_cases = .{
+        .{ .input = "return 5", .expected = 5 },
+        .{ .input = "return foo", .expected = "foo" },
+        .{ .input = "return true", .expected = true },
+    };
 
     var allocator = testing.allocator;
-    var lexer = Lexer.init(input);
-    var parser = try Parser.init(allocator, &lexer);
-    const tree = try parser.parse();
-    defer tree.deinit();
+    inline for (test_cases) |case| {
+        var lexer = Lexer.init(case.input);
+        var parser = try Parser.init(allocator, &lexer);
+        const tree = try parser.parse();
+        defer tree.deinit();
 
-    testing.expect(tree.nodes.len == 6);
+        testing.expect(tree.nodes.len == 1);
 
-    for (tree.nodes) |node| {
-        if (node == ._return) {
-            testing.expectEqualSlices(u8, node._return.token.string(), "return");
+        const node = tree.nodes[0]._return.value;
+
+        switch (@typeInfo(@TypeOf(case.expected))) {
+            .ComptimeInt => testing.expectEqual(@intCast(usize, case.expected), node.int_lit.value),
+            .Pointer => testing.expectEqualSlices(u8, case.expected, node.identifier.value),
+            .Bool => testing.expectEqual(case.expected, node.boolean.value),
+            else => @panic("Unexpected type"),
         }
     }
 }
