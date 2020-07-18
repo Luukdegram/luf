@@ -119,18 +119,18 @@ pub const Parser = struct {
             return error.ParserError;
         }
 
-        const val = self.source[self.current_token.start..self.current_token.end];
-        const name = try self.allocator.create(Node.Identifier);
-        name.* = .{ .token = self.current_token, .value = val };
+        const name = try self.parseIdentifier();
 
         if (!self.expectPeek(.assign)) {
             return error.ParserError;
         }
 
+        self.next();
+
         const decl = try self.allocator.create(Node.Declaration);
         decl.* = .{
             .token = tmp_token,
-            .name = Node{ .identifier = name },
+            .name = name,
             .value = try self.parseExpression(.lowest),
         };
 
@@ -166,16 +166,25 @@ pub const Parser = struct {
         var left = switch (self.current_token.type) {
             .identifier => try self.parseIdentifier(),
             .integer => try self.parseIntegerLiteral(),
+            .bang => try self.parsePrefixExpression(),
+            .minus => try self.parsePrefixExpression(),
             ._true, ._false => try self.parseBoolean(),
             ._if => try self.parseIfExpression(),
             .left_parenthesis => try self.parseGroupedExpression(),
             .function => try self.parseFunctionLiteral(),
-            else => try self.parsePrefixExpression(),
+            else => {
+                std.debug.print("Unexpected token: {}\n", .{self.current_token});
+                return error.ParserError;
+            },
         };
 
         if (prec.val() < findPrecedence(self.peek_token.type).val()) {
             self.next();
-            left = try self.parseInfixExpression(left);
+            if (self.currentIsType(.left_parenthesis)) {
+                left = try self.parseCallExpression(left);
+            } else {
+                left = try self.parseInfixExpression(left);
+            }
         }
 
         return left;
@@ -361,9 +370,8 @@ pub const Parser = struct {
     /// Parses the current token into a call expression
     /// Accepts a function node
     fn parseCallExpression(self: *Parser, func: Node) Error!Node {
-        std.debug.assert(func == .func_lit);
         const call = try self.allocator.create(Node.CallExpression);
-        errdefer self.allocator.free(call);
+        errdefer self.allocator.destroy(call);
         call.* = .{
             .token = self.current_token,
             .function = func,
@@ -384,7 +392,7 @@ pub const Parser = struct {
         }
 
         self.next();
-        try list.append(self.parseExpression(.lowest));
+        try list.append(try self.parseExpression(.lowest));
 
         while (self.peekIsType(.comma)) {
             self.next();
@@ -518,7 +526,7 @@ test "Parse prefix expressions" {
     };
     const test_cases = &[_]TestCase{
         .{ .input = "-5", .operator = "-", .expected = VarValue{ .int = 5 } },
-        .{ .input = "+25", .operator = "+", .expected = VarValue{ .int = 25 } },
+        .{ .input = "!25", .operator = "!", .expected = VarValue{ .int = 25 } },
         .{ .input = "!foobar", .operator = "!", .expected = VarValue{ .string = "foobar" } },
         .{ .input = "-foobar", .operator = "-", .expected = VarValue{ .string = "foobar" } },
         .{ .input = "!true", .operator = "!", .expected = VarValue{ .boolean = true } },
@@ -714,4 +722,22 @@ test "Function parameters" {
             testing.expectEqualSlices(u8, exp, func.params[i].identifier.value);
         }
     }
+}
+
+test "Call expression" {
+    const input = "add(1, 2 * 3, 4 + 5)";
+    var lexer = Lexer.init(input);
+    var parser = try Parser.init(testing.allocator, &lexer);
+    const tree = try parser.parse();
+    defer tree.deinit();
+
+    testing.expect(tree.nodes.len == 1);
+
+    const call = tree.nodes[0].expression.expression.call_expression;
+    testing.expectEqualSlices(u8, call.function.identifier.value, "add");
+    testing.expect(call.arguments.len == 3);
+
+    testing.expect(call.arguments[0].int_lit.value == 1);
+    testing.expectEqualSlices(u8, call.arguments[1].infix.operator, "*");
+    testing.expect(call.arguments[2].infix.right.int_lit.value == 5);
 }
