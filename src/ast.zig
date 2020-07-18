@@ -152,10 +152,10 @@ pub const Node = union(NodeType) {
     };
 
     /// Node to represent an expression, could be anything
-    /// `.expression` contains the root node of the expression
+    /// `value` contains the root node of the expression
     pub const Expression = struct {
         token: Token,
-        expression: Node,
+        value: Node,
     };
 
     /// Node representing a block statement
