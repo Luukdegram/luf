@@ -4,4 +4,5 @@ pub const repl = @import("repl.zig");
 
 test "All tests" {
     _ = @import("parser.zig");
+    _ = @import("eval.zig");
 }
