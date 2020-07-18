@@ -494,7 +494,7 @@ test "Parse identifier expression" {
 
     testing.expect(tree.nodes.len == 1);
 
-    const identifier = tree.nodes[0].expression.value.identifier;
+    const identifier = tree.nodes[0].expression.expression.identifier;
     testing.expect(identifier.token.type == .identifier);
     testing.expectEqualSlices(u8, identifier.value, input);
 }
@@ -508,7 +508,7 @@ test "Parse integer literal" {
     defer tree.deinit();
 
     testing.expect(tree.nodes.len == 1);
-    const literal = tree.nodes[0].expression.value.int_lit;
+    const literal = tree.nodes[0].expression.expression.int_lit;
     testing.expect(literal.token.type == .integer);
     testing.expect(literal.value == 124);
 }
@@ -542,7 +542,7 @@ test "Parse prefix expressions" {
 
         testing.expect(tree.nodes.len == 1);
 
-        const prefix = tree.nodes[0].expression.value.prefix;
+        const prefix = tree.nodes[0].expression.expression.prefix;
         switch (prefix.right) {
             .int_lit => |int| testing.expect(case.expected.int == int.value),
             .identifier => |id| testing.expectEqualSlices(u8, case.expected.string, id.value),
@@ -582,7 +582,7 @@ test "Parse infix expressions - integer" {
 
         testing.expect(tree.nodes.len == 1);
         const node: Node = tree.nodes[0];
-        const infix: *Node.Infix = node.expression.value.infix;
+        const infix: *Node.Infix = node.expression.expression.infix;
         testing.expectEqualSlices(u8, case.operator, infix.operator);
         testing.expectEqual(case.left, infix.left.int_lit.value);
         testing.expectEqual(case.right, infix.right.int_lit.value);
@@ -599,7 +599,7 @@ test "Parse infix expressions - identifier" {
 
     testing.expect(tree.nodes.len == 1);
     const node: Node = tree.nodes[0];
-    const infix: *Node.Infix = node.expression.value.infix;
+    const infix: *Node.Infix = node.expression.expression.infix;
     testing.expectEqualSlices(u8, "foobar", infix.left.identifier.value);
     testing.expectEqualSlices(u8, "foobarz", infix.right.identifier.value);
     testing.expectEqualSlices(u8, "+", infix.operator);
@@ -615,7 +615,7 @@ test "Parse infix expressions - boolean" {
 
     testing.expect(tree.nodes.len == 1);
     const node: Node = tree.nodes[0];
-    const infix: *Node.Infix = node.expression.value.infix;
+    const infix: *Node.Infix = node.expression.expression.infix;
     testing.expectEqual(true, infix.left.boolean.value);
     testing.expectEqual(true, infix.right.boolean.value);
     testing.expectEqualSlices(u8, "==", infix.operator);
@@ -630,7 +630,7 @@ test "Boolean expression" {
     defer tree.deinit();
 
     testing.expect(tree.nodes.len == 1);
-    testing.expect(tree.nodes[0].expression.value == .boolean);
+    testing.expect(tree.nodes[0].expression.expression == .boolean);
 }
 
 test "If expression" {
@@ -642,12 +642,12 @@ test "If expression" {
     defer tree.deinit();
 
     testing.expect(tree.nodes.len == 1);
-    const if_exp = tree.nodes[0].expression.value.if_expression;
+    const if_exp = tree.nodes[0].expression.expression.if_expression;
     testing.expect(if_exp.true_pong != null);
     testing.expect(if_exp.true_pong.?.block_statement.nodes[0] == .expression);
     testing.expectEqualSlices(
         u8,
-        if_exp.true_pong.?.block_statement.nodes[0].expression.value.identifier.value,
+        if_exp.true_pong.?.block_statement.nodes[0].expression.expression.identifier.value,
         "x",
     );
 }
@@ -661,19 +661,19 @@ test "If else expression" {
     defer tree.deinit();
 
     testing.expect(tree.nodes.len == 1);
-    const if_exp = tree.nodes[0].expression.value.if_expression;
+    const if_exp = tree.nodes[0].expression.expression.if_expression;
     testing.expect(if_exp.true_pong != null);
     testing.expect(if_exp.true_pong.?.block_statement.nodes[0] == .expression);
     testing.expectEqualSlices(
         u8,
-        if_exp.true_pong.?.block_statement.nodes[0].expression.value.identifier.value,
+        if_exp.true_pong.?.block_statement.nodes[0].expression.expression.identifier.value,
         "x",
     );
     testing.expect(if_exp.false_pong != null);
     testing.expect(if_exp.false_pong.?.block_statement.nodes[0] == .expression);
     testing.expectEqualSlices(
         u8,
-        if_exp.false_pong.?.block_statement.nodes[0].expression.value.identifier.value,
+        if_exp.false_pong.?.block_statement.nodes[0].expression.expression.identifier.value,
         "y",
     );
 }
@@ -687,14 +687,14 @@ test "Function literal" {
 
     testing.expect(tree.nodes.len == 1);
 
-    const func = tree.nodes[0].expression.value.func_lit;
+    const func = tree.nodes[0].expression.expression.func_lit;
     testing.expect(func.params.len == 2);
 
     testing.expectEqualSlices(u8, func.params[0].identifier.value, "x");
     testing.expectEqualSlices(u8, func.params[1].identifier.value, "y");
 
     const body = func.body.block_statement.nodes[0];
-    const infix = body.expression.value.infix;
+    const infix = body.expression.expression.infix;
     testing.expectEqualSlices(u8, infix.operator, "+");
     testing.expectEqualSlices(u8, infix.left.identifier.value, "x");
     testing.expectEqualSlices(u8, infix.right.identifier.value, "y");
@@ -715,7 +715,7 @@ test "Function parameters" {
 
         testing.expect(tree.nodes.len == 1);
 
-        const func = tree.nodes[0].expression.value.func_lit;
+        const func = tree.nodes[0].expression.expression.func_lit;
         testing.expect(func.params.len == case.expected.len);
 
         inline for (case.expected) |exp, i| {
@@ -733,7 +733,7 @@ test "Call expression" {
 
     testing.expect(tree.nodes.len == 1);
 
-    const call = tree.nodes[0].expression.value.call_expression;
+    const call = tree.nodes[0].expression.expression.call_expression;
     testing.expectEqualSlices(u8, call.function.identifier.value, "add");
     testing.expect(call.arguments.len == 3);
 
