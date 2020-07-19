@@ -153,9 +153,36 @@ pub const Node = union(NodeType) {
     /// Infix node, used to determine order
     pub const Infix = struct {
         token: Token,
-        operator: []const u8,
+        operator: Op,
         right: Node,
         left: Node,
+
+        pub const Op = enum {
+            assign,
+            add,
+            sub,
+            multiply,
+            divide,
+            less_than,
+            greater_than,
+            equal,
+            not_equal,
+
+            pub fn fromToken(token: Token) Op {
+                return switch (token.type) {
+                    .plus => .add,
+                    .minus => .sub,
+                    .assign => .assign,
+                    .asterisk => .multiply,
+                    .slash => .divide,
+                    .less_than => .less_than,
+                    .greater_than => .greater_than,
+                    .equal => .equal,
+                    .not_equal => .not_equal,
+                    else => @panic("Unexpected token"),
+                };
+            }
+        };
     };
 
     /// Represents an integer such as 385722

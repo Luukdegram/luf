@@ -212,7 +212,7 @@ pub const Parser = struct {
         const expression = try self.allocator.create(Node.Infix);
         expression.* = .{
             .token = self.current_token,
-            .operator = self.current_token.string(),
+            .operator = Node.Infix.Op.fromToken(self.current_token),
             .left = left,
             .right = undefined,
         };
@@ -563,19 +563,19 @@ test "Parse infix expressions - integer" {
     const TestCase = struct {
         input: []const u8,
         left: usize,
-        operator: []const u8,
+        operator: Node.Infix.Op,
         right: usize,
     };
 
     const test_cases = &[_]TestCase{
-        .{ .input = "10 + 10", .left = 10, .operator = "+", .right = 10 },
-        .{ .input = "10 - 10", .left = 10, .operator = "-", .right = 10 },
-        .{ .input = "10 * 10", .left = 10, .operator = "*", .right = 10 },
-        .{ .input = "10 / 10", .left = 10, .operator = "/", .right = 10 },
-        .{ .input = "10 > 10", .left = 10, .operator = ">", .right = 10 },
-        .{ .input = "10 < 10", .left = 10, .operator = "<", .right = 10 },
-        .{ .input = "10 == 10", .left = 10, .operator = "==", .right = 10 },
-        .{ .input = "10 != 10", .left = 10, .operator = "!=", .right = 10 },
+        .{ .input = "10 + 10", .left = 10, .operator = .add, .right = 10 },
+        .{ .input = "10 - 10", .left = 10, .operator = .sub, .right = 10 },
+        .{ .input = "10 * 10", .left = 10, .operator = .multiply, .right = 10 },
+        .{ .input = "10 / 10", .left = 10, .operator = .divide, .right = 10 },
+        .{ .input = "10 > 10", .left = 10, .operator = .greater_than, .right = 10 },
+        .{ .input = "10 < 10", .left = 10, .operator = .less_than, .right = 10 },
+        .{ .input = "10 == 10", .left = 10, .operator = .equal, .right = 10 },
+        .{ .input = "10 != 10", .left = 10, .operator = .not_equal, .right = 10 },
     };
 
     const allocator = testing.allocator;
@@ -588,7 +588,7 @@ test "Parse infix expressions - integer" {
         testing.expect(tree.nodes.len == 1);
         const node: Node = tree.nodes[0];
         const infix: *Node.Infix = node.expression.value.infix;
-        testing.expectEqualSlices(u8, case.operator, infix.operator);
+        testing.expectEqual(case.operator, infix.operator);
         testing.expectEqual(case.left, infix.left.int_lit.value);
         testing.expectEqual(case.right, infix.right.int_lit.value);
     }
@@ -607,7 +607,7 @@ test "Parse infix expressions - identifier" {
     const infix: *Node.Infix = node.expression.value.infix;
     testing.expectEqualSlices(u8, "foobar", infix.left.identifier.value);
     testing.expectEqualSlices(u8, "foobarz", infix.right.identifier.value);
-    testing.expectEqualSlices(u8, "+", infix.operator);
+    testing.expect(infix.operator == .add);
 }
 
 test "Parse infix expressions - boolean" {
@@ -623,7 +623,7 @@ test "Parse infix expressions - boolean" {
     const infix: *Node.Infix = node.expression.value.infix;
     testing.expectEqual(true, infix.left.boolean.value);
     testing.expectEqual(true, infix.right.boolean.value);
-    testing.expectEqualSlices(u8, "==", infix.operator);
+    testing.expect(infix.operator == .equal);
 }
 
 test "Boolean expression" {
@@ -700,7 +700,7 @@ test "Function literal" {
 
     const body = func.body.block_statement.nodes[0];
     const infix = body.expression.value.infix;
-    testing.expectEqualSlices(u8, infix.operator, "+");
+    testing.expectEqual(infix.operator, .add);
     testing.expectEqualSlices(u8, infix.left.identifier.value, "x");
     testing.expectEqualSlices(u8, infix.right.identifier.value, "y");
 }
@@ -743,6 +743,6 @@ test "Call expression" {
     testing.expect(call.arguments.len == 3);
 
     testing.expect(call.arguments[0].int_lit.value == 1);
-    testing.expectEqualSlices(u8, call.arguments[1].infix.operator, "*");
+    testing.expectEqual(call.arguments[1].infix.operator, .multiply);
     testing.expect(call.arguments[2].infix.right.int_lit.value == 5);
 }
