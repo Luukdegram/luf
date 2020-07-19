@@ -49,8 +49,9 @@ pub const Parser = struct {
     index: u32,
     source: []const u8,
 
-    pub const Error = error{ParserError} || std.mem.Allocator.Error || std.fmt.ParseIntError;
-
+    pub const Error = error{ParserError} ||
+        std.mem.Allocator.Error ||
+        std.fmt.ParseIntError;
     /// Creates a new Parser, using the given lexer.
     /// Sets the current and peek token.
     pub fn init(allocator: *Allocator, lexer: *Lexer) !Parser {
@@ -193,7 +194,11 @@ pub const Parser = struct {
     /// Parses the current token into a prefix, errors if current token is not a prefix token
     fn parsePrefixExpression(self: *Parser) Error!Node {
         const expression = try self.allocator.create(Node.Prefix);
-        expression.* = .{ .token = self.current_token, .operator = self.current_token.string(), .right = undefined };
+        expression.* = .{
+            .token = self.current_token,
+            .operator = Node.Prefix.Op.fromToken(self.current_token),
+            .right = undefined,
+        };
 
         self.next();
 
@@ -521,16 +526,16 @@ test "Parse prefix expressions" {
     };
     const TestCase = struct {
         input: []const u8,
-        operator: []const u8,
+        operator: Node.Prefix.Op,
         expected: VarValue,
     };
     const test_cases = &[_]TestCase{
-        .{ .input = "-5", .operator = "-", .expected = VarValue{ .int = 5 } },
-        .{ .input = "!25", .operator = "!", .expected = VarValue{ .int = 25 } },
-        .{ .input = "!foobar", .operator = "!", .expected = VarValue{ .string = "foobar" } },
-        .{ .input = "-foobar", .operator = "-", .expected = VarValue{ .string = "foobar" } },
-        .{ .input = "!true", .operator = "!", .expected = VarValue{ .boolean = true } },
-        .{ .input = "!false", .operator = "!", .expected = VarValue{ .boolean = false } },
+        .{ .input = "-5", .operator = .minus, .expected = VarValue{ .int = 5 } },
+        .{ .input = "!25", .operator = .bang, .expected = VarValue{ .int = 25 } },
+        .{ .input = "!foobar", .operator = .bang, .expected = VarValue{ .string = "foobar" } },
+        .{ .input = "-foobar", .operator = .minus, .expected = VarValue{ .string = "foobar" } },
+        .{ .input = "!true", .operator = .bang, .expected = VarValue{ .boolean = true } },
+        .{ .input = "!false", .operator = .bang, .expected = VarValue{ .boolean = false } },
     };
 
     const allocator = testing.allocator;
@@ -550,7 +555,7 @@ test "Parse prefix expressions" {
             else => @panic("Unexpected Node"),
         }
 
-        testing.expectEqualSlices(u8, case.operator, prefix.operator);
+        testing.expectEqual(case.operator, prefix.operator);
     }
 }
 

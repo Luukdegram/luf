@@ -10,14 +10,16 @@ pub fn eval(node: Node) Value {
         .expression => |exp| eval(exp.value),
         .int_lit => |lit| Value{ .integer = lit.value },
         .boolean => |bl| Value{ .boolean = bl.value },
-        .prefix => |pfx| evalPrefix(pfx),
+        .prefix => |pfx| evalPrefix(pfx.*),
         else => {
             @import("std").debug.panic("TODO: Implement node: {}\n", .{node});
         },
     };
 }
 
-fn evalPrefix(prefix: Node.Prefix) Value {}
+fn evalPrefix(prefix: Node.Prefix) Value {
+    return Value{ .nil = {} };
+}
 
 test "Eval integer" {
     const test_cases = .{

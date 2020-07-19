@@ -133,8 +133,21 @@ pub const Node = union(NodeType) {
     /// Prefix node, used to determine order -> x + y * 5
     pub const Prefix = struct {
         token: Token,
-        operator: []const u8,
+        operator: Op,
         right: Node,
+
+        pub const Op = enum {
+            minus,
+            bang,
+
+            pub fn fromToken(token: Token) Op {
+                return switch (token.type) {
+                    .minus => .minus,
+                    .bang => .bang,
+                    else => @panic("Unexpected token"),
+                };
+            }
+        };
     };
 
     /// Infix node, used to determine order
