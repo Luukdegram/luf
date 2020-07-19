@@ -14,9 +14,10 @@ pub fn eval(node: Node) Value {
         .int_lit => |lit| Value{ .integer = @bitCast(i64, lit.value) },
         .boolean => |bl| Value{ .boolean = bl.value },
         .prefix => |pfx| evalPrefix(pfx),
-        .block_statement => |block| evalNodes(block.nodes),
+        .block_statement => |block| evalBlock(block),
         .if_expression => |if_exp| evalIf(if_exp),
         .infix => |ifx| evalInfix(ifx),
+        ._return => |ret| Value{ ._return = &eval(ret.value) },
         else => {
             @import("std").debug.panic("TODO: Implement node: {}\n", .{node});
         },
@@ -28,6 +29,23 @@ pub fn evalNodes(nodes: []Node) Value {
     var value: Value = undefined;
     for (nodes) |node| {
         value = eval(node);
+
+        if (value == ._return) {
+            return value._return.*;
+        }
+    }
+
+    return value;
+}
+
+fn evalBlock(block: *const Node.BlockStatement) Value {
+    var value: Value = undefined;
+    for (block.nodes) |node| {
+        value = eval(node);
+
+        if (value == ._return and value._return.* != .nil) {
+            return value;
+        }
     }
 
     return value;
@@ -46,13 +64,13 @@ fn evalInfix(infix: *const Node.Infix) Value {
     const right = eval(infix.right);
 
     return switch (resolveType(left, right)) {
-        .nil => Value{ .nil = {} },
         .integer => evalIntegerInfix(infix.operator, left, right),
         .boolean => switch (infix.operator) {
             .equal => Value{ .boolean = left.boolean == right.boolean },
             .not_equal => Value{ .boolean = left.boolean != right.boolean },
             else => Value{ .nil = {} },
         },
+        else => Value{ .nil = {} },
     };
 }
 
@@ -204,5 +222,36 @@ test "Eval if else" {
             .ComptimeInt => testing.expectEqual(@intCast(i64, case.expected), value.integer),
             else => testing.expect(value == .nil),
         }
+    }
+}
+
+test "Eval return value" {
+    const test_cases = .{
+        .{ .input = "return 10", .expected = 10 },
+        .{ .input = "return 10 9", .expected = 10 },
+        .{ .input = "return 2 * 5 9", .expected = 10 },
+        .{ .input = "9 return 2 * 5 9", .expected = 10 },
+        .{
+            .input =
+                \\if(10 > 1) {
+                \\  if (10 > 1) {
+                \\      return 10
+                \\  }
+                \\  
+                \\  return 1
+                \\}
+            ,
+            .expected = 10,
+        },
+    };
+
+    inline for (test_cases) |case| {
+        var lexer = Lexer.init(case.input);
+        var parser = try Parser.init(testing.allocator, &lexer);
+        const tree = try parser.parse();
+        defer tree.deinit();
+
+        const value = evalNodes(tree.nodes);
+        testing.expectEqual(@intCast(i64, case.expected), value.integer);
     }
 }
