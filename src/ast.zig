@@ -72,7 +72,7 @@ pub const Node = union(NodeType) {
             },
             .if_expression => |if_exp| {
                 if_exp.condition.deinit(allocator);
-                if (if_exp.true_pong) |pong| pong.deinit(allocator);
+                if_exp.true_pong.deinit(allocator);
                 if (if_exp.false_pong) |pong| pong.deinit(allocator);
                 allocator.destroy(if_exp);
             },
@@ -188,7 +188,7 @@ pub const Node = union(NodeType) {
     /// Represents an integer such as 385722
     pub const IntegerLiteral = struct {
         token: Token,
-        value: usize,
+        value: u64,
     };
 
     /// Node to represent an expression, could be anything
@@ -215,7 +215,7 @@ pub const Node = union(NodeType) {
     pub const IfExpression = struct {
         token: Token,
         condition: Node,
-        true_pong: ?Node = null,
+        true_pong: Node,
         false_pong: ?Node = null,
     };
 

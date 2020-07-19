@@ -12,17 +12,17 @@ const Tree = ast.Tree;
 /// The higher the value, the earlier it will be executed
 /// This means a function call will be executed before a prefix,
 /// and the product will be calculated before the sum.
-const Precedence = enum {
-    lowest,
-    equals,
-    less_greater,
-    sum,
-    product,
-    prefix,
-    call,
+const Precedence = enum(u3) {
+    lowest = 1,
+    equals = 2,
+    less_greater = 3,
+    sum = 4,
+    product = 5,
+    prefix = 6,
+    call = 7,
 
     /// Returns the integer value of the enum
-    fn val(self: Precedence) usize {
+    fn val(self: Precedence) u3 {
         return @enumToInt(self);
     }
 };
@@ -179,13 +179,26 @@ pub const Parser = struct {
             },
         };
 
-        if (prec.val() < findPrecedence(self.peek_token.type).val()) {
-            self.next();
-            if (self.currentIsType(.left_parenthesis)) {
-                left = try self.parseCallExpression(left);
-            } else {
-                left = try self.parseInfixExpression(left);
-            }
+        while (prec.val() < findPrecedence(self.peek_token.type).val()) {
+            left = switch (self.peek_token.type) {
+                .left_parenthesis => blk: {
+                    self.next();
+                    break :blk try self.parseCallExpression(left);
+                },
+                .plus,
+                .minus,
+                .slash,
+                .asterisk,
+                .equal,
+                .not_equal,
+                .less_than,
+                .greater_than,
+                => blk: {
+                    self.next();
+                    break :blk try self.parseInfixExpression(left);
+                },
+                else => return left,
+            };
         }
 
         return left;
@@ -648,11 +661,10 @@ test "If expression" {
 
     testing.expect(tree.nodes.len == 1);
     const if_exp = tree.nodes[0].expression.value.if_expression;
-    testing.expect(if_exp.true_pong != null);
-    testing.expect(if_exp.true_pong.?.block_statement.nodes[0] == .expression);
+    testing.expect(if_exp.true_pong.block_statement.nodes[0] == .expression);
     testing.expectEqualSlices(
         u8,
-        if_exp.true_pong.?.block_statement.nodes[0].expression.value.identifier.value,
+        if_exp.true_pong.block_statement.nodes[0].expression.value.identifier.value,
         "x",
     );
 }
@@ -667,11 +679,10 @@ test "If else expression" {
 
     testing.expect(tree.nodes.len == 1);
     const if_exp = tree.nodes[0].expression.value.if_expression;
-    testing.expect(if_exp.true_pong != null);
-    testing.expect(if_exp.true_pong.?.block_statement.nodes[0] == .expression);
+    testing.expect(if_exp.true_pong.block_statement.nodes[0] == .expression);
     testing.expectEqualSlices(
         u8,
-        if_exp.true_pong.?.block_statement.nodes[0].expression.value.identifier.value,
+        if_exp.true_pong.block_statement.nodes[0].expression.value.identifier.value,
         "x",
     );
     testing.expect(if_exp.false_pong != null);

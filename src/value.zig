@@ -7,7 +7,7 @@ pub const Type = enum {
 
 /// Value depending on its type
 pub const Value = union(Type) {
-    integer: usize,
+    integer: i64,
     boolean: bool,
     nil: void,
 };
