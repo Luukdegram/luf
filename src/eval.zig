@@ -1,23 +1,37 @@
 const Node = @import("ast.zig").Node;
 const Value = @import("value.zig").Value;
 const Type = @import("value.zig").Type;
+const Env = @import("value.zig").Env;
 const Lexer = @import("lexer.zig").Lexer;
 const Parser = @import("parser.zig").Parser;
 const std = @import("std");
 const testing = std.testing;
 const assert = std.debug.assert;
 
+pub const EvalError = error{
+    UnknownOperator,
+    TypeMismatch,
+};
+
 /// Evaluates the given node and returns a Value
-pub fn eval(node: Node) Value {
+/// TODO Error handling
+pub fn eval(node: Node, env: *Env) Value {
     return switch (node) {
-        .expression => |exp| eval(exp.value),
+        .expression => |exp| eval(exp.value, env),
         .int_lit => |lit| Value{ .integer = @bitCast(i64, lit.value) },
         .boolean => |bl| Value{ .boolean = bl.value },
-        .prefix => |pfx| evalPrefix(pfx),
-        .block_statement => |block| evalBlock(block),
-        .if_expression => |if_exp| evalIf(if_exp),
-        .infix => |ifx| evalInfix(ifx),
-        ._return => |ret| Value{ ._return = &eval(ret.value) },
+        .prefix => |pfx| evalPrefix(pfx, env),
+        .block_statement => |block| evalBlock(block, env),
+        .if_expression => |if_exp| evalIf(if_exp, env),
+        .infix => |ifx| evalInfix(ifx, env),
+        ._return => |ret| Value{ ._return = &eval(ret.value, env) },
+        .identifier => |id| evalIdentifier(id, env),
+        .declaration => |decl| {
+            const val = eval(decl.value, env);
+            // TODO Error handling
+            env.set(decl.name.identifier.value, val) catch {};
+            return val;
+        },
         else => {
             @import("std").debug.panic("TODO: Implement node: {}\n", .{node});
         },
@@ -25,10 +39,10 @@ pub fn eval(node: Node) Value {
 }
 
 /// Evaluates the nodes and returns the final Value
-pub fn evalNodes(nodes: []Node) Value {
+pub fn evalNodes(nodes: []Node, env: *Env) Value {
     var value: Value = undefined;
     for (nodes) |node| {
-        value = eval(node);
+        value = eval(node, env);
 
         if (value == ._return) {
             return value._return.*;
@@ -38,10 +52,10 @@ pub fn evalNodes(nodes: []Node) Value {
     return value;
 }
 
-fn evalBlock(block: *const Node.BlockStatement) Value {
+fn evalBlock(block: *const Node.BlockStatement, env: *Env) Value {
     var value: Value = undefined;
     for (block.nodes) |node| {
-        value = eval(node);
+        value = eval(node, env);
 
         if (value == ._return and value._return.* != .nil) {
             return value;
@@ -51,17 +65,17 @@ fn evalBlock(block: *const Node.BlockStatement) Value {
     return value;
 }
 
-fn evalPrefix(prefix: *const Node.Prefix) Value {
+fn evalPrefix(prefix: *const Node.Prefix, env: *Env) Value {
     return switch (prefix.operator) {
-        .bang => evalBangOperator(eval(prefix.right)),
-        .minus => evalNegation(eval(prefix.right)),
+        .bang => evalBangOperator(eval(prefix.right, env)),
+        .minus => evalNegation(eval(prefix.right, env)),
         else => Value{ .nil = {} },
     };
 }
 
-fn evalInfix(infix: *const Node.Infix) Value {
-    const left = eval(infix.left);
-    const right = eval(infix.right);
+fn evalInfix(infix: *const Node.Infix, env: *Env) Value {
+    const left = eval(infix.left, env);
+    const right = eval(infix.right, env);
 
     return switch (resolveType(left, right)) {
         .integer => evalIntegerInfix(infix.operator, left, right),
@@ -114,13 +128,22 @@ fn evalNegation(right: Value) Value {
     return Value{ .integer = -right.integer };
 }
 
-fn evalIf(exp: *const Node.IfExpression) Value {
-    const condition = eval(exp.condition);
+fn evalIdentifier(identifier: *const Node.Identifier, env: *Env) Value {
+    if (env.get(identifier.value)) |val| {
+        return val;
+    } else {
+        //TODO Error handling
+        return Value{ .nil = {} };
+    }
+}
+
+fn evalIf(exp: *const Node.IfExpression, env: *Env) Value {
+    const condition = eval(exp.condition, env);
 
     if (isTrue(condition)) {
-        return eval(exp.true_pong);
+        return eval(exp.true_pong, env);
     } else if (exp.false_pong) |pong| {
-        return eval(pong);
+        return eval(pong, env);
     } else {
         return Value{ .nil = {} };
     }
@@ -158,8 +181,10 @@ test "Eval integer" {
         var parser = try Parser.init(testing.allocator, &lexer);
         const tree = try parser.parse();
         defer tree.deinit();
+        var env = Env.init(testing.allocator);
+        defer env.deinit();
 
-        const value = eval(tree.nodes[0]);
+        const value = evalNodes(tree.nodes, &env);
         testing.expectEqual(case.expected, value.integer);
     }
 }
@@ -175,8 +200,10 @@ test "Eval boolean" {
         var parser = try Parser.init(testing.allocator, &lexer);
         const tree = try parser.parse();
         defer tree.deinit();
+        var env = Env.init(testing.allocator);
+        defer env.deinit();
 
-        const value = evalNodes(tree.nodes);
+        const value = evalNodes(tree.nodes, &env);
         testing.expectEqual(case.expected, value.boolean);
     }
 }
@@ -194,8 +221,10 @@ test "Eval bang" {
         var parser = try Parser.init(testing.allocator, &lexer);
         const tree = try parser.parse();
         defer tree.deinit();
+        var env = Env.init(testing.allocator);
+        defer env.deinit();
 
-        const value = evalNodes(tree.nodes);
+        const value = evalNodes(tree.nodes, &env);
         testing.expectEqual(case.expected, value.boolean);
     }
 }
@@ -216,8 +245,10 @@ test "Eval if else" {
         var parser = try Parser.init(testing.allocator, &lexer);
         const tree = try parser.parse();
         defer tree.deinit();
+        var env = Env.init(testing.allocator);
+        defer env.deinit();
 
-        const value = evalNodes(tree.nodes);
+        const value = evalNodes(tree.nodes, &env);
         switch (@typeInfo(@TypeOf(case.expected))) {
             .ComptimeInt => testing.expectEqual(@intCast(i64, case.expected), value.integer),
             else => testing.expect(value == .nil),
@@ -250,8 +281,31 @@ test "Eval return value" {
         var parser = try Parser.init(testing.allocator, &lexer);
         const tree = try parser.parse();
         defer tree.deinit();
+        var env = Env.init(testing.allocator);
+        defer env.deinit();
 
-        const value = evalNodes(tree.nodes);
+        const value = evalNodes(tree.nodes, &env);
+        testing.expectEqual(@intCast(i64, case.expected), value.integer);
+    }
+}
+
+test "Eval declaration" {
+    const test_cases = .{
+        .{ .input = "const a = 5 a", .expected = 5 },
+        .{ .input = "mut a = 5 * 5 a", .expected = 25 },
+        .{ .input = "const a = 5 const b = a b", .expected = 5 },
+        .{ .input = "mut a = 5 const b = a mut c = a + b + 5 c", .expected = 15 },
+    };
+
+    inline for (test_cases) |case| {
+        var lexer = Lexer.init(case.input);
+        var parser = try Parser.init(testing.allocator, &lexer);
+        const tree = try parser.parse();
+        defer tree.deinit();
+        var env = Env.init(testing.allocator);
+        defer env.deinit();
+
+        const value = evalNodes(tree.nodes, &env);
         testing.expectEqual(@intCast(i64, case.expected), value.integer);
     }
 }
