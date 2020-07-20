@@ -32,9 +32,10 @@ pub const Node = union(NodeType) {
     if_expression: *IfExpression,
     func_lit: *FunctionLiteral,
     call_expression: *CallExpression,
+    string_lit: *StringLiteral,
 
     /// Frees memory of a node and all of its connected nodes.
-    /// Altho this can be used to free the memory of all nodes,
+    /// Although this can be used to free memory recursively,
     /// using an arena allocator will be much more performant.
     pub fn deinit(self: Node, allocator: *Allocator) void {
         switch (self) {
@@ -109,6 +110,13 @@ pub const Node = union(NodeType) {
         if_expression,
         func_lit,
         call_expression,
+        string_lit,
+    };
+
+    /// Represents a String
+    pub const StringLiteral = struct {
+        token: Token,
+        value: []const u8,
     };
 
     /// Statement node -> const x = 5
@@ -118,7 +126,7 @@ pub const Node = union(NodeType) {
         value: Node,
     };
 
-    /// Identifier node -> const x
+    /// Identifier node -> x
     pub const Identifier = struct {
         token: Token,
         value: []const u8,
@@ -130,7 +138,7 @@ pub const Node = union(NodeType) {
         value: Node,
     };
 
-    /// Prefix node, used to determine order -> x + y * 5
+    /// Prefix node, determines order such as negation
     pub const Prefix = struct {
         token: Token,
         operator: Op,
@@ -150,7 +158,7 @@ pub const Node = union(NodeType) {
         };
     };
 
-    /// Infix node, used to determine order
+    /// Infix node, used to determine order for arithmetics
     pub const Infix = struct {
         token: Token,
         operator: Op,
@@ -168,6 +176,7 @@ pub const Node = union(NodeType) {
             equal,
             not_equal,
 
+            /// Returns the corresponding `Op` based on the given `Token`
             pub fn fromToken(token: Token) Op {
                 return switch (token.type) {
                     .plus => .add,
