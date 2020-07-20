@@ -1,7 +1,7 @@
 const Node = @import("ast.zig").Node;
 const Value = @import("value.zig").Value;
 const Type = @import("value.zig").Type;
-const Env = @import("value.zig").Env;
+const Scope = @import("value.zig").Scope;
 const Lexer = @import("lexer.zig").Lexer;
 const Parser = @import("parser.zig").Parser;
 const std = @import("std");
@@ -15,21 +15,21 @@ pub const EvalError = error{
 
 /// Evaluates the given node and returns a Value
 /// TODO Error handling
-pub fn eval(node: Node, env: *Env) Value {
+pub fn eval(node: Node, scope: *Scope) Value {
     return switch (node) {
-        .expression => |exp| eval(exp.value, env),
+        .expression => |exp| eval(exp.value, scope),
         .int_lit => |lit| Value{ .integer = @bitCast(i64, lit.value) },
         .boolean => |bl| Value{ .boolean = bl.value },
-        .prefix => |pfx| evalPrefix(pfx, env),
-        .block_statement => |block| evalBlock(block, env),
-        .if_expression => |if_exp| evalIf(if_exp, env),
-        .infix => |ifx| evalInfix(ifx, env),
-        ._return => |ret| Value{ ._return = &eval(ret.value, env) },
-        .identifier => |id| evalIdentifier(id, env),
+        .prefix => |pfx| evalPrefix(pfx, scope),
+        .block_statement => |block| evalBlock(block, scope),
+        .if_expression => |if_exp| evalIf(if_exp, scope),
+        .infix => |ifx| evalInfix(ifx, scope),
+        ._return => |ret| Value{ ._return = &eval(ret.value, scope) },
+        .identifier => |id| evalIdentifier(id, scope),
         .declaration => |decl| {
-            const val = eval(decl.value, env);
+            const val = eval(decl.value, scope);
             // TODO Error handling
-            env.set(decl.name.identifier.value, val) catch {};
+            scope.set(decl.name.identifier.value, val) catch {};
             return val;
         },
         else => {
@@ -39,10 +39,10 @@ pub fn eval(node: Node, env: *Env) Value {
 }
 
 /// Evaluates the nodes and returns the final Value
-pub fn evalNodes(nodes: []Node, env: *Env) Value {
+pub fn evalNodes(nodes: []Node, scope: *Scope) Value {
     var value: Value = undefined;
     for (nodes) |node| {
-        value = eval(node, env);
+        value = eval(node, scope);
 
         if (value == ._return) {
             return value._return.*;
@@ -52,10 +52,10 @@ pub fn evalNodes(nodes: []Node, env: *Env) Value {
     return value;
 }
 
-fn evalBlock(block: *const Node.BlockStatement, env: *Env) Value {
+fn evalBlock(block: *const Node.BlockStatement, scope: *Scope) Value {
     var value: Value = undefined;
     for (block.nodes) |node| {
-        value = eval(node, env);
+        value = eval(node, scope);
 
         if (value == ._return and value._return.* != .nil) {
             return value;
@@ -65,17 +65,17 @@ fn evalBlock(block: *const Node.BlockStatement, env: *Env) Value {
     return value;
 }
 
-fn evalPrefix(prefix: *const Node.Prefix, env: *Env) Value {
+fn evalPrefix(prefix: *const Node.Prefix, scope: *Scope) Value {
     return switch (prefix.operator) {
-        .bang => evalBangOperator(eval(prefix.right, env)),
-        .minus => evalNegation(eval(prefix.right, env)),
+        .bang => evalBangOperator(eval(prefix.right, scope)),
+        .minus => evalNegation(eval(prefix.right, scope)),
         else => Value{ .nil = {} },
     };
 }
 
-fn evalInfix(infix: *const Node.Infix, env: *Env) Value {
-    const left = eval(infix.left, env);
-    const right = eval(infix.right, env);
+fn evalInfix(infix: *const Node.Infix, scope: *Scope) Value {
+    const left = eval(infix.left, scope);
+    const right = eval(infix.right, scope);
 
     return switch (resolveType(left, right)) {
         .integer => evalIntegerInfix(infix.operator, left, right),
@@ -128,8 +128,8 @@ fn evalNegation(right: Value) Value {
     return Value{ .integer = -right.integer };
 }
 
-fn evalIdentifier(identifier: *const Node.Identifier, env: *Env) Value {
-    if (env.get(identifier.value)) |val| {
+fn evalIdentifier(identifier: *const Node.Identifier, scope: *Scope) Value {
+    if (scope.get(identifier.value)) |val| {
         return val;
     } else {
         //TODO Error handling
@@ -137,13 +137,13 @@ fn evalIdentifier(identifier: *const Node.Identifier, env: *Env) Value {
     }
 }
 
-fn evalIf(exp: *const Node.IfExpression, env: *Env) Value {
-    const condition = eval(exp.condition, env);
+fn evalIf(exp: *const Node.IfExpression, scope: *Scope) Value {
+    const condition = eval(exp.condition, scope);
 
     if (isTrue(condition)) {
-        return eval(exp.true_pong, env);
+        return eval(exp.true_pong, scope);
     } else if (exp.false_pong) |pong| {
-        return eval(pong, env);
+        return eval(pong, scope);
     } else {
         return Value{ .nil = {} };
     }
@@ -181,10 +181,10 @@ test "Eval integer" {
         var parser = try Parser.init(testing.allocator, &lexer);
         const tree = try parser.parse();
         defer tree.deinit();
-        var env = Env.init(testing.allocator);
-        defer env.deinit();
+        var scope = Scope.init(testing.allocator);
+        defer scope.deinit();
 
-        const value = evalNodes(tree.nodes, &env);
+        const value = evalNodes(tree.nodes, &scope);
         testing.expectEqual(case.expected, value.integer);
     }
 }
@@ -200,10 +200,10 @@ test "Eval boolean" {
         var parser = try Parser.init(testing.allocator, &lexer);
         const tree = try parser.parse();
         defer tree.deinit();
-        var env = Env.init(testing.allocator);
-        defer env.deinit();
+        var scope = Scope.init(testing.allocator);
+        defer scope.deinit();
 
-        const value = evalNodes(tree.nodes, &env);
+        const value = evalNodes(tree.nodes, &scope);
         testing.expectEqual(case.expected, value.boolean);
     }
 }
@@ -221,10 +221,10 @@ test "Eval bang" {
         var parser = try Parser.init(testing.allocator, &lexer);
         const tree = try parser.parse();
         defer tree.deinit();
-        var env = Env.init(testing.allocator);
-        defer env.deinit();
+        var scope = Scope.init(testing.allocator);
+        defer scope.deinit();
 
-        const value = evalNodes(tree.nodes, &env);
+        const value = evalNodes(tree.nodes, &scope);
         testing.expectEqual(case.expected, value.boolean);
     }
 }
@@ -245,10 +245,10 @@ test "Eval if else" {
         var parser = try Parser.init(testing.allocator, &lexer);
         const tree = try parser.parse();
         defer tree.deinit();
-        var env = Env.init(testing.allocator);
-        defer env.deinit();
+        var scope = Scope.init(testing.allocator);
+        defer scope.deinit();
 
-        const value = evalNodes(tree.nodes, &env);
+        const value = evalNodes(tree.nodes, &scope);
         switch (@typeInfo(@TypeOf(case.expected))) {
             .ComptimeInt => testing.expectEqual(@intCast(i64, case.expected), value.integer),
             else => testing.expect(value == .nil),
@@ -281,10 +281,10 @@ test "Eval return value" {
         var parser = try Parser.init(testing.allocator, &lexer);
         const tree = try parser.parse();
         defer tree.deinit();
-        var env = Env.init(testing.allocator);
-        defer env.deinit();
+        var scope = Scope.init(testing.allocator);
+        defer scope.deinit();
 
-        const value = evalNodes(tree.nodes, &env);
+        const value = evalNodes(tree.nodes, &scope);
         testing.expectEqual(@intCast(i64, case.expected), value.integer);
     }
 }
@@ -302,10 +302,10 @@ test "Eval declaration" {
         var parser = try Parser.init(testing.allocator, &lexer);
         const tree = try parser.parse();
         defer tree.deinit();
-        var env = Env.init(testing.allocator);
-        defer env.deinit();
+        var scope = Scope.init(testing.allocator);
+        defer scope.deinit();
 
-        const value = evalNodes(tree.nodes, &env);
+        const value = evalNodes(tree.nodes, &scope);
         testing.expectEqual(@intCast(i64, case.expected), value.integer);
     }
 }
