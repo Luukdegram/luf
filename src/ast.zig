@@ -93,6 +93,7 @@ pub const Node = union(NodeType) {
                 allocator.free(call_exp.arguments);
                 allocator.destroy(call_exp);
             },
+            .string_lit => |string| allocator.free(string.value),
         }
     }
 

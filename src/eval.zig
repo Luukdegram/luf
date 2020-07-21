@@ -11,38 +11,50 @@ const assert = std.debug.assert;
 pub const EvalError = error{
     UnknownOperator,
     TypeMismatch,
-};
+    MissingIdentifier,
+} || error{OutOfMemory};
 
 /// Evaluates the given node and returns a Value
-/// TODO Error handling
-pub fn eval(node: Node, scope: *Scope) Value {
+pub fn eval(node: Node, scope: *Scope) EvalError!Value {
     return switch (node) {
-        .expression => |exp| eval(exp.value, scope),
+        .expression => |exp| try eval(exp.value, scope),
         .int_lit => |lit| Value{ .integer = @bitCast(i64, lit.value) },
         .boolean => |bl| Value{ .boolean = bl.value },
-        .prefix => |pfx| evalPrefix(pfx, scope),
-        .block_statement => |block| evalBlock(block, scope),
-        .if_expression => |if_exp| evalIf(if_exp, scope),
-        .infix => |ifx| evalInfix(ifx, scope),
-        ._return => |ret| Value{ ._return = &eval(ret.value, scope) },
-        .identifier => |id| evalIdentifier(id, scope),
+        .prefix => |pfx| try evalPrefix(pfx, scope),
+        .block_statement => |block| try evalBlock(block, scope),
+        .if_expression => |if_exp| try evalIf(if_exp, scope),
+        .infix => |ifx| try evalInfix(ifx, scope),
+        ._return => |ret| Value{ ._return = &(try eval(ret.value, scope)) },
+        .identifier => |id| try evalIdentifier(id, scope),
+        .func_lit => |func| Value{
+            .function = .{
+                .params = func.params,
+                .body = func.body,
+                .scope = scope,
+            },
+        },
         .declaration => |decl| {
-            const val = eval(decl.value, scope);
-            // TODO Error handling
-            scope.set(decl.name.identifier.value, val) catch {};
+            const val = try eval(decl.value, scope);
+            try scope.set(decl.name.identifier.value, val);
             return val;
         },
+        .call_expression => |call| blk: {
+            const func = try eval(call.function, scope);
+
+            const args = try evalArguments(call.arguments, scope);
+            break :blk try callFunction(func, args);
+        },
         else => {
-            @import("std").debug.panic("TODO: Implement node: {}\n", .{node});
+            @import("std").debug.panic("TODO: Implement node: {}\n", .{@tagName(node)});
         },
     };
 }
 
 /// Evaluates the nodes and returns the final Value
-pub fn evalNodes(nodes: []Node, scope: *Scope) Value {
+pub fn evalNodes(nodes: []Node, scope: *Scope) !Value {
     var value: Value = undefined;
     for (nodes) |node| {
-        value = eval(node, scope);
+        value = try eval(node, scope);
 
         if (value == ._return) {
             return value._return.*;
@@ -52,10 +64,35 @@ pub fn evalNodes(nodes: []Node, scope: *Scope) Value {
     return value;
 }
 
-fn evalBlock(block: *const Node.BlockStatement, scope: *Scope) Value {
+fn evalArguments(nodes: []Node, scope: *Scope) ![]Value {
+    var values = std.ArrayList(Value).init(scope.allocator);
+    for (nodes) |node| {
+        const res = try eval(node, scope);
+        try values.append(res);
+    }
+    return values.toOwnedSlice();
+}
+
+fn callFunction(func: Value, args: []Value) !Value {
+    assert(func == .function);
+
+    // create new scope
+    var scope = try func.function.scope.clone();
+    for (func.function.params) |param, i| {
+        try scope.set(param.identifier.value, args[i]);
+    }
+
+    const return_val = try eval(func.function.body, scope);
+    if (return_val == ._return) {
+        return return_val._return.*;
+    }
+    return return_val;
+}
+
+fn evalBlock(block: *const Node.BlockStatement, scope: *Scope) !Value {
     var value: Value = undefined;
     for (block.nodes) |node| {
-        value = eval(node, scope);
+        value = try eval(node, scope);
 
         if (value == ._return and value._return.* != .nil) {
             return value;
@@ -65,17 +102,17 @@ fn evalBlock(block: *const Node.BlockStatement, scope: *Scope) Value {
     return value;
 }
 
-fn evalPrefix(prefix: *const Node.Prefix, scope: *Scope) Value {
+fn evalPrefix(prefix: *const Node.Prefix, scope: *Scope) !Value {
     return switch (prefix.operator) {
-        .bang => evalBangOperator(eval(prefix.right, scope)),
-        .minus => evalNegation(eval(prefix.right, scope)),
+        .bang => evalBangOperator(try eval(prefix.right, scope)),
+        .minus => evalNegation(try eval(prefix.right, scope)),
         else => Value{ .nil = {} },
     };
 }
 
-fn evalInfix(infix: *const Node.Infix, scope: *Scope) Value {
-    const left = eval(infix.left, scope);
-    const right = eval(infix.right, scope);
+fn evalInfix(infix: *const Node.Infix, scope: *Scope) !Value {
+    const left = try eval(infix.left, scope);
+    const right = try eval(infix.right, scope);
 
     return switch (resolveType(left, right)) {
         .integer => evalIntegerInfix(infix.operator, left, right),
@@ -128,17 +165,17 @@ fn evalNegation(right: Value) Value {
     return Value{ .integer = -right.integer };
 }
 
-fn evalIdentifier(identifier: *const Node.Identifier, scope: *Scope) Value {
+fn evalIdentifier(identifier: *const Node.Identifier, scope: *Scope) !Value {
     if (scope.get(identifier.value)) |val| {
         return val;
     } else {
-        //TODO Error handling
-        return Value{ .nil = {} };
+        std.debug.print("FUnc: {}\n", .{identifier.value});
+        return EvalError.MissingIdentifier;
     }
 }
 
-fn evalIf(exp: *const Node.IfExpression, scope: *Scope) Value {
-    const condition = eval(exp.condition, scope);
+fn evalIf(exp: *const Node.IfExpression, scope: *Scope) !Value {
+    const condition = try eval(exp.condition, scope);
 
     if (isTrue(condition)) {
         return eval(exp.true_pong, scope);
@@ -184,7 +221,7 @@ test "Eval integer" {
         var scope = Scope.init(testing.allocator);
         defer scope.deinit();
 
-        const value = evalNodes(tree.nodes, &scope);
+        const value = try evalNodes(tree.nodes, &scope);
         testing.expectEqual(case.expected, value.integer);
     }
 }
@@ -203,7 +240,7 @@ test "Eval boolean" {
         var scope = Scope.init(testing.allocator);
         defer scope.deinit();
 
-        const value = evalNodes(tree.nodes, &scope);
+        const value = try evalNodes(tree.nodes, &scope);
         testing.expectEqual(case.expected, value.boolean);
     }
 }
@@ -224,7 +261,7 @@ test "Eval bang" {
         var scope = Scope.init(testing.allocator);
         defer scope.deinit();
 
-        const value = evalNodes(tree.nodes, &scope);
+        const value = try evalNodes(tree.nodes, &scope);
         testing.expectEqual(case.expected, value.boolean);
     }
 }
@@ -248,7 +285,7 @@ test "Eval if else" {
         var scope = Scope.init(testing.allocator);
         defer scope.deinit();
 
-        const value = evalNodes(tree.nodes, &scope);
+        const value = try evalNodes(tree.nodes, &scope);
         switch (@typeInfo(@TypeOf(case.expected))) {
             .ComptimeInt => testing.expectEqual(@intCast(i64, case.expected), value.integer),
             else => testing.expect(value == .nil),
@@ -284,7 +321,7 @@ test "Eval return value" {
         var scope = Scope.init(testing.allocator);
         defer scope.deinit();
 
-        const value = evalNodes(tree.nodes, &scope);
+        const value = try evalNodes(tree.nodes, &scope);
         testing.expectEqual(@intCast(i64, case.expected), value.integer);
     }
 }
@@ -305,7 +342,70 @@ test "Eval declaration" {
         var scope = Scope.init(testing.allocator);
         defer scope.deinit();
 
-        const value = evalNodes(tree.nodes, &scope);
+        const value = try evalNodes(tree.nodes, &scope);
         testing.expectEqual(@intCast(i64, case.expected), value.integer);
     }
+}
+
+test "Basic function" {
+    const input = "fn(x) { x + 5 }";
+    var lexer = Lexer.init(input);
+    var parser = try Parser.init(testing.allocator, &lexer);
+    const tree = try parser.parse();
+    defer tree.deinit();
+    var scope = Scope.init(testing.allocator);
+    defer scope.deinit();
+
+    const res = try evalNodes(tree.nodes, &scope);
+    testing.expect(res == .function);
+    testing.expect(res.function.params.len == 1);
+    testing.expectEqualSlices(u8, "x", res.function.params[0].identifier.value);
+}
+
+test "Function calling" {
+    const test_cases = .{
+        .{ .input = "const my_func = fn(x){x} my_func(5)", .expected = 5 },
+        .{ .input = "const my_func = fn(x){return x} my_func(5)", .expected = 5 },
+        .{ .input = "const double = fn(x){ x * 2 } double(5)", .expected = 10 },
+        .{ .input = "const add = fn(x, y){ x + y } add(5, 5)", .expected = 10 },
+        .{ .input = "const add = fn(x, y){ x + y } add(5 + 5, add(5, 5))", .expected = 20 },
+        .{ .input = "fn(x){x}(5)", .expected = 5 },
+    };
+
+    inline for (test_cases) |case| {
+        //wrap in an arena for now until we fix memory leak in function arguments
+        var arena = std.heap.ArenaAllocator.init(testing.allocator);
+        defer arena.deinit();
+        var lexer = Lexer.init(case.input);
+        var parser = try Parser.init(&arena.allocator, &lexer);
+        const tree = try parser.parse();
+        defer tree.deinit();
+        var scope = Scope.init(&arena.allocator);
+        defer scope.deinit();
+
+        const value = try evalNodes(tree.nodes, &scope);
+        testing.expectEqual(@intCast(i64, case.expected), value.integer);
+    }
+}
+
+test "Closure" {
+    const input =
+        \\const my_func = fn(x){
+        \\  fn(y){ x + y }        
+        \\}
+        \\const other_func = my_func(2)
+        \\other_func(2)
+    ;
+
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    var lexer = Lexer.init(input);
+    var parser = try Parser.init(&arena.allocator, &lexer);
+    const tree = try parser.parse();
+    defer tree.deinit();
+    var scope = Scope.init(&arena.allocator);
+    defer scope.deinit();
+
+    const value = try evalNodes(tree.nodes, &scope);
+    testing.expectEqual(@intCast(i64, 4), value.integer);
 }
