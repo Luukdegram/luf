@@ -5,6 +5,7 @@ const ast = @import("ast.zig");
 pub const Type = enum {
     integer,
     boolean,
+    string,
     nil,
     _return,
     function,
@@ -14,6 +15,7 @@ pub const Type = enum {
 pub const Value = union(Type) {
     integer: i64,
     boolean: bool,
+    string: []const u8,
     nil: void,
     _return: *Value,
     function: struct {

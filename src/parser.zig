@@ -167,6 +167,7 @@ pub const Parser = struct {
         var left = switch (self.current_token.type) {
             .identifier => try self.parseIdentifier(),
             .integer => try self.parseIntegerLiteral(),
+            .string => try self.parseStringLiteral(),
             .bang => try self.parsePrefixExpression(),
             .minus => try self.parsePrefixExpression(),
             ._true, ._false => try self.parseBoolean(),
@@ -247,6 +248,14 @@ pub const Parser = struct {
         return Node{ .int_lit = literal };
     }
 
+    /// Parses the current token into a string literal
+    fn parseStringLiteral(self: *Parser) Error!Node {
+        const literal = try self.allocator.create(Node.StringLiteral);
+        const token = self.current_token;
+        literal.* = .{ .token = token, .value = try self.allocator.dupe(u8, self.source[token.start..token.end]) };
+        return Node{ .string_lit = literal };
+    }
+
     /// Parses an expression into a boolean node
     fn parseBoolean(self: *Parser) !Node {
         const boolean = try self.allocator.create(Node.Bool);
@@ -310,7 +319,6 @@ pub const Parser = struct {
     /// Parses the tokens into a `Node.BlockStatement` until a right brace is found
     fn parseBlockStatement(self: *Parser) !Node {
         const block = try self.allocator.create(Node.BlockStatement);
-        errdefer self.allocator.destroy(block);
         block.* = .{
             .token = self.current_token,
             .nodes = undefined,
@@ -335,7 +343,6 @@ pub const Parser = struct {
     /// Returns errors if no left parenthesis or brace is found.
     fn parseFunctionLiteral(self: *Parser) Error!Node {
         const func = try self.allocator.create(Node.FunctionLiteral);
-        errdefer self.allocator.destroy(func);
         func.* = .{
             .token = self.current_token,
             .params = undefined,
@@ -389,7 +396,6 @@ pub const Parser = struct {
     /// Accepts a function node
     fn parseCallExpression(self: *Parser, func: Node) Error!Node {
         const call = try self.allocator.create(Node.CallExpression);
-        errdefer self.allocator.destroy(call);
         call.* = .{
             .token = self.current_token,
             .function = func,
@@ -756,4 +762,17 @@ test "Call expression" {
     testing.expect(call.arguments[0].int_lit.value == 1);
     testing.expectEqual(call.arguments[1].infix.operator, .multiply);
     testing.expect(call.arguments[2].infix.right.int_lit.value == 5);
+}
+
+test "String expression" {
+    const input = "\"Hello, world\"";
+    var lexer = Lexer.init(input);
+    var parser = try Parser.init(testing.allocator, &lexer);
+    const tree = try parser.parse();
+    defer tree.deinit();
+
+    testing.expect(tree.nodes.len == 1);
+
+    const string = tree.nodes[0].expression.value.string_lit;
+    testing.expectEqualSlices(u8, "Hello, world", string.value);
 }

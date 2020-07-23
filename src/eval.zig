@@ -44,6 +44,7 @@ pub fn eval(node: Node, scope: *Scope) EvalError!Value {
             const args = try evalArguments(call.arguments, scope);
             break :blk try callFunction(func, args);
         },
+        .string_lit => |string| Value{ .string = string.value },
         else => {
             @import("std").debug.panic("TODO: Implement node: {}\n", .{@tagName(node)});
         },
@@ -408,4 +409,20 @@ test "Closure" {
 
     const value = try evalNodes(tree.nodes, &scope);
     testing.expectEqual(@intCast(i64, 4), value.integer);
+}
+
+test "String literal" {
+    const input = "\"Some test input\"";
+
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    var lexer = Lexer.init(input);
+    var parser = try Parser.init(&arena.allocator, &lexer);
+    const tree = try parser.parse();
+    defer tree.deinit();
+    var scope = Scope.init(&arena.allocator);
+    defer scope.deinit();
+
+    const value = try evalNodes(tree.nodes, &scope);
+    testing.expectEqualSlices(u8, "Some test input", value.string);
 }

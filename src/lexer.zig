@@ -45,6 +45,13 @@ pub const Lexer = struct {
             '>' => .greater_than,
             '{' => .left_brace,
             '}' => .right_brace,
+            '"' => {
+                self.readChar();
+                const start = self.position;
+                _ = self.readString();
+                defer self.readChar();
+                return Token{ .type = .string, .start = start, .end = self.position };
+            },
             0 => .eof,
             else => |c| if (isLetter(c)) {
                 const start = self.position;
@@ -119,6 +126,16 @@ pub const Lexer = struct {
         }
         return self.source[pos..self.position];
     }
+
+    /// Reads a string from the current character
+    fn readString(self: *Lexer) []const u8 {
+        self.readChar(); // skip initial "
+        const pos = self.position;
+        while (self.char != '"' and self.char != 0) {
+            self.readChar();
+        }
+        return self.source[pos..self.position];
+    }
 };
 
 /// Returns true if the given character is considered whitespace
@@ -165,6 +182,8 @@ test "All supported tokens" {
         \\
         \\10 == 10
         \\10 != 9
+        \\"foo"
+        \\"foo bar"
     ;
 
     const tests = &[_]Token{
@@ -230,6 +249,8 @@ test "All supported tokens" {
         .{ .type = .integer, .start = 180, .end = 182 },
         .{ .type = .not_equal, .start = 183, .end = 185 },
         .{ .type = .integer, .start = 186, .end = 187 },
+        .{ .type = .string, .start = 189, .end = 192 },
+        .{ .type = .string, .start = 195, .end = 202 },
     };
 
     var lexer = Lexer.init(input);
