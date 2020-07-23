@@ -9,7 +9,7 @@ const testing = std.testing;
 const assert = std.debug.assert;
 
 pub const EvalError = error{
-    UnknownOperator,
+    UnsupportedOperator,
     TypeMismatch,
     MissingIdentifier,
 } || error{OutOfMemory};
@@ -117,6 +117,7 @@ fn evalInfix(infix: *const Node.Infix, scope: *Scope) !Value {
 
     return switch (resolveType(left, right)) {
         .integer => evalIntegerInfix(infix.operator, left, right),
+        .string => evalStringInfix(scope.allocator, infix.operator, left, right),
         .boolean => switch (infix.operator) {
             .equal => Value{ .boolean = left.boolean == right.boolean },
             .not_equal => Value{ .boolean = left.boolean != right.boolean },
@@ -151,6 +152,21 @@ fn evalIntegerInfix(operator: Node.Infix.Op, left: Value, right: Value) Value {
         .not_equal => Value{ .boolean = left_val != right_val },
         else => Value{ .nil = {} },
     };
+}
+
+fn evalStringInfix(allocator: *std.mem.Allocator, operator: Node.Infix.Op, left: Value, right: Value) !Value {
+    if (operator != .add) {
+        return EvalError.UnsupportedOperator;
+    }
+    const left_val = left.string;
+    const right_val = right.string;
+
+    var result = try std.mem.concat(allocator, u8, &[_][]const u8{
+        left_val,
+        right_val,
+    });
+
+    return Value{ .string = result };
 }
 
 fn evalBangOperator(right: Value) Value {
@@ -425,4 +441,20 @@ test "String literal" {
 
     const value = try evalNodes(tree.nodes, &scope);
     testing.expectEqualSlices(u8, "Some test input", value.string);
+}
+
+test "String concatenation" {
+    const input = "\"Hello\" + \" \" + \"world\"";
+
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    var lexer = Lexer.init(input);
+    var parser = try Parser.init(&arena.allocator, &lexer);
+    const tree = try parser.parse();
+    defer tree.deinit();
+    var scope = Scope.init(&arena.allocator);
+    defer scope.deinit();
+
+    const value = try evalNodes(tree.nodes, &scope);
+    testing.expectEqualSlices(u8, "Hello world", value.string);
 }
