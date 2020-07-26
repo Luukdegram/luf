@@ -38,13 +38,18 @@ pub fn eval(node: Node, scope: *Scope) EvalError!Value {
             try scope.set(decl.name.identifier.value, val);
             return val;
         },
-        .call_expression => |call| blk: {
+        .call_expression => |call| {
             const func = try eval(call.function, scope);
 
             const args = try evalArguments(call.arguments, scope);
-            break :blk try callFunction(func, args);
+            return try callFunction(func, args);
         },
         .string_lit => |string| Value{ .string = string.value },
+        .array => |array| {
+            const elements = try evalArguments(array.value, scope);
+            var list = Value.List.fromOwnedSlice(scope.allocator, elements);
+            return Value{ .list = list };
+        },
         else => {
             @import("std").debug.panic("TODO: Implement node: {}\n", .{@tagName(node)});
         },
@@ -186,7 +191,6 @@ fn evalIdentifier(identifier: *const Node.Identifier, scope: *Scope) !Value {
     if (scope.get(identifier.value)) |val| {
         return val;
     } else {
-        std.debug.print("FUnc: {}\n", .{identifier.value});
         return EvalError.MissingIdentifier;
     }
 }
@@ -457,4 +461,40 @@ test "String concatenation" {
 
     const value = try evalNodes(tree.nodes, &scope);
     testing.expectEqualSlices(u8, "Hello world", value.string);
+}
+
+test "String length" {
+    // const input = "const len = \"test\".len";
+
+    // var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    // defer arena.deinit();
+    // var lexer = Lexer.init(input);
+    // var parser = try Parser.init(&arena.allocator, &lexer);
+    // const tree = try parser.parse();
+    // defer tree.deinit();
+    // var scope = Scope.init(&arena.allocator);
+    // defer scope.deinit();
+
+    // const value = try evalNodes(tree.nodes, &scope);
+    // testing.expectEqual(@as(i64, 4), value.integer);
+}
+
+test "Array literal" {
+    const input = "[1, 2 * 2, 3 + 3]";
+
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    var lexer = Lexer.init(input);
+    var parser = try Parser.init(&arena.allocator, &lexer);
+    const tree = try parser.parse();
+    defer tree.deinit();
+    var scope = Scope.init(&arena.allocator);
+    defer scope.deinit();
+
+    const value = try evalNodes(tree.nodes, &scope);
+    testing.expect(value == .list);
+    testing.expect(value.list.items.len == 3);
+    testing.expect(value.list.items[0].integer == 1);
+    testing.expect(value.list.items[1].integer == 4);
+    testing.expect(value.list.items[2].integer == 6);
 }

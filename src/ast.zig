@@ -33,6 +33,8 @@ pub const Node = union(NodeType) {
     func_lit: *FunctionLiteral,
     call_expression: *CallExpression,
     string_lit: *StringLiteral,
+    array: *ArrayLiteral,
+    index: *IndexExpression,
 
     /// Frees memory of a node and all of its connected nodes.
     /// Although this can be used to free memory recursively,
@@ -97,6 +99,18 @@ pub const Node = union(NodeType) {
                 allocator.free(string.value);
                 allocator.destroy(string);
             },
+            .array => |list| {
+                for (list.value) |val| {
+                    val.deinit(allocator);
+                }
+                allocator.free(list.value);
+                allocator.destroy(list);
+            },
+            .index => |index| {
+                index.left.deinit(allocator);
+                index.index.deinit(allocator);
+                allocator.destroy(index);
+            },
         }
     }
 
@@ -115,12 +129,27 @@ pub const Node = union(NodeType) {
         func_lit,
         call_expression,
         string_lit,
+        array,
+        index,
     };
 
     /// Represents a String
     pub const StringLiteral = struct {
         token: Token,
         value: []const u8,
+    };
+
+    /// Node representing an array
+    pub const ArrayLiteral = struct {
+        token: Token,
+        value: []Node,
+    };
+
+    /// Represents an index selector to retrieve a value from an Array or Map
+    pub const IndexExpression = struct {
+        token: Token,
+        left: Node,
+        index: Node,
     };
 
     /// Statement node -> const x = 5
@@ -179,6 +208,7 @@ pub const Node = union(NodeType) {
             greater_than,
             equal,
             not_equal,
+            member,
 
             /// Returns the corresponding `Op` based on the given `Token`
             pub fn fromToken(token: Token) Op {
@@ -192,6 +222,7 @@ pub const Node = union(NodeType) {
                     .greater_than => .greater_than,
                     .equal => .equal,
                     .not_equal => .not_equal,
+                    .period => .member,
                     else => @panic("Unexpected token"),
                 };
             }

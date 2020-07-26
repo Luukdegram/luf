@@ -11,6 +11,7 @@ pub const Token = struct {
     pub const TokenType = union(enum) {
         illegal,
         eof,
+        period,
         // identifiers + literals
         identifier,
         integer,
@@ -32,6 +33,8 @@ pub const Token = struct {
         right_parenthesis,
         left_brace,
         right_brace,
+        left_bracket,
+        right_bracket,
         // keywords
         function,
         mutable,
@@ -82,6 +85,8 @@ pub const Token = struct {
             .right_parenthesis => ")",
             .left_brace => "{",
             .right_brace => "}",
+            .left_bracket => '[',
+            .right_bracket => ']',
             // keywords
             .function => "fn",
             .mutable => "mut",

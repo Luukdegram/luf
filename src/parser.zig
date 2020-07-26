@@ -12,7 +12,7 @@ const Tree = ast.Tree;
 /// The higher the value, the earlier it will be executed
 /// This means a function call will be executed before a prefix,
 /// and the product will be calculated before the sum.
-const Precedence = enum(u3) {
+const Precedence = enum(u4) {
     lowest = 1,
     equals = 2,
     less_greater = 3,
@@ -20,9 +20,11 @@ const Precedence = enum(u3) {
     product = 5,
     prefix = 6,
     call = 7,
+    index = 8,
+    member = 9,
 
     /// Returns the integer value of the enum
-    fn val(self: Precedence) u3 {
+    fn val(self: Precedence) u4 {
         return @enumToInt(self);
     }
 };
@@ -35,6 +37,8 @@ fn findPrecedence(token_type: Token.TokenType) Precedence {
         .plus, .minus => .sum,
         .slash, .asterisk => .product,
         .left_parenthesis => .call,
+        .left_bracket => .index,
+        .period => .member,
         else => .lowest,
     };
 }
@@ -49,7 +53,7 @@ pub const Parser = struct {
     index: u32,
     source: []const u8,
 
-    pub const Error = error{ParserError} ||
+    pub const Error = error{ ParserError, MissingClosingBracket } ||
         std.mem.Allocator.Error ||
         std.fmt.ParseIntError;
     /// Creates a new Parser, using the given lexer.
@@ -174,6 +178,7 @@ pub const Parser = struct {
             ._if => try self.parseIfExpression(),
             .left_parenthesis => try self.parseGroupedExpression(),
             .function => try self.parseFunctionLiteral(),
+            .left_bracket => try self.parseArray(),
             else => {
                 std.debug.print("Unexpected token: {}\n", .{self.current_token});
                 return error.ParserError;
@@ -186,6 +191,11 @@ pub const Parser = struct {
                     self.next();
                     break :blk try self.parseCallExpression(left);
                 },
+                .left_bracket => blk: {
+                    self.next();
+                    break :blk try self.parseIndexExpression(left);
+                },
+                .period,
                 .plus,
                 .minus,
                 .slash,
@@ -399,18 +409,18 @@ pub const Parser = struct {
         call.* = .{
             .token = self.current_token,
             .function = func,
-            .arguments = try self.parseCallArguments(),
+            .arguments = try self.parseArguments(.right_parenthesis),
         };
         return Node{ .call_expression = call };
     }
 
     /// Parses the next set of tokens into argument nodes
-    fn parseCallArguments(self: *Parser) Error![]Node {
+    fn parseArguments(self: *Parser, end_type: Token.TokenType) Error![]Node {
         var list = ArrayList(Node).init(self.allocator);
         errdefer list.deinit();
 
         // no arguments
-        if (self.peekIsType(.right_parenthesis)) {
+        if (self.peekIsType(end_type)) {
             self.next();
             return list.toOwnedSlice();
         }
@@ -424,11 +434,33 @@ pub const Parser = struct {
             try list.append(try self.parseExpression(.lowest));
         }
 
-        if (!self.expectPeek(.right_parenthesis)) {
+        if (!self.expectPeek(end_type)) {
             return error.ParserError;
         }
 
         return list.toOwnedSlice();
+    }
+
+    /// Parses the token into an `ArrayLiteral`
+    fn parseArray(self: *Parser) Error!Node {
+        const array = try self.allocator.create(Node.ArrayLiteral);
+        array.* = .{ .token = self.current_token, .value = try self.parseArguments(.right_bracket) };
+        return Node{ .array = array };
+    }
+
+    /// Parses the selector to retreive a value from an Array or Map
+    fn parseIndexExpression(self: *Parser, left: Node) Error!Node {
+        const index = try self.allocator.create(Node.IndexExpression);
+        index.* = .{ .token = self.current_token, .left = left, .index = undefined };
+        self.next();
+
+        index.index = try self.parseExpression(.lowest);
+
+        if (!self.expectPeek(.right_bracket)) {
+            return error.MissingClosingBracket;
+        }
+
+        return Node{ .index = index };
     }
 
     /// Determines if the next token is the expected token or not.
@@ -775,4 +807,47 @@ test "String expression" {
 
     const string = tree.nodes[0].expression.value.string_lit;
     testing.expectEqualSlices(u8, "Hello, world", string.value);
+}
+
+test "Member expression" {
+    const input = "foo.bar";
+    var lexer = Lexer.init(input);
+    var parser = try Parser.init(testing.allocator, &lexer);
+    const tree = try parser.parse();
+    defer tree.deinit();
+
+    testing.expect(tree.nodes.len == 1);
+
+    const infix = tree.nodes[0].expression.value.infix;
+    testing.expectEqualSlices(u8, "bar", infix.right.identifier.value);
+    testing.expect(infix.operator == .member);
+}
+
+test "Array literal" {
+    const input = "[1, 2 * 2, 3 + 3]";
+    var lexer = Lexer.init(input);
+    var parser = try Parser.init(testing.allocator, &lexer);
+    const tree = try parser.parse();
+    defer tree.deinit();
+
+    testing.expect(tree.nodes.len == 1);
+
+    const array = tree.nodes[0].expression.value.array;
+    testing.expect(array.value.len == 3);
+    testing.expect(array.value[0].int_lit.value == 1);
+    testing.expect(array.value[1].infix.operator == .multiply);
+}
+
+test "Array index" {
+    const input = "array[1]";
+    var lexer = Lexer.init(input);
+    var parser = try Parser.init(testing.allocator, &lexer);
+    const tree = try parser.parse();
+    defer tree.deinit();
+
+    testing.expect(tree.nodes.len == 1);
+
+    const index = tree.nodes[0].expression.value.index;
+    testing.expect(index.left == .identifier);
+    testing.expect(index.index.int_lit.value == 1);
 }

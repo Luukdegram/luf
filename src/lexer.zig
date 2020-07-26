@@ -45,6 +45,9 @@ pub const Lexer = struct {
             '>' => .greater_than,
             '{' => .left_brace,
             '}' => .right_brace,
+            '.' => .period,
+            '[' => .left_bracket,
+            ']' => .right_bracket,
             '"' => {
                 self.readChar();
                 const start = self.position;
@@ -184,6 +187,8 @@ test "All supported tokens" {
         \\10 != 9
         \\"foo"
         \\"foo bar"
+        \\"foo".len
+        \\[1, 2]
     ;
 
     const tests = &[_]Token{
@@ -251,6 +256,14 @@ test "All supported tokens" {
         .{ .type = .integer, .start = 186, .end = 187 },
         .{ .type = .string, .start = 189, .end = 192 },
         .{ .type = .string, .start = 195, .end = 202 },
+        .{ .type = .string, .start = 205, .end = 208 },
+        .{ .type = .period, .start = 209, .end = 210 },
+        .{ .type = .identifier, .start = 210, .end = 213 },
+        .{ .type = .left_bracket, .start = 214, .end = 215 },
+        .{ .type = .integer, .start = 215, .end = 216 },
+        .{ .type = .comma, .start = 216, .end = 217 },
+        .{ .type = .integer, .start = 218, .end = 219 },
+        .{ .type = .right_bracket, .start = 219, .end = 220 },
     };
 
     var lexer = Lexer.init(input);

@@ -9,6 +9,7 @@ pub const Type = enum {
     nil,
     _return,
     function,
+    list,
 };
 
 /// Value depending on its type
@@ -23,6 +24,9 @@ pub const Value = union(Type) {
         body: ast.Node,
         scope: *Scope,
     },
+    list: List,
+
+    pub const List = std.ArrayList(Value);
 };
 
 /// Scope maps identifiers to their names and can be used
