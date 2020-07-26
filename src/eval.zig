@@ -12,6 +12,7 @@ pub const EvalError = error{
     UnsupportedOperator,
     TypeMismatch,
     MissingIdentifier,
+    OutOfBounds,
 } || error{OutOfMemory};
 
 /// Evaluates the given node and returns a Value
@@ -50,6 +51,7 @@ pub fn eval(node: Node, scope: *Scope) EvalError!Value {
             var list = Value.List.fromOwnedSlice(scope.allocator, elements);
             return Value{ .list = list };
         },
+        .index => |index| try evalIndex(index, scope),
         else => {
             @import("std").debug.panic("TODO: Implement node: {}\n", .{@tagName(node)});
         },
@@ -214,6 +216,26 @@ fn isTrue(value: Value) bool {
         .boolean => |val| val,
         else => true,
     };
+}
+
+/// Evaluates the index node and retrieves the value at the parsed index of the
+/// array or map.
+fn evalIndex(node: *const Node.IndexExpression, scope: *Scope) !Value {
+    const left = try eval(node.left, scope);
+    const index = try eval(node.index, scope);
+
+    if (left == .list and index == .integer) {
+        const pos = index.integer;
+        const list = left.list;
+
+        if (pos >= list.items.len) {
+            return error.OutOfBounds;
+        }
+
+        return list.items[@intCast(usize, pos)];
+    } else {
+        return error.UnsupportedOperator;
+    }
 }
 
 test "Eval integer" {
@@ -497,4 +519,20 @@ test "Array literal" {
     testing.expect(value.list.items[0].integer == 1);
     testing.expect(value.list.items[1].integer == 4);
     testing.expect(value.list.items[2].integer == 6);
+}
+
+test "Array index" {
+    const input = "[1, 2, 3][0]";
+
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    var lexer = Lexer.init(input);
+    var parser = try Parser.init(&arena.allocator, &lexer);
+    const tree = try parser.parse();
+    defer tree.deinit();
+    var scope = Scope.init(&arena.allocator);
+    defer scope.deinit();
+
+    const value = try evalNodes(tree.nodes, &scope);
+    testing.expect(value.integer == 1);
 }
