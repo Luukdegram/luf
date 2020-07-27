@@ -13,7 +13,12 @@ pub const EvalError = error{
     TypeMismatch,
     MissingIdentifier,
     OutOfBounds,
-} || error{OutOfMemory};
+    MemoryNotExists,
+    OutOfMemory,
+    UnsupportedType,
+    MemberDoesNotExist,
+    MismatchingTypes,
+};
 
 /// Evaluates the given node and returns a Value
 pub fn eval(node: Node, scope: *Scope) EvalError!Value {
@@ -82,8 +87,6 @@ fn evalArguments(nodes: []Node, scope: *Scope) ![]Value {
 }
 
 fn callFunction(func: Value, args: []Value) !Value {
-    assert(func == .function);
-
     // create new scope
     var scope = try func.function.scope.clone();
     for (func.function.params) |param, i| {
@@ -193,7 +196,7 @@ fn evalIdentifier(identifier: *const Node.Identifier, scope: *Scope) !Value {
     if (scope.get(identifier.value)) |val| {
         return val;
     } else {
-        return EvalError.MissingIdentifier;
+        return error.MissingIdentifier;
     }
 }
 
@@ -220,9 +223,31 @@ fn isTrue(value: Value) bool {
 
 /// Evaluates the index node and retrieves the value at the parsed index of the
 /// array or map.
-fn evalIndex(node: *const Node.IndexExpression, scope: *Scope) !Value {
-    const left = try eval(node.left, scope);
-    const index = try eval(node.index, scope);
+fn evalIndex(node: *const Node.IndexExpression, scope: *Scope) EvalError!Value {
+    var left = try eval(node.left, scope);
+
+    // check if index is a builtin
+    if (node.index == .call_expression) {
+        const call: *Node.CallExpression = node.index.call_expression;
+        var args = try evalArguments(call.arguments, scope);
+
+        if (Value.builtins.get(call.function.identifier.value)) |builtin| {
+            var func_args = try scope.allocator.alloc(Value, args.len + 1);
+            defer scope.allocator.free(func_args);
+
+            func_args[0] = left;
+            std.mem.copy(Value, func_args[1..], args);
+            const result = (try builtin.builtin.func(func_args)).*;
+            try scope.set(node.left.identifier.value, result);
+            return result;
+        }
+    } else if (node.index == .identifier) {
+        if (Value.builtins.get(node.index.identifier.value)) |id| {
+            const result = try id.builtin.func(&[_]Value{left});
+            return result.*;
+        }
+    }
+    var index: Value = try eval(node.index, scope);
 
     if (left == .list and index == .integer) {
         const pos = index.integer;
@@ -231,7 +256,6 @@ fn evalIndex(node: *const Node.IndexExpression, scope: *Scope) !Value {
         if (pos >= list.items.len) {
             return error.OutOfBounds;
         }
-
         return list.items[@intCast(usize, pos)];
     } else {
         return error.UnsupportedOperator;
@@ -485,20 +509,25 @@ test "String concatenation" {
     testing.expectEqualSlices(u8, "Hello world", value.string);
 }
 
-test "String length" {
-    // const input = "const len = \"test\".len";
+test "Builtins" {
+    const test_cases = .{
+        .{ .input = "const len = \"test\".len const x = len + 1", .expected = 5 },
+        .{ .input = "const array = [1,2,3] const x = array.len", .expected = 3 },
+        .{ .input = "mut array = [1, 2, 3] array.add(1) const x = array.len", .expected = 4 },
+    };
+    inline for (test_cases) |case| {
+        var arena = std.heap.ArenaAllocator.init(testing.allocator);
+        defer arena.deinit();
+        var lexer = Lexer.init(case.input);
+        var parser = try Parser.init(&arena.allocator, &lexer);
+        const tree = try parser.parse();
+        defer tree.deinit();
+        var scope = Scope.init(&arena.allocator);
+        defer scope.deinit();
 
-    // var arena = std.heap.ArenaAllocator.init(testing.allocator);
-    // defer arena.deinit();
-    // var lexer = Lexer.init(input);
-    // var parser = try Parser.init(&arena.allocator, &lexer);
-    // const tree = try parser.parse();
-    // defer tree.deinit();
-    // var scope = Scope.init(&arena.allocator);
-    // defer scope.deinit();
-
-    // const value = try evalNodes(tree.nodes, &scope);
-    // testing.expectEqual(@as(i64, 4), value.integer);
+        const value = try evalNodes(tree.nodes, &scope);
+        testing.expectEqual(@as(i64, case.expected), value.integer);
+    }
 }
 
 test "Array literal" {

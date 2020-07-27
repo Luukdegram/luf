@@ -21,7 +21,6 @@ const Precedence = enum(u4) {
     prefix = 6,
     call = 7,
     index = 8,
-    member = 9,
 
     /// Returns the integer value of the enum
     fn val(self: Precedence) u4 {
@@ -38,7 +37,7 @@ fn findPrecedence(token_type: Token.TokenType) Precedence {
         .slash, .asterisk => .product,
         .left_parenthesis => .call,
         .left_bracket => .index,
-        .period => .member,
+        .period => .index,
         else => .lowest,
     };
 }
@@ -191,11 +190,10 @@ pub const Parser = struct {
                     self.next();
                     break :blk try self.parseCallExpression(left);
                 },
-                .left_bracket => blk: {
+                .left_bracket, .period => blk: {
                     self.next();
                     break :blk try self.parseIndexExpression(left);
                 },
-                .period,
                 .plus,
                 .minus,
                 .slash,
@@ -450,13 +448,14 @@ pub const Parser = struct {
 
     /// Parses the selector to retreive a value from an Array or Map
     fn parseIndexExpression(self: *Parser, left: Node) Error!Node {
+        const token = self.current_token;
         const index = try self.allocator.create(Node.IndexExpression);
-        index.* = .{ .token = self.current_token, .left = left, .index = undefined };
+        index.* = .{ .token = token, .left = left, .index = undefined };
         self.next();
 
         index.index = try self.parseExpression(.lowest);
 
-        if (!self.expectPeek(.right_bracket)) {
+        if (token.type != .period and !self.expectPeek(.right_bracket)) {
             return error.MissingClosingBracket;
         }
 
@@ -818,9 +817,10 @@ test "Member expression" {
 
     testing.expect(tree.nodes.len == 1);
 
-    const infix = tree.nodes[0].expression.value.infix;
-    testing.expectEqualSlices(u8, "bar", infix.right.identifier.value);
-    testing.expect(infix.operator == .member);
+    const index = tree.nodes[0].expression.value.index;
+    testing.expectEqualSlices(u8, "bar", index.index.identifier.value);
+    testing.expectEqualSlices(u8, "foo", index.left.identifier.value);
+    testing.expect(index.token.type == .period);
 }
 
 test "Array literal" {

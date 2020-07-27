@@ -1,5 +1,6 @@
 const std = @import("std");
 const ast = @import("ast.zig");
+const Allocator = std.mem.Allocator;
 
 /// Build in types supported by Luf
 pub const Type = enum {
@@ -10,6 +11,7 @@ pub const Type = enum {
     _return,
     function,
     list,
+    builtin,
 };
 
 /// Value depending on its type
@@ -25,8 +27,32 @@ pub const Value = union(Type) {
         scope: *Scope,
     },
     list: List,
+    builtin: struct {
+        func: builtinFn,
+    },
+
+    /// Frees Value's memory
+    pub fn deinit(self: Value, alloc: *Allocator) void {
+        switch (self) {
+            .string => |val| {
+                alloc.free(val);
+                alloc.destroy(self);
+            },
+            .function => |func| {
+                func.scope.deinit();
+                alloc.destroy(func);
+            },
+            .list => |list| list.deinit(),
+            else => alloc.destroy(self),
+        }
+    }
 
     pub const List = std.ArrayList(Value);
+
+    pub const builtins = std.ComptimeStringMap(Value, .{
+        .{ "len", len_func },
+        .{ "add", add_func },
+    });
 };
 
 /// Scope maps identifiers to their names and can be used
@@ -40,6 +66,11 @@ pub const Scope = struct {
 
     pub fn init(allocator: *std.mem.Allocator) Scope {
         return Scope{ .store = Map.init(allocator), .allocator = allocator };
+    }
+
+    /// Creates a new `Value` on the stack of the scope
+    pub fn create(self: Scope) !*Value {
+        return self.allocator.create(Value);
     }
 
     /// Creates a new Scope from the given scope where the parent is set
@@ -79,3 +110,36 @@ pub const Scope = struct {
         self.* = undefined;
     }
 };
+
+const builtinFn = fn (args: []Value) error{ OutOfMemory, UnsupportedType, MismatchingTypes }!*Value;
+const len_func = Value{ .builtin = .{ .func = len } };
+const add_func = Value{ .builtin = .{ .func = add } };
+
+/// Returns the length of the `Value`.
+/// Supports strings, arrays and maps.
+fn len(args: []Value) !*Value {
+    std.debug.assert(args.len == 1);
+    const length: i64 = switch (args[0]) {
+        .string => |val| @intCast(i64, val.len),
+        .list => |list| @intCast(i64, list.items.len),
+        else => return error.UnsupportedType,
+    };
+    return &Value{ .integer = length };
+}
+
+/// Appends a new value to the list
+fn add(args: []Value) !*Value {
+    std.debug.assert(args.len == 2);
+    return switch (args[0]) {
+        .list => |*list| {
+            if (list.items.len > 0) {
+                if (list.items[0] != std.meta.activeTag(args[1])) {
+                    return error.MismatchingTypes;
+                }
+            }
+            try list.append(args[1]);
+            return &args[0];
+        },
+        else => error.UnsupportedType,
+    };
+}
