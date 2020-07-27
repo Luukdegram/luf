@@ -178,6 +178,7 @@ pub const Parser = struct {
             .left_parenthesis => try self.parseGroupedExpression(),
             .function => try self.parseFunctionLiteral(),
             .left_bracket => try self.parseArray(),
+            .left_brace => try self.parseMap(),
             else => {
                 std.debug.print("Unexpected token: {}\n", .{self.current_token});
                 return error.ParserError;
@@ -444,6 +445,48 @@ pub const Parser = struct {
         const array = try self.allocator.create(Node.ArrayLiteral);
         array.* = .{ .token = self.current_token, .value = try self.parseArguments(.right_bracket) };
         return Node{ .array = array };
+    }
+
+    /// Parses the token into a `MapLiteral`
+    fn parseMap(self: *Parser) Error!Node {
+        const map = try self.allocator.create(Node.MapLiteral);
+        map.* = .{ .token = self.current_token, .value = undefined };
+
+        var pairs = std.ArrayList(Node).init(self.allocator);
+        errdefer pairs.deinit();
+
+        while (!self.peekIsType(.right_brace)) {
+            self.next();
+            const pair = try self.parsePair();
+            try pairs.append(pair);
+            if (!self.peekIsType(.right_brace) and !self.expectPeek(.comma)) {
+                return error.ParserError;
+            }
+        }
+
+        if (!self.expectPeek(.right_brace)) {
+            return error.ParserError;
+        }
+
+        map.value = pairs.toOwnedSlice();
+
+        return Node{ .map = map };
+    }
+
+    /// Parses the next token into a Key Value `MapPair`
+    fn parsePair(self: *Parser) Error!Node {
+        const pair = try self.allocator.create(Node.MapPair);
+        pair.* = .{ .token = self.current_token, .key = try self.parseExpression(.lowest), .value = undefined };
+
+        if (!self.expectPeek(.colon)) {
+            return error.ParserError;
+        }
+
+        // skip over colon
+        self.next();
+
+        pair.value = try self.parseExpression(.lowest);
+        return Node{ .map_pair = pair };
     }
 
     /// Parses the selector to retreive a value from an Array or Map
@@ -850,4 +893,28 @@ test "Array index" {
     const index = tree.nodes[0].expression.value.index;
     testing.expect(index.left == .identifier);
     testing.expect(index.index.int_lit.value == 1);
+}
+
+test "Map Literal" {
+    const input = "{\"foo\": 1, \"bar\": 5}";
+    var lexer = Lexer.init(input);
+    var parser = try Parser.init(testing.allocator, &lexer);
+    const tree = try parser.parse();
+    defer tree.deinit();
+
+    testing.expect(tree.nodes.len == 1);
+
+    const map = tree.nodes[0].expression.value.map;
+    testing.expect(map.value.len == 2);
+
+    const expected = .{
+        .{ .key = "foo", .value = 1 },
+        .{ .key = "bar", .value = 5 },
+    };
+
+    inline for (expected) |case, i| {
+        const pair: *Node.MapPair = map.value[i].map_pair;
+        testing.expectEqualSlices(u8, case.key, pair.key.string_lit.value);
+        testing.expect(case.value == pair.value.int_lit.value);
+    }
 }

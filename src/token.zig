@@ -35,6 +35,7 @@ pub const Token = struct {
         right_brace,
         left_bracket,
         right_bracket,
+        colon,
         // keywords
         function,
         mutable,
@@ -85,8 +86,9 @@ pub const Token = struct {
             .right_parenthesis => ")",
             .left_brace => "{",
             .right_brace => "}",
-            .left_bracket => '[',
-            .right_bracket => ']',
+            .left_bracket => "[",
+            .right_bracket => "]",
+            .colon => ":",
             // keywords
             .function => "fn",
             .mutable => "mut",

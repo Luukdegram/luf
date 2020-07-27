@@ -34,6 +34,8 @@ pub const Node = union(NodeType) {
     call_expression: *CallExpression,
     string_lit: *StringLiteral,
     array: *ArrayLiteral,
+    map: *MapLiteral,
+    map_pair: *MapPair,
     index: *IndexExpression,
 
     /// Frees memory of a node and all of its connected nodes.
@@ -111,6 +113,18 @@ pub const Node = union(NodeType) {
                 index.index.deinit(allocator);
                 allocator.destroy(index);
             },
+            .map => |map| {
+                for (map.value) |pair| {
+                    pair.deinit(allocator);
+                }
+                allocator.free(map.value);
+                allocator.destroy(map);
+            },
+            .map_pair => |pair| {
+                pair.key.deinit(allocator);
+                pair.value.deinit(allocator);
+                allocator.destroy(pair);
+            },
         }
     }
 
@@ -130,6 +144,8 @@ pub const Node = union(NodeType) {
         call_expression,
         string_lit,
         array,
+        map,
+        map_pair,
         index,
     };
 
@@ -143,6 +159,19 @@ pub const Node = union(NodeType) {
     pub const ArrayLiteral = struct {
         token: Token,
         value: []Node,
+    };
+
+    /// Node representing a map
+    pub const MapLiteral = struct {
+        token: Token,
+        value: []Node,
+    };
+
+    /// Node presents a key/value pair for inside a `MapLiteral`
+    pub const MapPair = struct {
+        token: Token,
+        key: Node,
+        value: Node,
     };
 
     /// Represents an index selector to retrieve a value from an Array or Map
