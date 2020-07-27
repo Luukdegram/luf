@@ -11,7 +11,7 @@ const assert = std.debug.assert;
 pub const EvalError = error{
     UnsupportedOperator,
     TypeMismatch,
-    MissingIdentifier,
+    UnknownIdentifier,
     OutOfBounds,
     MemoryNotExists,
     OutOfMemory,
@@ -53,6 +53,7 @@ pub fn eval(node: Node, scope: *Scope) EvalError!Value {
         .string_lit => |string| Value{ .string = string.value },
         .array => |array| {
             const elements = try evalArguments(array.value, scope);
+            try assertSameTypes(elements);
             var list = Value.List.fromOwnedSlice(scope.allocator, elements);
             return Value{ .list = list };
         },
@@ -64,7 +65,7 @@ pub fn eval(node: Node, scope: *Scope) EvalError!Value {
 }
 
 /// Evaluates the nodes and returns the final Value
-pub fn evalNodes(nodes: []Node, scope: *Scope) !Value {
+pub fn evalNodes(nodes: []Node, scope: *Scope) EvalError!Value {
     var value: Value = undefined;
     for (nodes) |node| {
         value = try eval(node, scope);
@@ -77,7 +78,7 @@ pub fn evalNodes(nodes: []Node, scope: *Scope) !Value {
     return value;
 }
 
-fn evalArguments(nodes: []Node, scope: *Scope) ![]Value {
+fn evalArguments(nodes: []Node, scope: *Scope) EvalError![]Value {
     var values = std.ArrayList(Value).init(scope.allocator);
     for (nodes) |node| {
         const res = try eval(node, scope);
@@ -86,7 +87,7 @@ fn evalArguments(nodes: []Node, scope: *Scope) ![]Value {
     return values.toOwnedSlice();
 }
 
-fn callFunction(func: Value, args: []Value) !Value {
+fn callFunction(func: Value, args: []Value) EvalError!Value {
     // create new scope
     var scope = try func.function.scope.clone();
     for (func.function.params) |param, i| {
@@ -100,7 +101,7 @@ fn callFunction(func: Value, args: []Value) !Value {
     return return_val;
 }
 
-fn evalBlock(block: *const Node.BlockStatement, scope: *Scope) !Value {
+fn evalBlock(block: *const Node.BlockStatement, scope: *Scope) EvalError!Value {
     var value: Value = undefined;
     for (block.nodes) |node| {
         value = try eval(node, scope);
@@ -113,7 +114,7 @@ fn evalBlock(block: *const Node.BlockStatement, scope: *Scope) !Value {
     return value;
 }
 
-fn evalPrefix(prefix: *const Node.Prefix, scope: *Scope) !Value {
+fn evalPrefix(prefix: *const Node.Prefix, scope: *Scope) EvalError!Value {
     return switch (prefix.operator) {
         .bang => evalBangOperator(try eval(prefix.right, scope)),
         .minus => evalNegation(try eval(prefix.right, scope)),
@@ -164,7 +165,7 @@ fn evalIntegerInfix(operator: Node.Infix.Op, left: Value, right: Value) Value {
     };
 }
 
-fn evalStringInfix(allocator: *std.mem.Allocator, operator: Node.Infix.Op, left: Value, right: Value) !Value {
+fn evalStringInfix(allocator: *std.mem.Allocator, operator: Node.Infix.Op, left: Value, right: Value) EvalError!Value {
     if (operator != .add) {
         return EvalError.UnsupportedOperator;
     }
@@ -192,15 +193,15 @@ fn evalNegation(right: Value) Value {
     return Value{ .integer = -right.integer };
 }
 
-fn evalIdentifier(identifier: *const Node.Identifier, scope: *Scope) !Value {
+fn evalIdentifier(identifier: *const Node.Identifier, scope: *Scope) EvalError!Value {
     if (scope.get(identifier.value)) |val| {
         return val;
     } else {
-        return error.MissingIdentifier;
+        return EvalError.UnknownIdentifier;
     }
 }
 
-fn evalIf(exp: *const Node.IfExpression, scope: *Scope) !Value {
+fn evalIf(exp: *const Node.IfExpression, scope: *Scope) EvalError!Value {
     const condition = try eval(exp.condition, scope);
 
     if (isTrue(condition)) {
@@ -254,11 +255,21 @@ fn evalIndex(node: *const Node.IndexExpression, scope: *Scope) EvalError!Value {
         const list = left.list;
 
         if (pos >= list.items.len) {
-            return error.OutOfBounds;
+            return EvalError.OutOfBounds;
         }
         return list.items[@intCast(usize, pos)];
     } else {
-        return error.UnsupportedOperator;
+        return EvalError.UnsupportedOperator;
+    }
+}
+
+fn assertSameTypes(values: []Value) EvalError!void {
+    if (values.len < 2) return;
+    var current = std.meta.activeTag(values[0]);
+    for (values[1..]) |val| {
+        if (current != std.meta.activeTag(val)) {
+            return EvalError.MismatchingTypes;
+        }
     }
 }
 
