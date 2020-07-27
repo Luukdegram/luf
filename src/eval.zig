@@ -23,15 +23,15 @@ pub const EvalError = error{
 /// Evaluates the given node and returns a Value
 pub fn eval(node: Node, scope: *Scope) EvalError!Value {
     return switch (node) {
-        .expression => |exp| try eval(exp.value, scope),
+        .expression => |exp| eval(exp.value, scope),
         .int_lit => |lit| Value{ .integer = @bitCast(i64, lit.value) },
         .boolean => |bl| Value{ .boolean = bl.value },
-        .prefix => |pfx| try evalPrefix(pfx, scope),
-        .block_statement => |block| try evalBlock(block, scope),
-        .if_expression => |if_exp| try evalIf(if_exp, scope),
-        .infix => |ifx| try evalInfix(ifx, scope),
+        .prefix => |pfx| evalPrefix(pfx, scope),
+        .block_statement => |block| evalBlock(block, scope),
+        .if_expression => |if_exp| evalIf(if_exp, scope),
+        .infix => |ifx| evalInfix(ifx, scope),
         ._return => |ret| Value{ ._return = &(try eval(ret.value, scope)) },
-        .identifier => |id| try evalIdentifier(id, scope),
+        .identifier => |id| evalIdentifier(id, scope),
         .func_lit => |func| Value{
             .function = .{
                 .params = func.params,
@@ -48,7 +48,7 @@ pub fn eval(node: Node, scope: *Scope) EvalError!Value {
             const func = try eval(call.function, scope);
 
             const args = try evalArguments(call.arguments, scope);
-            return try callFunction(func, args);
+            return callFunction(func, args);
         },
         .string_lit => |string| Value{ .string = string.value },
         .array => |array| {
@@ -57,7 +57,8 @@ pub fn eval(node: Node, scope: *Scope) EvalError!Value {
             var list = Value.List.fromOwnedSlice(scope.allocator, elements);
             return Value{ .list = list };
         },
-        .index => |index| try evalIndex(index, scope),
+        .map => |map| evalMap(map, scope),
+        .index => |index| evalIndex(index, scope),
         else => {
             @import("std").debug.panic("TODO: Implement node: {}\n", .{@tagName(node)});
         },
@@ -258,9 +259,50 @@ fn evalIndex(node: *const Node.IndexExpression, scope: *Scope) EvalError!Value {
             return EvalError.OutOfBounds;
         }
         return list.items[@intCast(usize, pos)];
+    } else if (left == .map) {
+        const map: Value.Map = left.map;
+        if (map.get(index)) |val| {
+            return val;
+        }
+        return Value{ .nil = {} };
     } else {
         return EvalError.UnsupportedOperator;
     }
+}
+
+/// Evaluates a map literal and its internals. Also ensures the internal
+/// keys and values have the same type
+fn evalMap(node: *const Node.MapLiteral, scope: *Scope) EvalError!Value {
+    var map = Value.Map.init(scope.allocator);
+    var key_type: Value = undefined;
+
+    if (node.value.len == 0) return Value{ .map = map };
+
+    const first_pair = node.value[0].map_pair;
+    const key = try eval(first_pair.key, scope);
+    const value = try eval(first_pair.value, scope);
+
+    try map.put(key, value);
+
+    if (node.value.len == 1) return Value{ .map = map };
+
+    for (node.value[1..]) |n| {
+        const pair = n.map_pair;
+        const k = try eval(pair.key, scope);
+        const v = try eval(pair.value, scope);
+
+        if (std.meta.activeTag(key) != std.meta.activeTag(k)) {
+            return EvalError.MismatchingTypes;
+        }
+
+        if (std.meta.activeTag(value) != std.meta.activeTag(v)) {
+            return EvalError.MismatchingTypes;
+        }
+
+        try map.put(k, v);
+    }
+
+    return Value{ .map = map };
 }
 
 fn assertSameTypes(values: []Value) EvalError!void {

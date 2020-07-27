@@ -11,6 +11,7 @@ pub const Type = enum {
     _return,
     function,
     list,
+    map,
     builtin,
 };
 
@@ -27,6 +28,7 @@ pub const Value = union(Type) {
         scope: *Scope,
     },
     list: List,
+    map: Map,
     builtin: struct {
         func: builtinFn,
     },
@@ -43,11 +45,64 @@ pub const Value = union(Type) {
                 alloc.destroy(func);
             },
             .list => |list| list.deinit(),
+            .map => |map| map.deinit(),
             else => alloc.destroy(self),
         }
     }
 
+    fn hash(key: Value) u32 {
+        const hashFn = std.hash.autoHash;
+        var hasher = std.hash.Wyhash.init(0);
+
+        switch (key) {
+            .integer => |int| hashFn(&hasher, int),
+            .boolean => |boolean| hashFn(&hasher, boolean),
+            .string => |str| hasher.update(str),
+            .function => |func| {
+                hashFn(&hasher, func.params.len);
+                hashFn(&hasher, func);
+            },
+            .list => |list| {
+                hashFn(&hasher, list.items.len);
+                hashFn(&hasher, list.items.ptr);
+            },
+            .map => |map| {
+                hashFn(&hasher, map.items().len);
+                hashFn(&hasher, map.items().ptr);
+            },
+            .builtin => |builtin| hashFn(&hasher, builtin.func),
+            .nil => {},
+            else => unreachable,
+        }
+        return @truncate(u32, hasher.final());
+    }
+
+    fn eql(a: Value, b: Value) bool {
+        return switch (a) {
+            .integer => a.integer == b.integer,
+            .boolean => a.boolean == b.boolean,
+            .nil => true,
+            .string => std.mem.eql(u8, a.string, b.string),
+            .list => |list| {
+                if (list.items.len != b.list.items.len) return false;
+                for (list.items) |item, i| {
+                    if (!item.eql(b.list.items[i])) return false;
+                }
+                return true;
+            },
+            .map => |map| {
+                if (map.items().len != b.map.items().len) return false;
+                for (map.items()) |entry, i| {
+                    if (entry.hash != b.map.items()[i].hash) return false;
+                }
+                return true;
+            },
+            else => unreachable,
+        };
+    }
+
     pub const List = std.ArrayList(Value);
+    pub const Map = std.HashMap(Value, Value, hash, eql, true);
 
     pub const builtins = std.ComptimeStringMap(Value, .{
         .{ "len", len_func },
@@ -62,7 +117,7 @@ pub const Scope = struct {
     parent: ?*Scope = null,
     allocator: *std.mem.Allocator,
 
-    pub const Map = std.StringHashMap(Value);
+    const Map = std.StringHashMap(Value);
 
     pub fn init(allocator: *std.mem.Allocator) Scope {
         return Scope{ .store = Map.init(allocator), .allocator = allocator };
