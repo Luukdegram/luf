@@ -166,31 +166,32 @@ pub const Scope = struct {
     }
 };
 
-const builtinFn = fn (args: []Value) error{ OutOfMemory, UnsupportedType, MismatchingTypes }!*Value;
+const BuiltinError = error{ OutOfMemory, UnsupportedType, MismatchingTypes };
+const builtinFn = fn (args: []Value) BuiltinError!*Value;
 const len_func = Value{ .builtin = .{ .func = len } };
 const add_func = Value{ .builtin = .{ .func = add } };
 
 /// Returns the length of the `Value`.
 /// Supports strings, arrays and maps.
-fn len(args: []Value) !*Value {
+fn len(args: []Value) BuiltinError!*Value {
     std.debug.assert(args.len == 1);
     const length: i64 = switch (args[0]) {
         .string => |val| @intCast(i64, val.len),
         .list => |list| @intCast(i64, list.items.len),
         .map => |map| @intCast(i64, map.items().len),
-        else => return error.UnsupportedType,
+        else => return BuiltinError.UnsupportedType,
     };
     return &Value{ .integer = length };
 }
 
 /// Appends a new value to the list
-fn add(args: []Value) !*Value {
+fn add(args: []Value) BuiltinError!*Value {
     std.debug.assert(args.len >= 2);
     return switch (args[0]) {
         .list => |*list| {
             if (list.items.len > 0) {
                 if (list.items[0] != std.meta.activeTag(args[1])) {
-                    return error.MismatchingTypes;
+                    return BuiltinError.MismatchingTypes;
                 }
             }
             try list.append(args[1]);
@@ -200,15 +201,15 @@ fn add(args: []Value) !*Value {
             if (map.items().len > 0) {
                 const entry = map.items()[0];
                 if (entry.key != std.meta.activeTag(args[1])) {
-                    return error.MismatchingTypes;
+                    return BuiltinError.MismatchingTypes;
                 }
                 if (entry.value != std.meta.activeTag(args[2])) {
-                    return error.MismatchingTypes;
+                    return BuiltinError.MismatchingTypes;
                 }
             }
             try map.put(args[1], args[2]);
             return &args[0];
         },
-        else => error.UnsupportedType,
+        else => BuiltinError.UnsupportedType,
     };
 }
