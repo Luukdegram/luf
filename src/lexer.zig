@@ -3,6 +3,9 @@ const testing = std.testing;
 const token = @import("token.zig");
 const Token = token.Token;
 
+//! The `Lexer` parses the source code into Tokens.
+//! The definition of all tokens can be found in token.zig
+
 /// Lexer reads the source code and turns it into tokens
 pub const Lexer = struct {
     source: []const u8,

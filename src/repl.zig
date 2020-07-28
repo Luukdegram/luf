@@ -9,7 +9,7 @@ const prompt = ">> ";
 
 /// Runs the REPL, reads from the reader stream and outputs
 /// to the writer stream.
-pub fn run(allocator: *Allocator, reader: var, writer: var) !void {
+pub fn run(allocator: *Allocator, reader: anytype, writer: anytype) !void {
     try writer.writeAll("---------======= Luf REPL =======---------\n");
     while (true) {
         // write our prompt
@@ -32,7 +32,7 @@ pub fn run(allocator: *Allocator, reader: var, writer: var) !void {
 }
 
 /// Reads a line from the reader
-fn readLine(allocator: *Allocator, reader: var) ![]const u8 {
+fn readLine(allocator: *Allocator, reader: anytype) ![]const u8 {
     var buffer = std.ArrayList(u8).init(allocator);
     var char: u8 = try reader.readByte();
     while (char != '\n') : (char = try reader.readByte()) {

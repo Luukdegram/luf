@@ -8,6 +8,10 @@ const std = @import("std");
 const testing = std.testing;
 const assert = std.debug.assert;
 
+//! This contains all the functions required to evaluate
+//! a set of nodes into one or more Luf values
+
+/// Possible errors that can be triggered when evaluation one or multiple nodes
 pub const EvalError = error{
     UnsupportedOperator,
     TypeMismatch,

@@ -1,6 +1,10 @@
 const std = @import("std");
 const testing = std.testing;
 
+//! Contains what Luf sees as tokens
+//! This file solely contains the definitions of all tokens
+//! the parsing of the tokens can be found in the `Lexer`.
+
 /// Type Luf uses to define a token in the language
 pub const Token = struct {
     type: TokenType,

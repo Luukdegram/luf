@@ -8,6 +8,9 @@ const ast = @import("ast.zig");
 const Node = ast.Node;
 const Tree = ast.Tree;
 
+//! This is where the `Parser` will parse all tokens, which are
+//! parsed by the `Lexer`, into an AST tree. 
+
 /// Precendence represent the order of importance
 /// The higher the value, the earlier it will be executed
 /// This means a function call will be executed before a prefix,

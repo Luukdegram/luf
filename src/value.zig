@@ -2,6 +2,9 @@ const std = @import("std");
 const ast = @import("ast.zig");
 const Allocator = std.mem.Allocator;
 
+//! Value represents a Zig to Luf type
+//!
+
 /// Build in types supported by Luf
 pub const Type = enum {
     integer,
@@ -115,11 +118,11 @@ pub const Value = union(Type) {
 pub const Scope = struct {
     store: Map,
     parent: ?*Scope = null,
-    allocator: *std.mem.Allocator,
+    allocator: *Allocator,
 
     const Map = std.StringHashMap(Value);
 
-    pub fn init(allocator: *std.mem.Allocator) Scope {
+    pub fn init(allocator: *Allocator) Scope {
         return Scope{ .store = Map.init(allocator), .allocator = allocator };
     }
 

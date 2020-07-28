@@ -1,6 +1,9 @@
 const Allocator = @import("std").mem.Allocator;
 const Token = @import("token.zig").Token;
 
+//! All AST Nodes are defined here
+//! The `Parser` parses all of the `Lexer`'s tokens into these nodes
+
 /// Tree represents all parsed Nodes
 pub const Tree = struct {
     nodes: []Node,
