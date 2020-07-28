@@ -70,7 +70,7 @@ pub fn eval(node: Node, scope: *Scope) EvalError!Value {
 }
 
 /// Evaluates the nodes and returns the final Value
-pub fn evalNodes(nodes: []Node, scope: *Scope) EvalError!Value {
+pub fn evalNodes(nodes: []const Node, scope: *Scope) EvalError!Value {
     var value: Value = undefined;
     for (nodes) |node| {
         value = try eval(node, scope);
@@ -83,7 +83,7 @@ pub fn evalNodes(nodes: []Node, scope: *Scope) EvalError!Value {
     return value;
 }
 
-fn evalArguments(nodes: []Node, scope: *Scope) EvalError![]Value {
+fn evalArguments(nodes: []const Node, scope: *Scope) EvalError![]Value {
     var values = std.ArrayList(Value).init(scope.allocator);
     for (nodes) |node| {
         const res = try eval(node, scope);

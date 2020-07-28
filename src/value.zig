@@ -23,7 +23,7 @@ pub const Value = union(Type) {
     integer: i64,
     boolean: bool,
     string: []const u8,
-    nil: void,
+    nil,
     _return: *Value,
     function: struct {
         params: []ast.Node,

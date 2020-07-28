@@ -6,7 +6,7 @@ const Token = @import("token.zig").Token;
 
 /// Tree represents all parsed Nodes
 pub const Tree = struct {
-    nodes: []Node,
+    nodes: []const Node,
     tokens: []const Token,
     allocator: *Allocator,
 
