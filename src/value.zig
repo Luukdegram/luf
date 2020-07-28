@@ -177,6 +177,7 @@ fn len(args: []Value) !*Value {
     const length: i64 = switch (args[0]) {
         .string => |val| @intCast(i64, val.len),
         .list => |list| @intCast(i64, list.items.len),
+        .map => |map| @intCast(i64, map.items().len),
         else => return error.UnsupportedType,
     };
     return &Value{ .integer = length };
@@ -184,7 +185,7 @@ fn len(args: []Value) !*Value {
 
 /// Appends a new value to the list
 fn add(args: []Value) !*Value {
-    std.debug.assert(args.len == 2);
+    std.debug.assert(args.len >= 2);
     return switch (args[0]) {
         .list => |*list| {
             if (list.items.len > 0) {
@@ -193,6 +194,19 @@ fn add(args: []Value) !*Value {
                 }
             }
             try list.append(args[1]);
+            return &args[0];
+        },
+        .map => |*map| {
+            if (map.items().len > 0) {
+                const entry = map.items()[0];
+                if (entry.key != std.meta.activeTag(args[1])) {
+                    return error.MismatchingTypes;
+                }
+                if (entry.value != std.meta.activeTag(args[2])) {
+                    return error.MismatchingTypes;
+                }
+            }
+            try map.put(args[1], args[2]);
             return &args[0];
         },
         else => error.UnsupportedType,

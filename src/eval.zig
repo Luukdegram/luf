@@ -567,6 +567,8 @@ test "Builtins" {
         .{ .input = "const len = \"test\".len const x = len + 1", .expected = 5 },
         .{ .input = "const array = [1,2,3] const x = array.len", .expected = 3 },
         .{ .input = "mut array = [1, 2, 3] array.add(1) const x = array.len", .expected = 4 },
+        .{ .input = "const map = {\"foo\":1, \"bar\": 2} const x = map.len", .expected = 2 },
+        .{ .input = "mut map = {\"foo\":1} map.add(\"bar\", 2) const x = map.len", .expected = 2 },
     };
     inline for (test_cases) |case| {
         var arena = std.heap.ArenaAllocator.init(testing.allocator);
@@ -605,6 +607,41 @@ test "Array literal" {
 
 test "Array index" {
     const input = "[1, 2, 3][0]";
+
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    var lexer = Lexer.init(input);
+    var parser = try Parser.init(&arena.allocator, &lexer);
+    const tree = try parser.parse();
+    defer tree.deinit();
+    var scope = Scope.init(&arena.allocator);
+    defer scope.deinit();
+
+    const value = try evalNodes(tree.nodes, &scope);
+    testing.expect(value.integer == 1);
+}
+
+test "Map literal" {
+    const input = "const map = {\"foo\":1, \"bar\": 2}";
+
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    var lexer = Lexer.init(input);
+    var parser = try Parser.init(&arena.allocator, &lexer);
+    const tree = try parser.parse();
+    defer tree.deinit();
+    var scope = Scope.init(&arena.allocator);
+    defer scope.deinit();
+
+    const value = try evalNodes(tree.nodes, &scope);
+    const map = value.map;
+    testing.expect(map.items().len == 2);
+    testing.expect(map.get(Value{ .string = "foo" }).?.integer == 1);
+    testing.expect(map.get(Value{ .string = "bar" }).?.integer == 2);
+}
+
+test "Map index" {
+    const input = "const map = {\"foo\":1, \"bar\": 2} const x = map[\"foo\"]";
 
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
