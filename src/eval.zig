@@ -3,7 +3,7 @@ const Value = @import("value.zig").Value;
 const Type = @import("value.zig").Type;
 const Scope = @import("value.zig").Scope;
 const Lexer = @import("lexer.zig").Lexer;
-const Parser = @import("parser.zig").Parser;
+const parser = @import("parser.zig");
 const std = @import("std");
 const testing = std.testing;
 const assert = std.debug.assert;
@@ -338,10 +338,9 @@ test "Eval integer" {
     };
 
     inline for (test_cases) |case| {
-        var lexer = Lexer.init(case.input);
-        var parser = try Parser.init(testing.allocator, &lexer);
-        const tree = try parser.parse();
+        const tree = try parser.parse(testing.allocator, case.input);
         defer tree.deinit();
+
         var scope = Scope.init(testing.allocator);
         defer scope.deinit();
 
@@ -357,10 +356,9 @@ test "Eval boolean" {
     };
 
     inline for (test_cases) |case| {
-        var lexer = Lexer.init(case.input);
-        var parser = try Parser.init(testing.allocator, &lexer);
-        const tree = try parser.parse();
+        const tree = try parser.parse(testing.allocator, case.input);
         defer tree.deinit();
+
         var scope = Scope.init(testing.allocator);
         defer scope.deinit();
 
@@ -378,10 +376,9 @@ test "Eval bang" {
     };
 
     inline for (test_cases) |case| {
-        var lexer = Lexer.init(case.input);
-        var parser = try Parser.init(testing.allocator, &lexer);
-        const tree = try parser.parse();
+        const tree = try parser.parse(testing.allocator, case.input);
         defer tree.deinit();
+
         var scope = Scope.init(testing.allocator);
         defer scope.deinit();
 
@@ -402,10 +399,9 @@ test "Eval if else" {
     };
 
     inline for (test_cases) |case| {
-        var lexer = Lexer.init(case.input);
-        var parser = try Parser.init(testing.allocator, &lexer);
-        const tree = try parser.parse();
+        const tree = try parser.parse(testing.allocator, case.input);
         defer tree.deinit();
+
         var scope = Scope.init(testing.allocator);
         defer scope.deinit();
 
@@ -438,10 +434,9 @@ test "Eval return value" {
     };
 
     inline for (test_cases) |case| {
-        var lexer = Lexer.init(case.input);
-        var parser = try Parser.init(testing.allocator, &lexer);
-        const tree = try parser.parse();
+        const tree = try parser.parse(testing.allocator, case.input);
         defer tree.deinit();
+
         var scope = Scope.init(testing.allocator);
         defer scope.deinit();
 
@@ -459,10 +454,9 @@ test "Eval declaration" {
     };
 
     inline for (test_cases) |case| {
-        var lexer = Lexer.init(case.input);
-        var parser = try Parser.init(testing.allocator, &lexer);
-        const tree = try parser.parse();
+        const tree = try parser.parse(testing.allocator, case.input);
         defer tree.deinit();
+
         var scope = Scope.init(testing.allocator);
         defer scope.deinit();
 
@@ -473,9 +467,7 @@ test "Eval declaration" {
 
 test "Basic function" {
     const input = "fn(x) { x + 5 }";
-    var lexer = Lexer.init(input);
-    var parser = try Parser.init(testing.allocator, &lexer);
-    const tree = try parser.parse();
+    const tree = try parser.parse(testing.allocator, input);
     defer tree.deinit();
     var scope = Scope.init(testing.allocator);
     defer scope.deinit();
@@ -500,10 +492,9 @@ test "Function calling" {
         //wrap in an arena for now until we fix memory leak in function arguments
         var arena = std.heap.ArenaAllocator.init(testing.allocator);
         defer arena.deinit();
-        var lexer = Lexer.init(case.input);
-        var parser = try Parser.init(&arena.allocator, &lexer);
-        const tree = try parser.parse();
+        const tree = try parser.parse(&arena.allocator, case.input);
         defer tree.deinit();
+
         var scope = Scope.init(&arena.allocator);
         defer scope.deinit();
 
@@ -523,10 +514,9 @@ test "Closure" {
 
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
-    var lexer = Lexer.init(input);
-    var parser = try Parser.init(&arena.allocator, &lexer);
-    const tree = try parser.parse();
+    const tree = try parser.parse(&arena.allocator, input);
     defer tree.deinit();
+
     var scope = Scope.init(&arena.allocator);
     defer scope.deinit();
 
@@ -539,10 +529,9 @@ test "String literal" {
 
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
-    var lexer = Lexer.init(input);
-    var parser = try Parser.init(&arena.allocator, &lexer);
-    const tree = try parser.parse();
+    const tree = try parser.parse(&arena.allocator, input);
     defer tree.deinit();
+
     var scope = Scope.init(&arena.allocator);
     defer scope.deinit();
 
@@ -555,10 +544,9 @@ test "String concatenation" {
 
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
-    var lexer = Lexer.init(input);
-    var parser = try Parser.init(&arena.allocator, &lexer);
-    const tree = try parser.parse();
+    const tree = try parser.parse(&arena.allocator, input);
     defer tree.deinit();
+
     var scope = Scope.init(&arena.allocator);
     defer scope.deinit();
 
@@ -577,10 +565,9 @@ test "Builtins" {
     inline for (test_cases) |case| {
         var arena = std.heap.ArenaAllocator.init(testing.allocator);
         defer arena.deinit();
-        var lexer = Lexer.init(case.input);
-        var parser = try Parser.init(&arena.allocator, &lexer);
-        const tree = try parser.parse();
+        const tree = try parser.parse(&arena.allocator, case.input);
         defer tree.deinit();
+
         var scope = Scope.init(&arena.allocator);
         defer scope.deinit();
 
@@ -594,10 +581,9 @@ test "Array literal" {
 
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
-    var lexer = Lexer.init(input);
-    var parser = try Parser.init(&arena.allocator, &lexer);
-    const tree = try parser.parse();
+    const tree = try parser.parse(&arena.allocator, input);
     defer tree.deinit();
+
     var scope = Scope.init(&arena.allocator);
     defer scope.deinit();
 
@@ -614,10 +600,9 @@ test "Array index" {
 
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
-    var lexer = Lexer.init(input);
-    var parser = try Parser.init(&arena.allocator, &lexer);
-    const tree = try parser.parse();
+    const tree = try parser.parse(&arena.allocator, input);
     defer tree.deinit();
+
     var scope = Scope.init(&arena.allocator);
     defer scope.deinit();
 
@@ -630,9 +615,7 @@ test "Map literal" {
 
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
-    var lexer = Lexer.init(input);
-    var parser = try Parser.init(&arena.allocator, &lexer);
-    const tree = try parser.parse();
+    const tree = try parser.parse(&arena.allocator, input);
     defer tree.deinit();
     var scope = Scope.init(&arena.allocator);
     defer scope.deinit();
@@ -649,9 +632,7 @@ test "Map index" {
 
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
-    var lexer = Lexer.init(input);
-    var parser = try Parser.init(&arena.allocator, &lexer);
-    const tree = try parser.parse();
+    const tree = try parser.parse(&arena.allocator, input);
     defer tree.deinit();
     var scope = Scope.init(&arena.allocator);
     defer scope.deinit();

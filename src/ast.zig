@@ -1,4 +1,4 @@
-const Allocator = @import("std").mem.Allocator;
+const std = @import("std");
 const Token = @import("token.zig").Token;
 
 //! All AST Nodes are defined here
@@ -7,16 +7,13 @@ const Token = @import("token.zig").Token;
 /// Tree represents all parsed Nodes
 pub const Tree = struct {
     nodes: []const Node,
-    tokens: []const Token,
-    allocator: *Allocator,
+    arena: std.heap.ArenaAllocator.State,
+    allocator: *std.mem.Allocator,
 
     /// Frees all memory
-    pub fn deinit(self: Tree) void {
-        for (self.nodes) |node| {
-            node.deinit(self.allocator);
-        }
-        self.allocator.free(self.nodes);
-        self.allocator.free(self.tokens);
+    pub fn deinit(self: *Tree) void {
+        self.arena.promote(self.allocator).deinit();
+        self.allocator.destroy(self);
     }
 };
 
@@ -40,96 +37,6 @@ pub const Node = union(NodeType) {
     map: *MapLiteral,
     map_pair: *MapPair,
     index: *IndexExpression,
-
-    /// Frees memory of a node and all of its connected nodes.
-    /// Although this can be used to free memory recursively,
-    /// using an arena allocator will be much more performant.
-    pub fn deinit(self: Node, allocator: *Allocator) void {
-        switch (self) {
-            .declaration => |decl| {
-                decl.name.deinit(allocator);
-                decl.value.deinit(allocator);
-                allocator.destroy(decl);
-            },
-            .identifier => |id| allocator.destroy(id),
-            ._return => |ret| {
-                ret.value.deinit(allocator);
-                allocator.destroy(ret);
-            },
-            .prefix => |pref| {
-                pref.right.deinit(allocator);
-                allocator.destroy(pref);
-            },
-            .infix => |inf| {
-                inf.right.deinit(allocator);
-                inf.left.deinit(allocator);
-                allocator.destroy(inf);
-            },
-            .int_lit => |int| allocator.destroy(int),
-            .expression => |exp| {
-                exp.value.deinit(allocator);
-                allocator.destroy(exp);
-            },
-            .boolean => |boolean| allocator.destroy(boolean),
-            .block_statement => |blk| {
-                for (blk.nodes) |n| {
-                    n.deinit(allocator);
-                }
-                allocator.free(blk.nodes);
-                allocator.destroy(blk);
-            },
-            .if_expression => |if_exp| {
-                if_exp.condition.deinit(allocator);
-                if_exp.true_pong.deinit(allocator);
-                if (if_exp.false_pong) |pong| pong.deinit(allocator);
-                allocator.destroy(if_exp);
-            },
-            .func_lit => |fn_lit| {
-                for (fn_lit.params) |param| {
-                    param.deinit(allocator);
-                }
-                allocator.free(fn_lit.params);
-                fn_lit.body.deinit(allocator);
-                allocator.destroy(fn_lit);
-            },
-            .call_expression => |call_exp| {
-                call_exp.function.deinit(allocator);
-                for (call_exp.arguments) |arg| {
-                    arg.deinit(allocator);
-                }
-                allocator.free(call_exp.arguments);
-                allocator.destroy(call_exp);
-            },
-            .string_lit => |string| {
-                allocator.free(string.value);
-                allocator.destroy(string);
-            },
-            .array => |list| {
-                for (list.value) |val| {
-                    val.deinit(allocator);
-                }
-                allocator.free(list.value);
-                allocator.destroy(list);
-            },
-            .index => |index| {
-                index.left.deinit(allocator);
-                index.index.deinit(allocator);
-                allocator.destroy(index);
-            },
-            .map => |map| {
-                for (map.value) |pair| {
-                    pair.deinit(allocator);
-                }
-                allocator.free(map.value);
-                allocator.destroy(map);
-            },
-            .map_pair => |pair| {
-                pair.key.deinit(allocator);
-                pair.value.deinit(allocator);
-                allocator.destroy(pair);
-            },
-        }
-    }
 
     /// Possible Nodes which are supported
     pub const NodeType = enum {
