@@ -1,5 +1,6 @@
 const std = @import("std");
 const Token = @import("token.zig").Token;
+const Errors = @import("error.zig").Errors;
 
 //! All AST Nodes are defined here
 //! The `Parser` parses all of the `Lexer`'s tokens into these nodes
@@ -9,6 +10,7 @@ pub const Tree = struct {
     nodes: []const Node,
     arena: std.heap.ArenaAllocator.State,
     allocator: *std.mem.Allocator,
+    errors: Errors,
 
     /// Frees all memory
     pub fn deinit(self: *Tree) void {

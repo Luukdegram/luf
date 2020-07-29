@@ -8,6 +8,7 @@ const Token = @import("token.zig").Token;
 const ast = @import("ast.zig");
 const Node = ast.Node;
 const Tree = ast.Tree;
+const Errors = @import("error.zig").Errors;
 
 //! This is where the `Parser` will parse all tokens, which are
 //! parsed by the `Lexer`, into an AST tree.
@@ -47,11 +48,14 @@ fn findPrecedence(token_type: Token.TokenType) Precedence {
 }
 
 /// Parses source code into an AST tree
-pub fn parse(allocator: *Allocator, source: []const u8) !*Tree {
+pub fn parse(allocator: *Allocator, source: []const u8) Parser.Error!*Tree {
     var lexer = Lexer.init(source);
 
     var arena = std.heap.ArenaAllocator.init(allocator);
     errdefer arena.deinit();
+
+    // TODO extend its lifetime by allocating it and possibly pass around other areas
+    var errors = Errors.init(allocator);
 
     var parser = Parser{
         .current_token = lexer.next(),
@@ -59,6 +63,7 @@ pub fn parse(allocator: *Allocator, source: []const u8) !*Tree {
         .allocator = &arena.allocator,
         .lexer = &lexer,
         .source = source,
+        .errors = errors,
     };
 
     var nodes = ArrayList(Node).init(parser.allocator);
@@ -72,6 +77,7 @@ pub fn parse(allocator: *Allocator, source: []const u8) !*Tree {
         .nodes = nodes.toOwnedSlice(),
         .arena = arena.state,
         .allocator = allocator,
+        .errors = errors,
     };
 
     return tree;
@@ -85,17 +91,26 @@ pub const Parser = struct {
     allocator: *Allocator,
     lexer: *Lexer,
     source: []const u8,
+    errors: Errors,
 
-    pub const Error = error{ ParserError, MissingClosingBracket } ||
-        std.mem.Allocator.Error ||
-        std.fmt.ParseIntError;
+    pub const Error = error{
+        ParserError,
+        OutOfMemory,
+        Overflow,
+        InvalidCharacter,
+    };
+
+    /// Returns `Error.ParserError` and appends an error message to the `errors` list.
+    fn fail(self: *Parser, msg: []const u8) Error {
+        try self.errors.add(msg, self.current_token.start, .err);
+        return Error.ParserError;
+    }
 
     /// Sets the current token to the peek token and retrieves a new
     /// token from the Lexer and sets its value to the peak token.
     fn next(self: *Parser) void {
         self.current_token = self.peek_token;
         self.peek_token = self.lexer.next();
-        //self.index += 1;
     }
 
     /// Parses the statement into a node
@@ -112,13 +127,13 @@ pub const Parser = struct {
         const tmp_token = self.current_token;
 
         if (!self.expectPeek(.identifier)) {
-            return error.ParserError;
+            return self.fail("Expected identifier but found {}");
         }
 
         const name = try self.parseIdentifier();
 
         if (!self.expectPeek(.assign)) {
-            return error.ParserError;
+            return self.fail("Expected token = but found {}");
         }
 
         self.next();
@@ -491,7 +506,7 @@ pub const Parser = struct {
         index.index = try self.parseExpression(.lowest);
 
         if (token.type != .period and !self.expectPeek(.right_bracket)) {
-            return error.MissingClosingBracket;
+            return self.fail("Expected } but found {}");
         }
 
         return Node{ .index = index };

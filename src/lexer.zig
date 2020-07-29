@@ -82,7 +82,8 @@ pub const Lexer = struct {
         };
     }
 
-    /// Tokenizes all tokens found in the input source
+    /// Tokenizes all tokens found in the input source and returns a list of tokens.
+    /// Memory is owned by the caller.
     pub fn tokenize(self: *Lexer, allocator: *std.mem.Allocator) ![]const Token {
         var token_list = std.ArrayList(Token).init(allocator);
         while (true) {
@@ -101,7 +102,7 @@ pub const Lexer = struct {
         self.read_position += 1;
     }
 
-    /// Returns the character but does not increase the position
+    /// Returns the next character but does not increase the Lexer's position
     fn peekChar(self: Lexer) u8 {
         return if (self.read_position >= self.source.len)
             0
@@ -109,7 +110,7 @@ pub const Lexer = struct {
             self.source[self.read_position];
     }
 
-    /// Skips whitespace until a character is found
+    /// Skips whitespace until a non-whitespace character is found
     fn skipWhitespace(self: *Lexer) void {
         while (isWhitespace(self.char)) {
             self.readChar();
