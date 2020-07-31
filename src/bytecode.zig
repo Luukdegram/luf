@@ -3,7 +3,8 @@ const testing = std.testing;
 
 /// Opcode for the virtual machine
 pub const Opcode = enum(u8) {
-    load_const
+    load_const,
+    add,
 };
 
 /// Instruction contains the opcode and its data using native endian
@@ -30,6 +31,11 @@ test "generate instruction" {
             .op = Opcode.load_const,
             .operand = @as(u16, 65534),
             .expected = &[_]u8{ 254, 255 },
+        },
+        .{
+            .op = Opcode.add,
+            .operand = null,
+            .expected = &[_]u8{},
         },
     };
 

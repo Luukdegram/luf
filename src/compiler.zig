@@ -82,6 +82,10 @@ pub const Compiler = struct {
             .infix => |inf| {
                 try self.compile(inf.left);
                 try self.compile(inf.right);
+                switch (inf.operator) {
+                    .add => _ = try self.emit(.add, null),
+                    else => return Error.CompilerError,
+                }
             },
             .int_lit => |int| {
                 const val: Value = .{ .integer = @bitCast(i64, int.value) };
@@ -97,7 +101,7 @@ test "Compile integers" {
         .{
             .input = "1 + 2",
             .consts = &[_]i64{ 1, 2 },
-            .opcodes = &[_]bytecode.Opcode{ .load_const, .load_const },
+            .opcodes = &[_]bytecode.Opcode{ .load_const, .load_const, .add },
         },
     };
 

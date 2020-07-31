@@ -4,6 +4,9 @@ const ByteCode = compiler.Compiler.ByteCode;
 const Value = @import("value.zig").Value;
 const testing = std.testing;
 
+//! The Virtual Machine of Luf is stack-based.
+//! Currently the stack has a size of 2048 (pre-allocated)
+
 pub fn run(byte_code: ByteCode) Vm.Error!Vm {
     var vm = Vm{};
 
@@ -14,6 +17,13 @@ pub fn run(byte_code: ByteCode) Vm.Error!Vm {
             .load_const => {
                 const index = std.mem.bytesToValue(u16, inst.data[0..2]);
                 try vm.push(byte_code.constants[index]);
+            },
+            .add => {
+                const left = vm.pop().?;
+                const right = vm.pop().?;
+
+                const result = left.integer + right.integer;
+                try vm.push(.{ .integer = result });
             },
             else => std.debug.panic("TODO Implement operator: {}", .{inst.op}),
         }
@@ -47,7 +57,7 @@ pub const Vm = struct {
     /// pointer by 1. Returns null if stack is empty.
     fn pop(self: *Vm) ?Value {
         if (self.sp == 0) return null;
-
+        defer self.sp -= 1;
         return self.stack[self.sp - 1];
     }
 };
