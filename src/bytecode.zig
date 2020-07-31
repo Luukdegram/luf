@@ -12,6 +12,10 @@ pub const Opcode = enum(u8) {
     sub,
     mul,
     div,
+    equal,
+    not_equal,
+    greater_than,
+    less_than,
 
     // specifically removes a value from the stack
     pop,
@@ -19,7 +23,9 @@ pub const Opcode = enum(u8) {
 
 /// Instruction contains the opcode and its data using native endian
 pub const Instruction = struct {
+    /// Opcode for the instruction
     op: Opcode,
+    /// Points to index of constant value
     ptr: u16,
 };
 

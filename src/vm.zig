@@ -18,6 +18,7 @@ pub fn run(code: ByteCode) Vm.Error!Vm {
             .load_const => {
                 try vm.push(code.constants[inst.ptr]);
             },
+            .equal, .not_equal, .less_than, .greater_than => try vm.analCmp(inst.op),
             .add, .sub, .mul, .div => try vm.analBinOp(inst.op),
             .pop => _ = vm.pop(),
             .load_true => try vm.push(.{ .boolean = true }),
@@ -87,6 +88,37 @@ pub const Vm = struct {
 
         return self.push(.{ .integer = result });
     }
+
+    /// Analyzes a then executes a comparison and pushes the return value on the stack
+    fn analCmp(self: *Vm, op: byte_code.Opcode) Error!void {
+        // right is on the top of left, therefore we pop it first
+        const right = self.pop() orelse return Error.MissingValue;
+        const left = self.pop() orelse return Error.MissingValue;
+
+        if (std.meta.activeTag(left) == std.meta.activeTag(right) and left == .integer) {
+            return self.analIntCmp(op, left.integer, right.integer);
+        }
+
+        // for now just assume it's a boolean
+        switch (op) {
+            .equal => try self.push(.{ .boolean = left.boolean == right.boolean }),
+            .not_equal => try self.push(.{ .boolean = left.boolean != right.boolean }),
+            else => return Error.InvalidOperator,
+        }
+    }
+
+    /// Analyzes and compares 2 integers depending on the given operator
+    fn analIntCmp(self: *Vm, op: byte_code.Opcode, left: i64, right: i64) Error!void {
+        const boolean = switch (op) {
+            .equal => left == right,
+            .not_equal => left != right,
+            .greater_than => left > right,
+            .less_than => left < right,
+            else => return Error.InvalidOperator,
+        };
+
+        return self.push(.{ .boolean = boolean });
+    }
 };
 
 test "Integer arithmetic" {
@@ -111,6 +143,11 @@ test "Boolean" {
     const test_cases = .{
         .{ .input = "true", .expected = true },
         .{ .input = "false", .expected = false },
+        .{ .input = "1 < 2", .expected = true },
+        .{ .input = "1 > 2", .expected = false },
+        .{ .input = "1 == 1", .expected = true },
+        .{ .input = "1 != 1", .expected = false },
+        .{ .input = "true != true", .expected = false },
     };
 
     inline for (test_cases) |case| {

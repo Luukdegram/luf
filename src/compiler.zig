@@ -97,6 +97,10 @@ pub const Compiler = struct {
                     .multiply => _ = try self.emit(.mul),
                     .sub => _ = try self.emit(.sub),
                     .divide => _ = try self.emit(.div),
+                    .less_than => _ = try self.emit(.less_than),
+                    .greater_than => _ = try self.emit(.greater_than),
+                    .equal => _ = try self.emit(.equal),
+                    .not_equal => _ = try self.emit(.not_equal),
                     else => return Error.CompilerError,
                 }
             },
@@ -110,7 +114,7 @@ pub const Compiler = struct {
     }
 };
 
-test "Compile integers" {
+test "Compile AST to bytecode" {
     const test_cases = .{
         .{
             .input = "1 + 2",
@@ -136,6 +140,31 @@ test "Compile integers" {
             .input = "true",
             .consts = &[_]i64{},
             .opcodes = &[_]bytecode.Opcode{ .load_true, .pop },
+        },
+        .{
+            .input = "1 > 2",
+            .consts = &[_]i64{ 1, 2 },
+            .opcodes = &[_]bytecode.Opcode{ .load_const, .load_const, .greater_than, .pop },
+        },
+        .{
+            .input = "1 < 2",
+            .consts = &[_]i64{ 1, 2 },
+            .opcodes = &[_]bytecode.Opcode{ .load_const, .load_const, .less_than, .pop },
+        },
+        .{
+            .input = "1 == 2",
+            .consts = &[_]i64{ 1, 2 },
+            .opcodes = &[_]bytecode.Opcode{ .load_const, .load_const, .equal, .pop },
+        },
+        .{
+            .input = "1 != 2",
+            .consts = &[_]i64{ 1, 2 },
+            .opcodes = &[_]bytecode.Opcode{ .load_const, .load_const, .not_equal, .pop },
+        },
+        .{
+            .input = "true == false",
+            .consts = &[_]i64{},
+            .opcodes = &[_]bytecode.Opcode{ .load_true, .load_false, .equal, .pop },
         },
     };
 

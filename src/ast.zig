@@ -149,7 +149,6 @@ pub const Node = union(NodeType) {
             greater_than,
             equal,
             not_equal,
-            member,
 
             /// Returns the corresponding `Op` based on the given `Token`
             pub fn fromToken(token: Token) Op {
@@ -163,7 +162,6 @@ pub const Node = union(NodeType) {
                     .greater_than => .greater_than,
                     .equal => .equal,
                     .not_equal => .not_equal,
-                    .period => .member,
                     else => @panic("Unexpected token"),
                 };
             }
