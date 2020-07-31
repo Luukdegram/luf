@@ -23,6 +23,8 @@ pub fn run(code: ByteCode) Vm.Error!Vm {
             .pop => _ = vm.pop(),
             .load_true => try vm.push(.{ .boolean = true }),
             .load_false => try vm.push(.{ .boolean = false }),
+            .minus => try vm.analNegation(),
+            .bang => try vm.analBang(),
             else => std.debug.panic("TODO Implement operator: {}", .{inst.op}),
         }
     }
@@ -119,6 +121,24 @@ pub const Vm = struct {
 
         return self.push(.{ .boolean = boolean });
     }
+
+    /// Analyzes and executes a negation
+    fn analNegation(self: *Vm) Error!void {
+        const right = self.pop() orelse return Error.MissingValue;
+        if (right != .integer) return Error.InvalidOperator;
+
+        return self.push(.{ .integer = -right.integer });
+    }
+    /// Analyzes and executes the '!' operator
+    fn analBang(self: *Vm) Error!void {
+        const right = self.pop() orelse return Error.MissingValue;
+
+        const val = switch (right) {
+            .boolean => !right.boolean,
+            else => false,
+        };
+        return self.push(.{ .boolean = val });
+    }
 };
 
 test "Integer arithmetic" {
@@ -129,6 +149,8 @@ test "Integer arithmetic" {
         .{ .input = "1 * 3", .expected = 3 },
         .{ .input = "1 - 3", .expected = -2 },
         .{ .input = "10 / 2", .expected = 5 },
+        .{ .input = "-2", .expected = -2 },
+        .{ .input = "(5 + 10 * 2 + 15 / 3) * 2 + -10", .expected = 50 },
     };
 
     inline for (test_cases) |case| {
@@ -148,6 +170,7 @@ test "Boolean" {
         .{ .input = "1 == 1", .expected = true },
         .{ .input = "1 != 1", .expected = false },
         .{ .input = "true != true", .expected = false },
+        .{ .input = "!true", .expected = false },
     };
 
     inline for (test_cases) |case| {

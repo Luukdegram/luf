@@ -101,7 +101,14 @@ pub const Compiler = struct {
                     .greater_than => _ = try self.emit(.greater_than),
                     .equal => _ = try self.emit(.equal),
                     .not_equal => _ = try self.emit(.not_equal),
-                    else => return Error.CompilerError,
+                    .assign => return Error.CompilerError,
+                }
+            },
+            .prefix => |pfx| {
+                try self.compile(pfx.right);
+                switch (pfx.operator) {
+                    .minus => _ = try self.emit(.minus),
+                    .bang => _ = try self.emit(.bang),
                 }
             },
             .boolean => |boolean| _ = try self.emit(if (boolean.value) .load_true else .load_false),
@@ -165,6 +172,16 @@ test "Compile AST to bytecode" {
             .input = "true == false",
             .consts = &[_]i64{},
             .opcodes = &[_]bytecode.Opcode{ .load_true, .load_false, .equal, .pop },
+        },
+        .{
+            .input = "-1",
+            .consts = &[_]i64{1},
+            .opcodes = &[_]bytecode.Opcode{ .load_const, .minus, .pop },
+        },
+        .{
+            .input = "!true",
+            .consts = &[_]i64{},
+            .opcodes = &[_]bytecode.Opcode{ .load_true, .bang, .pop },
         },
     };
 

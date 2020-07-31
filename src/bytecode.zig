@@ -16,6 +16,8 @@ pub const Opcode = enum(u8) {
     not_equal,
     greater_than,
     less_than,
+    minus,
+    bang,
 
     // specifically removes a value from the stack
     pop,
@@ -40,29 +42,3 @@ pub fn gen(op: Opcode, operand: ?u16) Instruction {
 
 /// List of instructions
 pub const Instructions = std.ArrayList(Instruction);
-
-test "generate instruction" {
-    const test_cases = .{
-        .{
-            .op = Opcode.load_const,
-            .operand = @as(u16, 65534),
-            .expected = 65534,
-        },
-        .{
-            .op = Opcode.add,
-            .operand = null,
-            .expected = 0,
-        },
-        .{
-            .op = Opcode.load_false,
-            .operand = null,
-            .expected = 0,
-        },
-    };
-
-    inline for (test_cases) |case| {
-        const inst = gen(case.op, case.operand);
-        testing.expect(case.op == inst.op);
-        testing.expectEqual(@as(u16, case.expected), inst.ptr);
-    }
-}
