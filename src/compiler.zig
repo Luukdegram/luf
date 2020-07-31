@@ -100,6 +100,7 @@ pub const Compiler = struct {
                     else => return Error.CompilerError,
                 }
             },
+            .boolean => |boolean| _ = try self.emit(if (boolean.value) .load_true else .load_false),
             .int_lit => |int| {
                 const val: Value = .{ .integer = @bitCast(i64, int.value) };
                 _ = try self.emitOp(.load_const, try self.addConstant(val));
@@ -130,6 +131,11 @@ test "Compile integers" {
             .input = "2 / 2",
             .consts = &[_]i64{ 2, 2 },
             .opcodes = &[_]bytecode.Opcode{ .load_const, .load_const, .div, .pop },
+        },
+        .{
+            .input = "true",
+            .consts = &[_]i64{},
+            .opcodes = &[_]bytecode.Opcode{ .load_true, .pop },
         },
     };
 

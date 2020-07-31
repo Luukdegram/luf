@@ -20,6 +20,8 @@ pub fn run(code: ByteCode) Vm.Error!Vm {
             },
             .add, .sub, .mul, .div => try vm.analBinOp(inst.op),
             .pop => _ = vm.pop(),
+            .load_true => try vm.push(.{ .boolean = true }),
+            .load_false => try vm.push(.{ .boolean = false }),
             else => std.debug.panic("TODO Implement operator: {}", .{inst.op}),
         }
     }
@@ -102,5 +104,19 @@ test "Integer arithmetic" {
         defer code.deinit();
         var vm = try run(code);
         testing.expect(case.expected == vm.popped().integer);
+    }
+}
+
+test "Boolean" {
+    const test_cases = .{
+        .{ .input = "true", .expected = true },
+        .{ .input = "false", .expected = false },
+    };
+
+    inline for (test_cases) |case| {
+        const code = try compiler.compile(testing.allocator, case.input);
+        defer code.deinit();
+        var vm = try run(code);
+        testing.expect(case.expected == vm.popped().boolean);
     }
 }

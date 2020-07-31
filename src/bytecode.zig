@@ -4,6 +4,8 @@ const testing = std.testing;
 /// Opcode for the virtual machine
 pub const Opcode = enum(u8) {
     load_const,
+    load_true,
+    load_false,
 
     //bin ops
     add,
@@ -42,6 +44,11 @@ test "generate instruction" {
         },
         .{
             .op = Opcode.add,
+            .operand = null,
+            .expected = 0,
+        },
+        .{
+            .op = Opcode.load_false,
             .operand = null,
             .expected = 0,
         },
