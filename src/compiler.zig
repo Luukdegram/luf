@@ -70,7 +70,14 @@ pub const Compiler = struct {
     }
 
     /// Appends a new instruction to the compiler and returns the current position
-    fn emit(self: *Compiler, op: bytecode.Opcode, operand: ?u16) !u16 {
+    fn emit(self: *Compiler, op: bytecode.Opcode) !u16 {
+        const pos = @truncate(u16, self.instructions.items.len);
+        try self.instructions.append(bytecode.gen(op, null));
+        return pos;
+    }
+
+    /// Appends a new instruction and saves the operand as bytes and returns the current position
+    fn emitOp(self: *Compiler, op: bytecode.Opcode, operand: u16) !u16 {
         const pos = @truncate(u16, self.instructions.items.len);
         try self.instructions.append(bytecode.gen(op, operand));
         return pos;
@@ -78,18 +85,24 @@ pub const Compiler = struct {
 
     fn compile(self: *Compiler, node: ast.Node) Error!void {
         switch (node) {
-            .expression => |exp| try self.compile(exp.value),
+            .expression => |exp| {
+                try self.compile(exp.value);
+                _ = try self.emit(.pop);
+            },
             .infix => |inf| {
                 try self.compile(inf.left);
                 try self.compile(inf.right);
                 switch (inf.operator) {
-                    .add => _ = try self.emit(.add, null),
+                    .add => _ = try self.emit(.add),
+                    .multiply => _ = try self.emit(.mul),
+                    .sub => _ = try self.emit(.sub),
+                    .divide => _ = try self.emit(.div),
                     else => return Error.CompilerError,
                 }
             },
             .int_lit => |int| {
                 const val: Value = .{ .integer = @bitCast(i64, int.value) };
-                _ = try self.emit(.load_const, try self.addConstant(val));
+                _ = try self.emitOp(.load_const, try self.addConstant(val));
             },
             else => return Error.CompilerError,
         }
@@ -101,7 +114,22 @@ test "Compile integers" {
         .{
             .input = "1 + 2",
             .consts = &[_]i64{ 1, 2 },
-            .opcodes = &[_]bytecode.Opcode{ .load_const, .load_const, .add },
+            .opcodes = &[_]bytecode.Opcode{ .load_const, .load_const, .add, .pop },
+        },
+        .{
+            .input = "3 - 1",
+            .consts = &[_]i64{ 3, 1 },
+            .opcodes = &[_]bytecode.Opcode{ .load_const, .load_const, .sub, .pop },
+        },
+        .{
+            .input = "1 * 2",
+            .consts = &[_]i64{ 1, 2 },
+            .opcodes = &[_]bytecode.Opcode{ .load_const, .load_const, .mul, .pop },
+        },
+        .{
+            .input = "2 / 2",
+            .consts = &[_]i64{ 2, 2 },
+            .opcodes = &[_]bytecode.Opcode{ .load_const, .load_const, .div, .pop },
         },
     };
 
