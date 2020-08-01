@@ -20,12 +20,20 @@ pub fn compile(
     const tree = try parser.parse(allocator, source);
     defer tree.deinit();
 
+    var root_scope = Compiler.Scope{
+        .symbols = Compiler.SymbolTable.init(allocator),
+        .id = .root,
+        .allocator = allocator,
+    };
+    defer root_scope.symbols.deinit();
+
     var compiler = Compiler{
         .instructions = bytecode.Instructions.init(allocator),
         .constants = Values.init(allocator),
         .allocator = allocator,
         .last_inst = undefined,
         .prev_inst = undefined,
+        .scope = &root_scope,
     };
 
     for (tree.nodes) |node| {
@@ -51,6 +59,60 @@ pub const Compiler = struct {
 
     last_inst: EmitInst,
     prev_inst: EmitInst,
+
+    scope: *Scope,
+
+    /// Symbols known by the compiler
+    const Symbol = struct {
+        name: []const u8,
+        /// Not mutable by default
+        mutable: bool = false,
+        /// Index of symbol table
+        index: u16 = 0,
+    };
+
+    /// Hashmap of `Symbol` where the key is the Symnbol's name
+    const SymbolTable = std.StringHashMap(Symbol);
+
+    /// Scope of the current state (function, root, etc)
+    const Scope = struct {
+        symbols: SymbolTable,
+        id: enum {
+            root,
+            function,
+        },
+        parent: ?*Scope = null,
+        allocator: *Allocator,
+
+        /// Creates a new `Scope` from the current Scope.
+        /// The new Scope will have its parent set to the current Scope
+        fn fork(self: Scope, id: Scope.id) !*Scope {
+            const fork = try self.allocator.create(Scope);
+            fork.* = .{
+                .symbols = SymbolTable.init(self.allocator),
+                .id = id,
+                .parent = &self,
+                .allocator = self.allocator,
+            };
+            return fork;
+        }
+
+        /// Defines a new symbol and saves it in the symbol table
+        fn define(self: *Scope, name: []const u8, mutable: bool) !Symbol {
+            const symbol = Symbol{
+                .name = name,
+                .mutable = mutable,
+                .index = @truncate(u16, self.symbols.items().len),
+            };
+            try self.symbols.put(name, symbol);
+            return symbol;
+        }
+
+        /// Retrieves a `Symbol` from the Scopes symbol table, returns null if not found
+        fn resolve(self: *Scope, name: []const u8) ?Symbol {
+            return self.symbols.get(name);
+        }
+    };
 
     /// Instruction that has already been emitted.
     /// This is used to generate a new instruction if it needs to be reapplied
@@ -182,6 +244,15 @@ pub const Compiler = struct {
                 const len = self.instructions.items.len;
                 self.instructions.items[jump_pos].ptr = @truncate(u16, len);
             },
+            .declaration => |decl| {
+                try self.compile(decl.value);
+                const symbol = try self.scope.define(decl.name.identifier.value, decl.mutable);
+                _ = try self.emitOp(.bind_global, symbol.index);
+            },
+            .identifier => |id| if (self.scope.resolve(id.value)) |symbol| {
+                _ = try self.emitOp(.load_global, symbol.index);
+            } else return Error.CompilerError,
+
             else => return Error.CompilerError,
         }
     }

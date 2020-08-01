@@ -3,10 +3,13 @@ const testing = std.testing;
 
 /// Opcode for the virtual machine
 pub const Opcode = enum(u8) {
+    // general ops
     load_const,
     load_true,
     load_false,
     load_nil,
+    load_global,
+    bind_global,
     jump_false,
     jump,
 
@@ -22,7 +25,7 @@ pub const Opcode = enum(u8) {
     minus,
     bang,
 
-    // specifically removes a value from the stack
+    /// specifically removes a value from the stack
     pop,
 };
 

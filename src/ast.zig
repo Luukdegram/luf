@@ -98,6 +98,7 @@ pub const Node = union(NodeType) {
         token: Token,
         name: Node,
         value: Node,
+        mutable: bool = false,
     };
 
     /// Identifier node -> x

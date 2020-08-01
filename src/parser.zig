@@ -143,6 +143,7 @@ pub const Parser = struct {
             .token = tmp_token,
             .name = name,
             .value = try self.parseExpression(.lowest),
+            .mutable = tmp_token.type == .mutable,
         };
 
         return Node{ .declaration = decl };
@@ -541,21 +542,19 @@ test "Parse Delcaration" {
     ;
 
     var allocator = testing.allocator;
-    const tree = try parse(allocator, input);
-    defer tree.deinit();
-
-    testing.expect(tree.nodes.len == 3);
-
-    const identifiers = &[_][]const u8{
-        "x", "y", "z",
+    const test_cases = .{
+        .{ .input = "const x = 5", .id = "x", .expected = 5, .mutable = false },
+        .{ .input = "mut y = 50", .id = "y", .expected = 50, .mutable = true },
+        .{ .input = "mut x = 2 const y = 5", .id = "y", .expected = 5, .mutable = false },
     };
 
-    var index: usize = 0;
-    for (tree.nodes) |node| {
-        const id = identifiers[index];
-        index += 1;
-
-        testing.expectEqualSlices(u8, id, node.declaration.name.identifier.value);
+    inline for (test_cases) |case| {
+        const tree = try parse(allocator, case.input);
+        defer tree.deinit();
+        const node = tree.nodes[tree.nodes.len - 1].declaration;
+        testing.expectEqualSlices(u8, case.id, node.name.identifier.value);
+        testing.expect(case.expected == node.value.int_lit.value);
+        testing.expect(case.mutable == node.mutable);
     }
 }
 

@@ -4,37 +4,20 @@ const ByteCode = compiler.Compiler.ByteCode;
 const byte_code = @import("bytecode.zig");
 const Value = @import("value.zig").Value;
 const testing = std.testing;
+const Allocator = std.mem.Allocator;
 
 //! The Virtual Machine of Luf is stack-based.
 //! Currently the stack has a size of 2048 (pre-allocated)
 
-pub fn run(code: ByteCode) Vm.Error!Vm {
-    var vm = Vm{};
-
-    // instruction pointer
-    var ip: usize = 0;
-    while (ip < code.instructions.len) : (ip += 1) {
-        const inst = code.instructions[ip];
-
-        switch (inst.op) {
-            .load_const => try vm.push(code.constants[inst.ptr]),
-            .equal, .not_equal, .less_than, .greater_than => try vm.analCmp(inst.op),
-            .add, .sub, .mul, .div => try vm.analBinOp(inst.op),
-            .pop => _ = vm.pop(),
-            .load_true => try vm.push(Value.True),
-            .load_false => try vm.push(Value.False),
-            .minus => try vm.analNegation(),
-            .bang => try vm.analBang(),
-            .load_nil => try vm.push(Value.Nil),
-            .jump => ip = inst.ptr - 1,
-            .jump_false => {
-                const condition = vm.pop().?;
-                if (!isTrue(condition)) ip = inst.ptr - 1;
-            },
-            else => std.debug.panic("TODO Implement operator: {}", .{inst.op}),
-        }
-    }
-
+/// Creates a new Virtual Machine on the stack, runs the given `ByteCode`
+/// and finally returns the `Vm`. Use deinit() to free its memory.
+pub fn run(code: ByteCode, allocator: *Allocator) Vm.Error!*Vm {
+    const vm = try allocator.create(Vm);
+    vm.* = .{
+        .globals = Value.List.init(allocator),
+        .allocator = allocator,
+    };
+    try vm.run(code);
     return vm;
 }
 
@@ -42,13 +25,52 @@ pub fn run(code: ByteCode) Vm.Error!Vm {
 /// Although a register-based VM is more performant,
 /// a stack-based one is more understandable
 pub const Vm = struct {
-    /// Stack pointer holds the current stack position
+    /// Stack pointer points to the next value
     sp: usize = 0,
     /// Stack has a max of 2048 Value's that it can hold
     /// This is pre-allocated.
     stack: [2048]Value = undefined,
+    /// Globals that live inside the VM
+    /// Currently allows 65536 Values
+    globals: Value.List,
+    allocator: *Allocator,
 
     pub const Error = error{ OutOfMemory, MissingValue, InvalidOperator };
+
+    /// Frees the Virtual Machine's memory
+    pub fn deinit(self: *Vm) void {
+        self.globals.deinit();
+        self.allocator.destroy(self);
+    }
+
+    /// Runs the given `ByteCode` on the Virtual Machine
+    pub fn run(self: *Vm, code: ByteCode) Error!void {
+        // instruction pointer
+        var ip: usize = 0;
+        while (ip < code.instructions.len) : (ip += 1) {
+            const inst = code.instructions[ip];
+
+            switch (inst.op) {
+                .load_const => try self.push(code.constants[inst.ptr]),
+                .equal, .not_equal, .less_than, .greater_than => try self.analCmp(inst.op),
+                .add, .sub, .mul, .div => try self.analBinOp(inst.op),
+                .pop => _ = self.pop(),
+                .load_true => try self.push(Value.True),
+                .load_false => try self.push(Value.False),
+                .minus => try self.analNegation(),
+                .bang => try self.analBang(),
+                .load_nil => try self.push(Value.Nil),
+                .jump => ip = inst.ptr - 1,
+                .jump_false => {
+                    const condition = self.pop().?;
+                    if (!isTrue(condition)) ip = inst.ptr - 1;
+                },
+                .bind_global => try self.globals.append(self.pop().?),
+                .load_global => try self.push(self.globals.items[inst.ptr]),
+                else => std.debug.panic("TODO Implement operator: {}", .{inst.op}),
+            }
+        }
+    }
 
     /// Pushes a new `Value` on top of the `stack` and increases
     /// the stack pointer by 1.
@@ -173,7 +195,8 @@ test "Integer arithmetic" {
     inline for (test_cases) |case| {
         const code = try compiler.compile(testing.allocator, case.input);
         defer code.deinit();
-        var vm = try run(code);
+        var vm = try run(code, testing.allocator);
+        defer vm.deinit();
         testing.expect(case.expected == vm.popped().integer);
     }
 }
@@ -193,7 +216,8 @@ test "Boolean" {
     inline for (test_cases) |case| {
         const code = try compiler.compile(testing.allocator, case.input);
         defer code.deinit();
-        var vm = try run(code);
+        var vm = try run(code, testing.allocator);
+        defer vm.deinit();
         testing.expect(case.expected == vm.popped().boolean);
     }
 }
@@ -210,11 +234,30 @@ test "Conditional" {
     inline for (test_cases) |case| {
         const code = try compiler.compile(testing.allocator, case.input);
         defer code.deinit();
-        var vm = try run(code);
+        var vm = try run(code, testing.allocator);
+        defer vm.deinit();
         if (@TypeOf(case.expected) == comptime_int) {
             testing.expect(case.expected == vm.popped().integer);
         } else {
             testing.expect(vm.popped() == .nil);
+        }
+    }
+}
+
+test "Declaration" {
+    const test_cases = .{
+        .{ .input = "const x = 1 x", .expected = 1 },
+        .{ .input = "const x = 1 const y = 1 x + y", .expected = 2 },
+        .{ .input = "mut x = 1 const y = x + x x + y", .expected = 3 },
+    };
+
+    inline for (test_cases) |case| {
+        const code = try compiler.compile(testing.allocator, case.input);
+        defer code.deinit();
+        var vm = try run(code, testing.allocator);
+        defer vm.deinit();
+        if (@TypeOf(case.expected) == comptime_int) {
+            testing.expect(case.expected == vm.popped().integer);
         }
     }
 }
