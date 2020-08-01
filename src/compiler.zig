@@ -24,6 +24,8 @@ pub fn compile(
         .instructions = bytecode.Instructions.init(allocator),
         .constants = Values.init(allocator),
         .allocator = allocator,
+        .last_inst = undefined,
+        .prev_inst = undefined,
     };
 
     for (tree.nodes) |node| {
@@ -46,6 +48,17 @@ pub const Compiler = struct {
     instructions: bytecode.Instructions,
     constants: Values,
     allocator: *Allocator,
+
+    last_inst: EmitInst,
+    prev_inst: EmitInst,
+
+    /// Instruction that has already been emitted.
+    /// This is used to generate a new instruction if it needs to be reapplied
+    /// after being emitted
+    const EmitInst = struct {
+        op: bytecode.Opcode,
+        pos: usize,
+    };
 
     /// Compiler errorset
     pub const Error = error{ CompilerError, OutOfMemory };
@@ -70,25 +83,46 @@ pub const Compiler = struct {
     }
 
     /// Appends a new instruction to the compiler and returns the current position
-    fn emit(self: *Compiler, op: bytecode.Opcode) !u16 {
-        const pos = @truncate(u16, self.instructions.items.len);
+    fn emit(self: *Compiler, op: bytecode.Opcode) !usize {
+        const pos = self.instructions.items.len;
         try self.instructions.append(bytecode.gen(op, null));
+        self.saveEmitInst(op, pos);
         return pos;
     }
 
-    /// Appends a new instruction and saves the operand as bytes and returns the current position
-    fn emitOp(self: *Compiler, op: bytecode.Opcode, operand: u16) !u16 {
-        const pos = @truncate(u16, self.instructions.items.len);
+    /// Appends a new instruction and saves the operand and returns the current position
+    fn emitOp(self: *Compiler, op: bytecode.Opcode, operand: u16) !usize {
+        const pos = self.instructions.items.len;
         try self.instructions.append(bytecode.gen(op, operand));
+        self.saveEmitInst(op, pos);
         return pos;
     }
 
+    /// Sets the previous and last instruction that were emitted
+    fn saveEmitInst(self: *Compiler, op: bytecode.Opcode, pos: usize) void {
+        self.prev_inst = self.last_inst;
+        self.last_inst = EmitInst{ .op = op, .pos = pos };
+    }
+
+    /// Returns true if the last emitted instruction was `.pop`
+    fn lastIsPop(self: *Compiler) bool {
+        return self.last_inst.op == .pop;
+    }
+
+    /// Removes the last instruction
+    fn removeLastInst(self: *Compiler) void {
+        _ = self.instructions.popOrNull();
+        self.last_inst = self.prev_inst;
+    }
+
+    /// Compiles the given node into Instructions
     fn compile(self: *Compiler, node: ast.Node) Error!void {
         switch (node) {
             .expression => |exp| {
                 try self.compile(exp.value);
                 _ = try self.emit(.pop);
             },
+            .block_statement => |block| for (block.nodes) |bnode| try self.compile(bnode),
             .infix => |inf| {
                 try self.compile(inf.left);
                 try self.compile(inf.right);
@@ -115,6 +149,38 @@ pub const Compiler = struct {
             .int_lit => |int| {
                 const val: Value = .{ .integer = @bitCast(i64, int.value) };
                 _ = try self.emitOp(.load_const, try self.addConstant(val));
+            },
+            .if_expression => |if_exp| {
+                try self.compile(if_exp.condition);
+                // false is last so put it bottom of the added stack
+                const false_pos = try self.emit(.jump_false);
+
+                // compile the true pong and place the emitted opcodes on the stack
+                try self.compile(if_exp.true_pong);
+
+                // remove potential pop opcode as we continue the expression
+                if (self.lastIsPop()) self.removeLastInst();
+
+                // Add a jump to the stack and return its position
+                const jump_pos = try self.emit(.jump);
+
+                // save current instructions position
+                const cur_pos = self.instructions.items.len;
+
+                // Point the position of the false jump to the current position
+                self.instructions.items[false_pos].ptr = @truncate(u16, cur_pos);
+
+                if (if_exp.false_pong) |pong| {
+                    try self.compile(pong);
+
+                    if (self.lastIsPop()) self.removeLastInst();
+                } else {
+                    _ = try self.emit(.load_nil);
+                }
+
+                // set the true jump to the current stack position
+                const len = self.instructions.items.len;
+                self.instructions.items[jump_pos].ptr = @truncate(u16, len);
             },
             else => return Error.CompilerError,
         }
@@ -183,6 +249,34 @@ test "Compile AST to bytecode" {
             .consts = &[_]i64{},
             .opcodes = &[_]bytecode.Opcode{ .load_true, .bang, .pop },
         },
+        .{
+            .input = "if (true) { 5 } 10",
+            .consts = &[_]i64{ 5, 10 },
+            .opcodes = &[_]bytecode.Opcode{
+                .load_true,
+                .jump_false,
+                .load_const,
+                .jump,
+                .load_nil,
+                .pop,
+                .load_const,
+                .pop,
+            },
+        },
+        .{
+            .input = "if (true) { 5 } else { 7 } 10",
+            .consts = &[_]i64{ 5, 7, 10 },
+            .opcodes = &[_]bytecode.Opcode{
+                .load_true,
+                .jump_false,
+                .load_const,
+                .jump,
+                .load_const,
+                .pop,
+                .load_const,
+                .pop,
+            },
+        },
     };
 
     inline for (test_cases) |case| {
@@ -190,6 +284,7 @@ test "Compile AST to bytecode" {
         defer code.deinit();
 
         testing.expect(case.consts.len == code.constants.len);
+        testing.expect(case.opcodes.len == code.instructions.len);
         for (case.consts) |int, i| {
             testing.expect(int == code.constants[i].integer);
         }

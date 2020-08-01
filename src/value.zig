@@ -36,6 +36,10 @@ pub const Value = union(Type) {
         func: builtinFn,
     },
 
+    pub const True = Value{ .boolean = true };
+    pub const False = Value{ .boolean = false };
+    pub const Nil = Value{ .nil = {} };
+
     /// Frees Value's memory
     pub fn deinit(self: Value, alloc: *Allocator) void {
         switch (self) {

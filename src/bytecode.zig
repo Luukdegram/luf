@@ -6,6 +6,9 @@ pub const Opcode = enum(u8) {
     load_const,
     load_true,
     load_false,
+    load_nil,
+    jump_false,
+    jump,
 
     //bin ops
     add,

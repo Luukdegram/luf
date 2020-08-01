@@ -13,18 +13,24 @@ pub fn run(code: ByteCode) Vm.Error!Vm {
 
     // instruction pointer
     var ip: usize = 0;
-    for (code.instructions) |inst| {
+    while (ip < code.instructions.len) : (ip += 1) {
+        const inst = code.instructions[ip];
+
         switch (inst.op) {
-            .load_const => {
-                try vm.push(code.constants[inst.ptr]);
-            },
+            .load_const => try vm.push(code.constants[inst.ptr]),
             .equal, .not_equal, .less_than, .greater_than => try vm.analCmp(inst.op),
             .add, .sub, .mul, .div => try vm.analBinOp(inst.op),
             .pop => _ = vm.pop(),
-            .load_true => try vm.push(.{ .boolean = true }),
-            .load_false => try vm.push(.{ .boolean = false }),
+            .load_true => try vm.push(Value.True),
+            .load_false => try vm.push(Value.False),
             .minus => try vm.analNegation(),
             .bang => try vm.analBang(),
+            .load_nil => try vm.push(Value.Nil),
+            .jump => ip = inst.ptr - 1,
+            .jump_false => {
+                const condition = vm.pop().?;
+                if (!isTrue(condition)) ip = inst.ptr - 1;
+            },
             else => std.debug.panic("TODO Implement operator: {}", .{inst.op}),
         }
     }
@@ -103,8 +109,8 @@ pub const Vm = struct {
 
         // for now just assume it's a boolean
         switch (op) {
-            .equal => try self.push(.{ .boolean = left.boolean == right.boolean }),
-            .not_equal => try self.push(.{ .boolean = left.boolean != right.boolean }),
+            .equal => try self.push(if (left.boolean == right.boolean) Value.True else Value.False),
+            .not_equal => try self.push(if (left.boolean != right.boolean) Value.True else Value.False),
             else => return Error.InvalidOperator,
         }
     }
@@ -119,7 +125,7 @@ pub const Vm = struct {
             else => return Error.InvalidOperator,
         };
 
-        return self.push(.{ .boolean = boolean });
+        return self.push(if (boolean) Value.True else Value.False);
     }
 
     /// Analyzes and executes a negation
@@ -135,11 +141,22 @@ pub const Vm = struct {
 
         const val = switch (right) {
             .boolean => !right.boolean,
+            .nil => true,
             else => false,
         };
-        return self.push(.{ .boolean = val });
+        return self.push(if (val) Value.True else Value.False);
     }
 };
+
+/// Evalutes if the given `Value` is truthy.
+/// Only accepts booleans and 'Nil'.
+fn isTrue(value: Value) bool {
+    return switch (value) {
+        .nil => false,
+        .boolean => |val| val,
+        else => true,
+    };
+}
 
 test "Integer arithmetic" {
     const test_cases = .{
@@ -178,5 +195,26 @@ test "Boolean" {
         defer code.deinit();
         var vm = try run(code);
         testing.expect(case.expected == vm.popped().boolean);
+    }
+}
+
+test "Conditional" {
+    const test_cases = .{
+        .{ .input = "if (true) { 10 }", .expected = 10 },
+        .{ .input = "if (true) { 10 } else { 20 }", .expected = 10 },
+        .{ .input = "if (false) { 10 } else { 20 }", .expected = 20 },
+        .{ .input = "if (1 < 2) { 10 }", .expected = 10 },
+        .{ .input = "if (1 > 2) { 10 }", .expected = null },
+    };
+
+    inline for (test_cases) |case| {
+        const code = try compiler.compile(testing.allocator, case.input);
+        defer code.deinit();
+        var vm = try run(code);
+        if (@TypeOf(case.expected) == comptime_int) {
+            testing.expect(case.expected == vm.popped().integer);
+        } else {
+            testing.expect(vm.popped() == .nil);
+        }
     }
 }
