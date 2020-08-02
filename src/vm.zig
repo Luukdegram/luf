@@ -76,6 +76,7 @@ pub const Vm = struct {
                 .load_global => try self.push(self.globals.items[inst.ptr]),
                 .make_array => try self.analArray(inst),
                 .make_map => try self.analMap(inst),
+                .index => try self.analIndex(),
             }
         }
     }
@@ -248,6 +249,29 @@ pub const Vm = struct {
 
         return self.push(.{ .map = map });
     }
+
+    /// Analyzes an index/reference pushes the value on the stack
+    fn analIndex(self: *Vm) Error!void {
+        const index = self.pop() orelse return Error.MissingValue;
+        const left = self.pop() orelse return Error.MissingValue;
+
+        //TODO implement builtins and references
+        if (left == .list and index == .integer) {
+            const i = index.integer;
+            const list = left.list;
+            if (i < 0 or i > list.items.len) return Error.OutOfMemory;
+
+            return self.push(list.items[@intCast(u64, i)]);
+        } else if (left == .map) {
+            const map: Value.Map = left.map;
+            if (map.get(index)) |val| {
+                return self.push(val);
+            }
+            return self.push(Value.Nil);
+        }
+
+        return Error.MissingValue;
+    }
 };
 
 /// Checks each given type if they are equal or not
@@ -415,5 +439,26 @@ test "Maps" {
                 testing.expectEqualStrings(key, item.key.string);
             }
         }
+    }
+}
+
+test "Index array/map" {
+    const test_cases = .{
+        .{ .input = "[1, 2, 3][1]", .expected = 2 },
+        .{ .input = "{1: 5}[1]", .expected = 5 },
+        .{ .input = "{2: 5}[0]", .expected = Value.Nil },
+        .{ .input = "{\"foo\": 15}[\"foo\"]", .expected = 15 },
+    };
+
+    inline for (test_cases) |case| {
+        const code = try compiler.compile(testing.allocator, case.input);
+        defer code.deinit();
+        var vm = try run(code, testing.allocator);
+        defer vm.deinit();
+
+        if (@TypeOf(case.expected) == comptime_int)
+            testing.expectEqual(@as(i64, case.expected), vm.popped().integer)
+        else
+            testing.expectEqual(case.expected, vm.popped());
     }
 }
