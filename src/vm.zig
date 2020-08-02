@@ -12,10 +12,14 @@ const Allocator = std.mem.Allocator;
 /// Creates a new Virtual Machine on the stack, runs the given `ByteCode`
 /// and finally returns the `Vm`. Use deinit() to free its memory.
 pub fn run(code: ByteCode, allocator: *Allocator) Vm.Error!*Vm {
+    //TODO cleanup this mess once we have implemented a garbage collector
+    // to handle the memory
     const vm = try allocator.create(Vm);
+    var arena = std.heap.ArenaAllocator.init(allocator);
     vm.* = .{
         .globals = Value.List.init(allocator),
         .allocator = allocator,
+        .arena = arena,
     };
     try vm.run(code);
     return vm;
@@ -34,12 +38,14 @@ pub const Vm = struct {
     /// Currently allows 65536 Values
     globals: Value.List,
     allocator: *Allocator,
+    arena: std.heap.ArenaAllocator,
 
     pub const Error = error{ OutOfMemory, MissingValue, InvalidOperator };
 
     /// Frees the Virtual Machine's memory
     pub fn deinit(self: *Vm) void {
         self.globals.deinit();
+        self.arena.deinit();
         self.allocator.destroy(self);
     }
 
@@ -67,7 +73,6 @@ pub const Vm = struct {
                 },
                 .bind_global => try self.globals.append(self.pop().?),
                 .load_global => try self.push(self.globals.items[inst.ptr]),
-                else => std.debug.panic("TODO Implement operator: {}", .{inst.op}),
             }
         }
     }
@@ -104,6 +109,9 @@ pub const Vm = struct {
         if (std.meta.activeTag(left) == std.meta.activeTag(right) and left == .integer) {
             return self.analIntOp(op, left.integer, right.integer);
         }
+        if (std.meta.activeTag(left) == std.meta.activeTag(right) and left == .string) {
+            return self.analStringOp(op, left.string, right.string);
+        }
     }
 
     /// Analyzes and executes a binary operation on an integer
@@ -117,6 +125,12 @@ pub const Vm = struct {
         };
 
         return self.push(.{ .integer = result });
+    }
+
+    fn analStringOp(self: *Vm, op: byte_code.Opcode, left: []const u8, right: []const u8) Error!void {
+        if (op != .add) return Error.InvalidOperator;
+
+        return self.push(.{ .string = try std.mem.concat(&self.arena.allocator, u8, &[_][]const u8{ left, right }) });
     }
 
     /// Analyzes a then executes a comparison and pushes the return value on the stack
@@ -256,8 +270,21 @@ test "Declaration" {
         defer code.deinit();
         var vm = try run(code, testing.allocator);
         defer vm.deinit();
-        if (@TypeOf(case.expected) == comptime_int) {
-            testing.expect(case.expected == vm.popped().integer);
-        }
+        testing.expect(case.expected == vm.popped().integer);
+    }
+}
+
+test "Strings" {
+    const test_cases = .{
+        //.{ .input = "\"foo\"", .expected = "foo" },
+        .{ .input = "\"foo\" + \"bar\"", .expected = "foobar" },
+    };
+
+    inline for (test_cases) |case| {
+        const code = try compiler.compile(testing.allocator, case.input);
+        defer code.deinit();
+        var vm = try run(code, testing.allocator);
+        defer vm.deinit();
+        testing.expectEqualStrings(case.expected, vm.popped().string);
     }
 }

@@ -123,7 +123,6 @@ fn evalPrefix(prefix: *const Node.Prefix, scope: *Scope) EvalError!Value {
     return switch (prefix.operator) {
         .bang => evalBangOperator(try eval(prefix.right, scope)),
         .minus => evalNegation(try eval(prefix.right, scope)),
-        else => Value{ .nil = {} },
     };
 }
 
