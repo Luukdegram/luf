@@ -3,6 +3,7 @@ const compiler = @import("compiler.zig");
 const ByteCode = compiler.Compiler.ByteCode;
 const byte_code = @import("bytecode.zig");
 const Value = @import("value.zig").Value;
+const Type = @import("value.zig").Type;
 const testing = std.testing;
 const Allocator = std.mem.Allocator;
 
@@ -73,6 +74,7 @@ pub const Vm = struct {
                 },
                 .bind_global => try self.globals.append(self.pop().?),
                 .load_global => try self.push(self.globals.items[inst.ptr]),
+                .make_array => try self.analArray(inst),
             }
         }
     }
@@ -182,7 +184,41 @@ pub const Vm = struct {
         };
         return self.push(if (val) Value.True else Value.False);
     }
+
+    /// Analyzes the instruction and builds an array
+    fn analArray(self: *Vm, inst: byte_code.Instruction) Error!void {
+        const len = inst.ptr;
+        var list = try Value.List.initCapacity(&self.arena.allocator, len);
+        var index = self.sp - len;
+        var i: usize = 0;
+
+        var list_type: @TagType(Value) = undefined;
+        while (i < len) : ({
+            i += 1;
+            index += 1;
+        }) {
+            const val = self.stack[index];
+            if (i == 0)
+                list_type = std.meta.activeTag(val)
+            else {
+                if (list_type != std.meta.activeTag(val)) return Error.MissingValue;
+            }
+            try list.insert(i, val);
+        }
+
+        try self.push(.{ .list = list });
+    }
 };
+
+/// Checks each given type if they are equal or not
+fn resolveType(values: []Value) Vm.Error!Type {
+    std.debug.assert(values.len > 0);
+    const cur_tag: Type = std.meta.activeTag(values[0]);
+    if (values.len == 1) return cur_tag;
+
+    for (values[1..]) |value|
+        if (std.meta.activeTag(value) != cur_tag) return Vm.Error.MissingValue;
+}
 
 /// Evalutes if the given `Value` is truthy.
 /// Only accepts booleans and 'Nil'.
@@ -276,7 +312,7 @@ test "Declaration" {
 
 test "Strings" {
     const test_cases = .{
-        //.{ .input = "\"foo\"", .expected = "foo" },
+        .{ .input = "\"foo\"", .expected = "foo" },
         .{ .input = "\"foo\" + \"bar\"", .expected = "foobar" },
     };
 
@@ -286,5 +322,27 @@ test "Strings" {
         var vm = try run(code, testing.allocator);
         defer vm.deinit();
         testing.expectEqualStrings(case.expected, vm.popped().string);
+    }
+}
+
+test "Arrays" {
+    const test_cases = .{
+        .{ .input = "[1, 2, 3]", .expected = &[_]i64{ 1, 2, 3 } },
+        .{ .input = "[]", .expected = &[_]i64{} },
+        .{ .input = "[1 + 1, 2 * 2, 6]", .expected = &[_]i64{ 2, 4, 6 } },
+    };
+
+    inline for (test_cases) |case| {
+        const code = try compiler.compile(testing.allocator, case.input);
+        defer code.deinit();
+        var vm = try run(code, testing.allocator);
+        defer vm.deinit();
+
+        const list = vm.popped().list;
+        testing.expect(list.items.len == case.expected.len);
+        inline for (case.expected) |int, i| {
+            const items = list.items;
+            testing.expectEqual(int, items[i].integer);
+        }
     }
 }

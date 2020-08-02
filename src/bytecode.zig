@@ -13,6 +13,8 @@ pub const Opcode = enum(u8) {
     jump_false,
     jump,
 
+    make_array,
+
     //bin ops
     add,
     sub,

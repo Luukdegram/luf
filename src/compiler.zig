@@ -260,6 +260,12 @@ pub const Compiler = struct {
                 const val = Value{ .string = try self.scope.allocator.dupe(u8, string.value) };
                 _ = try self.emitOp(.load_const, try self.addConstant(val));
             },
+            .array => |array| {
+                for (array.value) |element| {
+                    try self.compile(element);
+                }
+                _ = try self.emitOp(.make_array, @truncate(u16, array.value.len));
+            },
 
             else => return Error.CompilerError,
         }
@@ -360,6 +366,11 @@ test "Compile AST to bytecode" {
             .input = "const x = \"foo\"",
             .consts = &[_][]const u8{"foo"},
             .opcodes = &[_]bytecode.Opcode{ .load_const, .bind_global },
+        },
+        .{
+            .input = "const x = [1, 2, 3]",
+            .consts = &[_]i64{ 1, 2, 3 },
+            .opcodes = &[_]bytecode.Opcode{ .load_const, .load_const, .load_const, .make_array, .bind_global },
         },
     };
 
