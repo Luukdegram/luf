@@ -75,6 +75,7 @@ pub const Vm = struct {
                 .bind_global => try self.globals.append(self.pop().?),
                 .load_global => try self.push(self.globals.items[inst.ptr]),
                 .make_array => try self.analArray(inst),
+                .make_map => try self.analMap(inst),
             }
         }
     }
@@ -189,10 +190,14 @@ pub const Vm = struct {
     fn analArray(self: *Vm, inst: byte_code.Instruction) Error!void {
         const len = inst.ptr;
         var list = try Value.List.initCapacity(&self.arena.allocator, len);
+        errdefer list.deinit();
+
+        if (len == 0) return self.push(.{ .list = list });
+
         var index = self.sp - len;
+        var list_type: Type = undefined;
         var i: usize = 0;
 
-        var list_type: @TagType(Value) = undefined;
         while (i < len) : ({
             i += 1;
             index += 1;
@@ -206,7 +211,42 @@ pub const Vm = struct {
             try list.insert(i, val);
         }
 
-        try self.push(.{ .list = list });
+        return self.push(.{ .list = list });
+    }
+
+    /// Analyzes and creates a new map
+    fn analMap(self: *Vm, inst: byte_code.Instruction) Error!void {
+        const len = inst.ptr / 2;
+        var map = Value.Map.init(&self.arena.allocator);
+        errdefer map.deinit();
+        if (len == 0) return self.push(.{ .map = map });
+
+        try map.ensureCapacity(len);
+
+        var index = self.sp - (len * 2);
+        var key_type: Type = undefined;
+        var value_type: Type = undefined;
+        var i: usize = 0;
+
+        while (i < len) : ({
+            i += 1;
+            index += 2;
+        }) {
+            const key = self.stack[index];
+            const value = self.stack[index + 1];
+
+            if (i == 0) {
+                key_type = std.meta.activeTag(key);
+                value_type = std.meta.activeTag(value);
+            } else {
+                if (key_type != std.meta.activeTag(key)) return Error.MissingValue;
+                if (value_type != std.meta.activeTag(value)) return Error.MissingValue;
+            }
+
+            map.putAssumeCapacity(key, value);
+        }
+
+        return self.push(.{ .map = map });
     }
 };
 
@@ -343,6 +383,37 @@ test "Arrays" {
         inline for (case.expected) |int, i| {
             const items = list.items;
             testing.expectEqual(int, items[i].integer);
+        }
+    }
+}
+
+test "Maps" {
+    const test_cases = .{
+        .{ .input = "{1:2, 2:1, 5:6}", .expected = &[_]i64{ 2, 1, 6 }, .keys = &[_]i64{ 1, 2, 5 } },
+        .{ .input = "{}", .expected = &[_]i64{}, .keys = &[_]i64{} },
+        .{ .input = "{\"foo\":1}", .expected = &[_]i64{1}, .keys = &[_][]const u8{"foo"} },
+    };
+
+    inline for (test_cases) |case| {
+        const code = try compiler.compile(testing.allocator, case.input);
+        defer code.deinit();
+        var vm = try run(code, testing.allocator);
+        defer vm.deinit();
+
+        const map = vm.popped().map;
+        testing.expect(map.items().len == case.expected.len);
+        inline for (case.expected) |int, i| {
+            const items = map.items();
+            testing.expectEqual(int, items[i].value.integer);
+        }
+
+        inline for (case.keys) |key, i| {
+            const item = map.items()[i];
+            if (@TypeOf(key) == i64) {
+                testing.expectEqual(key, item.key.integer);
+            } else {
+                testing.expectEqualStrings(key, item.key.string);
+            }
         }
     }
 }

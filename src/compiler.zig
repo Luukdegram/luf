@@ -266,6 +266,14 @@ pub const Compiler = struct {
                 }
                 _ = try self.emitOp(.make_array, @truncate(u16, array.value.len));
             },
+            .map => |map| {
+                for (map.value) |pair| try self.compile(pair);
+                _ = try self.emitOp(.make_map, @truncate(u16, map.value.len * 2));
+            },
+            .map_pair => |pair| {
+                try self.compile(pair.key);
+                try self.compile(pair.value);
+            },
 
             else => return Error.CompilerError,
         }
@@ -371,6 +379,20 @@ test "Compile AST to bytecode" {
             .input = "const x = [1, 2, 3]",
             .consts = &[_]i64{ 1, 2, 3 },
             .opcodes = &[_]bytecode.Opcode{ .load_const, .load_const, .load_const, .make_array, .bind_global },
+        },
+        .{
+            .input = "const x = {1: 2, 2: 1, 5: 6}",
+            .consts = &[_]i64{ 1, 2, 2, 1, 5, 6 },
+            .opcodes = &[_]bytecode.Opcode{
+                .load_const,
+                .load_const,
+                .load_const,
+                .load_const,
+                .load_const,
+                .load_const,
+                .make_map,
+                .bind_global,
+            },
         },
     };
 

@@ -14,6 +14,7 @@ pub const Opcode = enum(u8) {
     jump,
 
     make_array,
+    make_map,
 
     //bin ops
     add,
