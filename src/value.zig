@@ -26,9 +26,7 @@ pub const Value = union(Type) {
     nil,
     _return: *Value,
     function: struct {
-        params: []ast.Node,
-        body: ast.Node,
-        scope: *Scope,
+        offset: usize,
     },
     list: List,
     map: Map,
@@ -66,8 +64,7 @@ pub const Value = union(Type) {
             .boolean => |boolean| hashFn(&hasher, boolean),
             .string => |str| hasher.update(str),
             .function => |func| {
-                hashFn(&hasher, func.params.len);
-                hashFn(&hasher, func);
+                hashFn(&hasher, func.offset);
             },
             .list => |list| {
                 hashFn(&hasher, list.items.len);

@@ -21,6 +21,7 @@ pub fn run(code: ByteCode, allocator: *Allocator) Vm.Error!*Vm {
         .globals = Value.List.init(allocator),
         .allocator = allocator,
         .arena = arena,
+        .call_stack = Vm.CallStack.init(allocator),
     };
     try vm.run(code);
     return vm;
@@ -40,13 +41,23 @@ pub const Vm = struct {
     globals: Value.List,
     allocator: *Allocator,
     arena: std.heap.ArenaAllocator,
+    call_stack: CallStack,
 
     pub const Error = error{ OutOfMemory, MissingValue, InvalidOperator };
+    const CallStack = std.ArrayList(Frame);
+    /// Function `Frame` on the callstack
+    const Frame = struct {
+        /// Frame pointer which contains the actual function `Value`
+        fp: *Value,
+        /// `Instruction` pointer to the position of the function in the bytecode's instruction set
+        ip: usize,
+    };
 
     /// Frees the Virtual Machine's memory
     pub fn deinit(self: *Vm) void {
         self.globals.deinit();
         self.arena.deinit();
+        self.call_stack.deinit();
         self.allocator.destroy(self);
     }
 
@@ -77,6 +88,33 @@ pub const Vm = struct {
                 .make_array => try self.analArray(inst),
                 .make_map => try self.analMap(inst),
                 .index => try self.analIndex(),
+                ._return => {
+                    const cur_frame = self.call_stack.pop();
+                    ip = cur_frame.ip;
+
+                    _ = self.pop();
+                    try self.push(Value.Nil);
+                },
+                .return_value => {
+                    // remove the frame from the call stack
+                    const cur_frame = self.call_stack.pop();
+                    ip = cur_frame.ip;
+
+                    // // get return value from stack
+                    const rv = self.pop().?;
+
+                    // remove function itself from stack
+                    _ = self.pop();
+
+                    // push the return value back to the stack
+                    try self.push(rv);
+                },
+                .call => {
+                    const val = &self.stack[self.sp - 1];
+                    if (val.* != .function) return error.InvalidOperator;
+                    try self.call_stack.append(.{ .fp = val, .ip = ip });
+                    ip = val.function.offset - 1;
+                },
             }
         }
     }
@@ -102,6 +140,13 @@ pub const Vm = struct {
     /// Note that this results in UB if the stack is empty.
     fn popped(self: *Vm) Value {
         return self.stack[self.sp];
+    }
+
+    /// Returns the current `Frame` of the call stack
+    /// Returns null if the call stack is emtpy
+    fn frame(self: *Vm) ?Frame {
+        if (self.call_stack.items.len == 0) return null;
+        return self.call_stack.items[self.call_stack.items.len - 1];
     }
 
     /// Analyzes and executes a binary operation.
@@ -448,6 +493,27 @@ test "Index array/map" {
         .{ .input = "{1: 5}[1]", .expected = 5 },
         .{ .input = "{2: 5}[0]", .expected = Value.Nil },
         .{ .input = "{\"foo\": 15}[\"foo\"]", .expected = 15 },
+    };
+
+    inline for (test_cases) |case| {
+        const code = try compiler.compile(testing.allocator, case.input);
+        defer code.deinit();
+        var vm = try run(code, testing.allocator);
+        defer vm.deinit();
+
+        if (@TypeOf(case.expected) == comptime_int)
+            testing.expectEqual(@as(i64, case.expected), vm.popped().integer)
+        else
+            testing.expectEqual(case.expected, vm.popped());
+    }
+}
+
+test "Basic function calls with no arguments" {
+    const test_cases = .{
+        .{ .input = "const x = fn() { 1 + 2 } x()", .expected = 3 },
+        .{ .input = "const x = fn() { 1 } const y = fn() { 5 } x() + y()", .expected = 6 },
+        .{ .input = "const x = fn() { return 5 10 } x()", .expected = 5 },
+        .{ .input = "const x = fn() { } x()", .expected = Value.Nil },
     };
 
     inline for (test_cases) |case| {
