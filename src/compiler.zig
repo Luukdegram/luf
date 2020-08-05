@@ -71,9 +71,12 @@ pub const Compiler = struct {
         mutable: bool = false,
         /// Index of symbol table
         index: u16 = 0,
+        /// The scope the symbol belongs to
+        /// used to determine if global or local symbol
+        scope: *Scope,
     };
 
-    /// Hashmap of `Symbol` where the key is the Symnbol's name
+    /// Hashmap of `Symbol` where the key is the Symbol's name
     const SymbolTable = std.StringHashMap(Symbol);
 
     /// Scope of the current state (function, root, etc)
@@ -107,13 +110,14 @@ pub const Compiler = struct {
                 .name = name,
                 .mutable = mutable,
                 .index = @truncate(u16, self.symbols.items().len),
+                .scope = self,
             };
             try self.symbols.put(name, symbol);
             return symbol;
         }
 
         /// Retrieves a `Symbol` from the Scopes symbol table, returns null if not found
-        fn resolve(self: *Scope, name: []const u8) ?Symbol {
+        fn resolve(self: *const Scope, name: []const u8) ?Symbol {
             return self.symbols.get(name);
         }
 
@@ -198,9 +202,21 @@ pub const Compiler = struct {
         }
     }
 
+    /// Creates a new Scope with the given Id, then sets the new scope as the current
     fn createScope(self: *Compiler, id: Scope.Id) !void {
         const fork = try self.scope.fork(id);
         self.scope = fork;
+    }
+
+    /// Attempts to resolve a symbol from the symbol table
+    /// If not found, will attempt to resolve it from a parent scope
+    fn resolveSymbol(self: *Compiler, scope: *const Scope, name: []const u8) ?Symbol {
+        return if (scope.resolve(name)) |symbol|
+            symbol
+        else if (scope.id != .root and scope.parent != null)
+            self.resolveSymbol(scope.parent.?, name)
+        else
+            null;
     }
 
     /// Compiles the given node into Instructions
@@ -273,10 +289,19 @@ pub const Compiler = struct {
             .declaration => |decl| {
                 try self.compile(decl.value);
                 const symbol = try self.scope.define(decl.name.identifier.value, decl.mutable);
-                _ = try self.emitOp(.bind_global, symbol.index);
+                const opcode: bytecode.Opcode = if (symbol.scope.id == .root)
+                    .bind_global
+                else
+                    .bind_local;
+
+                _ = try self.emitOp(opcode, symbol.index);
             },
-            .identifier => |id| if (self.scope.resolve(id.value)) |symbol| {
-                _ = try self.emitOp(.load_global, symbol.index);
+            .identifier => |id| if (self.resolveSymbol(self.scope, id.value)) |symbol| {
+                const opcode: bytecode.Opcode = if (symbol.scope.id == .root)
+                    .load_global
+                else
+                    .load_local;
+                _ = try self.emitOp(opcode, symbol.index);
             } else return Error.CompilerError,
             .string_lit => |string| {
                 const val = Value{ .string = try self.scope.allocator.dupe(u8, string.value) };
@@ -526,6 +551,32 @@ test "Compile AST to bytecode" {
                 .pop,
             },
         },
+        .{
+            .input = "const x = 5 fn(){ x }",
+            .consts = &[_]Value{ Value{ .integer = 5 }, Value{ .function = .{ .offset = 3 } } },
+            .opcodes = &[_]bytecode.Opcode{
+                .load_const,
+                .bind_global,
+                .jump,
+                .load_global,
+                .return_value,
+                .load_const,
+                .pop,
+            },
+        },
+        .{
+            .input = "fn(){ const x = 5 x }",
+            .consts = &[_]Value{ Value{ .integer = 5 }, Value{ .function = .{ .offset = 1 } } },
+            .opcodes = &[_]bytecode.Opcode{
+                .jump,
+                .load_const,
+                .bind_local,
+                .load_local,
+                .return_value,
+                .load_const,
+                .pop,
+            },
+        },
     };
 
     inline for (test_cases) |case| {
@@ -533,7 +584,7 @@ test "Compile AST to bytecode" {
         defer code.deinit();
 
         testing.expect(case.consts.len == code.constants.len);
-        //testing.expect(case.opcodes.len == code.instructions.len);
+        testing.expect(case.opcodes.len == code.instructions.len);
         for (case.consts) |constant, i| {
             if (@TypeOf(constant) == i64)
                 testing.expect(constant == code.constants[i].integer)

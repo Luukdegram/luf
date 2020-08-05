@@ -115,6 +115,15 @@ pub const Vm = struct {
                     try self.call_stack.append(.{ .fp = val, .ip = ip });
                     ip = val.function.offset - 1;
                 },
+                .bind_local => {
+                    const current_frame = self.frame().?;
+                    self.stack[current_frame.ip + inst.ptr] = self.pop().?;
+                },
+                .load_local => {
+                    const val = self.stack[self.frame().?.ip + inst.ptr];
+                    try self.push(val);
+                },
+                //else => {},
             }
         }
     }
@@ -514,6 +523,25 @@ test "Basic function calls with no arguments" {
         .{ .input = "const x = fn() { 1 } const y = fn() { 5 } x() + y()", .expected = 6 },
         .{ .input = "const x = fn() { return 5 10 } x()", .expected = 5 },
         .{ .input = "const x = fn() { } x()", .expected = Value.Nil },
+    };
+
+    inline for (test_cases) |case| {
+        const code = try compiler.compile(testing.allocator, case.input);
+        defer code.deinit();
+        var vm = try run(code, testing.allocator);
+        defer vm.deinit();
+
+        if (@TypeOf(case.expected) == comptime_int)
+            testing.expectEqual(@as(i64, case.expected), vm.popped().integer)
+        else
+            testing.expectEqual(case.expected, vm.popped());
+    }
+}
+
+test "Globals vs Locals" {
+    const test_cases = .{
+        .{ .input = "const x = fn() { const x = 5 x } x()", .expected = 5 },
+        .{ .input = "const x = fn() { const y = 1 const z = 2 y + z } x()", .expected = 3 },
     };
 
     inline for (test_cases) |case| {
