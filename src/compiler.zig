@@ -330,6 +330,11 @@ pub const Compiler = struct {
                 const jump_pos = try self.emit(.jump);
                 try self.createScope(.function);
 
+                for (function.params) |param| {
+                    // function arguments are not mutable by default
+                    _ = try self.scope.define(param.identifier.value, false);
+                }
+
                 const offset = self.instructions.items.len;
 
                 try self.compile(function.body);
@@ -347,14 +352,22 @@ pub const Compiler = struct {
 
                 self.escapeScope();
 
-                const last_pos = try self.emitOp(.load_const, try self.addConstant(.{ .function = .{ .offset = offset } }));
+                const last_pos = try self.emitOp(.load_const, try self.addConstant(.{
+                    .function = .{
+                        .offset = offset,
+                        .arg_len = function.params.len,
+                    },
+                }));
 
                 const jump = &self.instructions.items[jump_pos];
                 jump.ptr = @truncate(u16, last_pos);
             },
             .call_expression => |call| {
                 try self.compile(call.function);
-                _ = try self.emit(.call);
+                for (call.arguments) |arg| {
+                    try self.compile(arg);
+                }
+                _ = try self.emitOp(.call, @truncate(u16, call.arguments.len));
             },
             ._return => |ret| {
                 try self.compile(ret.value);
@@ -504,7 +517,7 @@ test "Compile AST to bytecode" {
         },
         .{
             .input = "fn(){ 1 + 2 }",
-            .consts = &[_]Value{ Value{ .integer = 1 }, Value{ .integer = 2 }, Value{ .function = .{ .offset = 1 } } },
+            .consts = &[_]Value{ Value{ .integer = 1 }, Value{ .integer = 2 }, Value{ .function = .{ .offset = 1, .arg_len = 0 } } },
             .opcodes = &[_]bytecode.Opcode{
                 .jump,
                 .load_const,
@@ -517,7 +530,7 @@ test "Compile AST to bytecode" {
         },
         .{
             .input = "fn(){ }",
-            .consts = &[_]Value{Value{ .function = .{ .offset = 1 } }},
+            .consts = &[_]Value{Value{ .function = .{ .offset = 1, .arg_len = 0 } }},
             .opcodes = &[_]bytecode.Opcode{
                 .jump,
                 ._return,
@@ -527,7 +540,7 @@ test "Compile AST to bytecode" {
         },
         .{
             .input = "fn(){ 1 }()",
-            .consts = &[_]Value{ Value{ .integer = 1 }, Value{ .function = .{ .offset = 1 } } },
+            .consts = &[_]Value{ Value{ .integer = 1 }, Value{ .function = .{ .offset = 1, .arg_len = 0 } } },
             .opcodes = &[_]bytecode.Opcode{
                 .jump,
                 .load_const,
@@ -539,7 +552,7 @@ test "Compile AST to bytecode" {
         },
         .{
             .input = "const x = fn(){ 1 } x()",
-            .consts = &[_]Value{ Value{ .integer = 1 }, Value{ .function = .{ .offset = 1 } } },
+            .consts = &[_]Value{ Value{ .integer = 1 }, Value{ .function = .{ .offset = 1, .arg_len = 0 } } },
             .opcodes = &[_]bytecode.Opcode{
                 .jump,
                 .load_const,
@@ -553,7 +566,7 @@ test "Compile AST to bytecode" {
         },
         .{
             .input = "const x = 5 fn(){ x }",
-            .consts = &[_]Value{ Value{ .integer = 5 }, Value{ .function = .{ .offset = 3 } } },
+            .consts = &[_]Value{ Value{ .integer = 5 }, Value{ .function = .{ .offset = 3, .arg_len = 0 } } },
             .opcodes = &[_]bytecode.Opcode{
                 .load_const,
                 .bind_global,
@@ -566,7 +579,7 @@ test "Compile AST to bytecode" {
         },
         .{
             .input = "fn(){ const x = 5 x }",
-            .consts = &[_]Value{ Value{ .integer = 5 }, Value{ .function = .{ .offset = 1 } } },
+            .consts = &[_]Value{ Value{ .integer = 5 }, Value{ .function = .{ .offset = 1, .arg_len = 0 } } },
             .opcodes = &[_]bytecode.Opcode{
                 .jump,
                 .load_const,
@@ -574,6 +587,21 @@ test "Compile AST to bytecode" {
                 .load_local,
                 .return_value,
                 .load_const,
+                .pop,
+            },
+        },
+        .{
+            .input = "const func = fn(x){ x } func(5)",
+            .consts = &[_]Value{ Value{ .function = .{ .offset = 1, .arg_len = 1 } }, Value{ .integer = 5 } },
+            .opcodes = &[_]bytecode.Opcode{
+                .jump,
+                .load_local,
+                .return_value,
+                .load_const,
+                .bind_global,
+                .load_global,
+                .load_const,
+                .call,
                 .pop,
             },
         },
@@ -600,7 +628,7 @@ test "Compile AST to bytecode" {
             }
         }
         for (case.opcodes) |op, i| {
-            testing.expect(op == code.instructions[i].op);
+            testing.expectEqual(op, code.instructions[i].op);
         }
     }
 }

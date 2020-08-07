@@ -27,6 +27,7 @@ pub const Value = union(Type) {
     _return: *Value,
     function: struct {
         offset: usize,
+        arg_len: usize,
     },
     list: List,
     map: Map,

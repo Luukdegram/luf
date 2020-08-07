@@ -33,6 +33,8 @@ pub fn run(code: ByteCode, allocator: *Allocator) Vm.Error!*Vm {
 pub const Vm = struct {
     /// Stack pointer points to the next value
     sp: usize = 0,
+    /// Instruction pointer. Points to current instruction of the loaded instruction set
+    ip: usize = 0,
     /// Stack has a max of 2048 Value's that it can hold
     /// This is pre-allocated.
     stack: [2048]Value = undefined,
@@ -51,6 +53,8 @@ pub const Vm = struct {
         fp: *Value,
         /// `Instruction` pointer to the position of the function in the bytecode's instruction set
         ip: usize,
+        /// Stack pointer. Mostly used to reset the stack pointer between scope changes
+        sp: usize,
     };
 
     /// Frees the Virtual Machine's memory
@@ -63,10 +67,8 @@ pub const Vm = struct {
 
     /// Runs the given `ByteCode` on the Virtual Machine
     pub fn run(self: *Vm, code: ByteCode) Error!void {
-        // instruction pointer
-        var ip: usize = 0;
-        while (ip < code.instructions.len) : (ip += 1) {
-            const inst = code.instructions[ip];
+        while (self.ip < code.instructions.len) : (self.ip += 1) {
+            const inst = code.instructions[self.ip];
 
             switch (inst.op) {
                 .load_const => try self.push(code.constants[inst.ptr]),
@@ -78,10 +80,10 @@ pub const Vm = struct {
                 .minus => try self.analNegation(),
                 .bang => try self.analBang(),
                 .load_nil => try self.push(Value.Nil),
-                .jump => ip = inst.ptr - 1,
+                .jump => self.ip = inst.ptr - 1,
                 .jump_false => {
                     const condition = self.pop().?;
-                    if (!isTrue(condition)) ip = inst.ptr - 1;
+                    if (!isTrue(condition)) self.ip = inst.ptr - 1;
                 },
                 .bind_global => try self.globals.append(self.pop().?),
                 .load_global => try self.push(self.globals.items[inst.ptr]),
@@ -90,7 +92,7 @@ pub const Vm = struct {
                 .index => try self.analIndex(),
                 ._return => {
                     const cur_frame = self.call_stack.pop();
-                    ip = cur_frame.ip;
+                    self.ip = cur_frame.ip;
 
                     _ = self.pop();
                     try self.push(Value.Nil);
@@ -98,10 +100,12 @@ pub const Vm = struct {
                 .return_value => {
                     // remove the frame from the call stack
                     const cur_frame = self.call_stack.pop();
-                    ip = cur_frame.ip;
+                    self.ip = cur_frame.ip;
+                    //self.sp = cur_frame.sp;
 
                     // // get return value from stack
                     const rv = self.pop().?;
+                    self.sp = cur_frame.sp;
 
                     // remove function itself from stack
                     _ = self.pop();
@@ -109,18 +113,13 @@ pub const Vm = struct {
                     // push the return value back to the stack
                     try self.push(rv);
                 },
-                .call => {
-                    const val = &self.stack[self.sp - 1];
-                    if (val.* != .function) return error.InvalidOperator;
-                    try self.call_stack.append(.{ .fp = val, .ip = ip });
-                    ip = val.function.offset - 1;
-                },
+                .call => try self.analFunctionCall(inst),
                 .bind_local => {
                     const current_frame = self.frame().?;
-                    self.stack[current_frame.ip + inst.ptr] = self.pop().?;
+                    self.stack[current_frame.sp + inst.ptr] = self.stack[self.sp - 1];
                 },
                 .load_local => {
-                    const val = self.stack[self.frame().?.ip + inst.ptr];
+                    const val = self.stack[self.frame().?.sp + inst.ptr];
                     try self.push(val);
                 },
                 //else => {},
@@ -141,8 +140,8 @@ pub const Vm = struct {
     /// pointer by 1. Returns null if stack is empty.
     fn pop(self: *Vm) ?Value {
         if (self.sp == 0) return null;
-        defer self.sp -= 1;
-        return self.stack[self.sp - 1];
+        self.sp -= 1;
+        return self.stack[self.sp];
     }
 
     /// Returns the previously popped `Value`
@@ -325,6 +324,23 @@ pub const Vm = struct {
         }
 
         return Error.MissingValue;
+    }
+
+    /// Analyzes the current instruction to execture a function call
+    /// Expects the current instruction pointer.
+    /// This will also return the new instruction pointer
+    fn analFunctionCall(self: *Vm, inst: byte_code.Instruction) Error!void {
+        const arg_len = inst.ptr;
+        const val = &self.stack[self.sp - (1 + arg_len)];
+        if (val.* != .function) return error.InvalidOperator;
+
+        if (arg_len != val.function.arg_len) return Error.MissingValue;
+        try self.call_stack.append(.{
+            .fp = val,
+            .ip = self.ip,
+            .sp = self.sp - arg_len,
+        });
+        self.ip = val.function.offset - 1;
     }
 };
 
@@ -542,6 +558,26 @@ test "Globals vs Locals" {
     const test_cases = .{
         .{ .input = "const x = fn() { const x = 5 x } x()", .expected = 5 },
         .{ .input = "const x = fn() { const y = 1 const z = 2 y + z } x()", .expected = 3 },
+    };
+
+    inline for (test_cases) |case| {
+        const code = try compiler.compile(testing.allocator, case.input);
+        defer code.deinit();
+        var vm = try run(code, testing.allocator);
+        defer vm.deinit();
+
+        if (@TypeOf(case.expected) == comptime_int)
+            testing.expectEqual(@as(i64, case.expected), vm.popped().integer)
+        else
+            testing.expectEqual(case.expected, vm.popped());
+    }
+}
+
+test "Functions with arguments" {
+    const test_cases = .{
+        .{ .input = "const x = fn(x) { x } x(3)", .expected = 3 },
+        .{ .input = "const x = fn(a, b) { a + b } x(3,5)", .expected = 8 },
+        .{ .input = "const x = fn(a, b) { const z = a + b z } x(3,5)", .expected = 8 },
     };
 
     inline for (test_cases) |case| {
