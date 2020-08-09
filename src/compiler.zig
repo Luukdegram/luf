@@ -28,6 +28,17 @@ pub fn compile(
     };
     defer root_scope.symbols.deinit();
 
+    // load builtins
+    try root_scope.symbols.ensureCapacity(Value.builtin_keys.len);
+    for (Value.builtin_keys) |key, i| {
+        root_scope.symbols.putAssumeCapacity(key, .{
+            .scope = .builtin,
+            .name = key,
+            .mutable = false,
+            .index = @truncate(u16, i),
+        });
+    }
+
     var compiler = Compiler{
         .instructions = bytecode.Instructions.init(allocator),
         .constants = Values.init(allocator),
@@ -72,8 +83,7 @@ pub const Compiler = struct {
         /// Index of symbol table
         index: u16 = 0,
         /// The scope the symbol belongs to
-        /// used to determine if global or local symbol
-        scope: *Scope,
+        scope: Scope.Id,
     };
 
     /// Hashmap of `Symbol` where the key is the Symbol's name
@@ -89,6 +99,7 @@ pub const Compiler = struct {
         const Id = enum {
             root,
             function,
+            builtin,
         };
 
         /// Creates a new `Scope` from the current Scope.
@@ -106,11 +117,16 @@ pub const Compiler = struct {
 
         /// Defines a new symbol and saves it in the symbol table
         fn define(self: *Scope, name: []const u8, mutable: bool) !Symbol {
+            const index = if (self.id == .root)
+                self.symbols.items().len - Value.builtin_keys.len
+            else
+                self.symbols.items().len;
+
             const symbol = Symbol{
                 .name = name,
                 .mutable = mutable,
-                .index = @truncate(u16, self.symbols.items().len),
-                .scope = self,
+                .index = @truncate(u16, index),
+                .scope = self.id,
             };
             try self.symbols.put(name, symbol);
             return symbol;
@@ -289,7 +305,7 @@ pub const Compiler = struct {
             .declaration => |decl| {
                 try self.compile(decl.value);
                 const symbol = try self.scope.define(decl.name.identifier.value, decl.mutable);
-                const opcode: bytecode.Opcode = if (symbol.scope.id == .root)
+                const opcode: bytecode.Opcode = if (symbol.scope == .root)
                     .bind_global
                 else
                     .bind_local;
@@ -297,10 +313,11 @@ pub const Compiler = struct {
                 _ = try self.emitOp(opcode, symbol.index);
             },
             .identifier => |id| if (self.resolveSymbol(self.scope, id.value)) |symbol| {
-                const opcode: bytecode.Opcode = if (symbol.scope.id == .root)
-                    .load_global
-                else
-                    .load_local;
+                const opcode: bytecode.Opcode = switch (symbol.scope) {
+                    .root => .load_global,
+                    .function => .load_local,
+                    .builtin => .load_builtin,
+                };
                 _ = try self.emitOp(opcode, symbol.index);
             } else return Error.CompilerError,
             .string_lit => |string| {
@@ -603,6 +620,16 @@ test "Compile AST to bytecode" {
                 .load_const,
                 .call,
                 .pop,
+            },
+        },
+        .{
+            .input = "const x = \"string\".len",
+            .consts = &[_][]const u8{"string"},
+            .opcodes = &[_]bytecode.Opcode{
+                .load_const,
+                .load_builtin,
+                .index,
+                .bind_global,
             },
         },
     };

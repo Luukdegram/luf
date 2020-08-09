@@ -12,6 +12,7 @@ pub const Opcode = enum(u8) {
     bind_global,
     load_local,
     bind_local,
+    load_builtin,
     jump_false,
     jump,
     call,

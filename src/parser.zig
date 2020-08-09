@@ -127,13 +127,13 @@ pub const Parser = struct {
         const tmp_token = self.current_token;
 
         if (!self.expectPeek(.identifier)) {
-            return self.fail("Expected identifier but found {}");
+            return self.fail("Expected identifier but found '{}'");
         }
 
         const name = try self.parseIdentifier();
 
         if (!self.expectPeek(.assign)) {
-            return self.fail("Expected token = but found {}");
+            return self.fail("Expected token '=' but found '{}'");
         }
 
         self.next();
@@ -187,10 +187,7 @@ pub const Parser = struct {
             .function => try self.parseFunctionLiteral(),
             .left_bracket => try self.parseArray(),
             .left_brace => try self.parseMap(),
-            else => {
-                std.debug.print("Unexpected token: {}\n", .{self.current_token});
-                return error.ParserError;
-            },
+            else => return self.fail("Unexpected token '{}'"),
         };
 
         while (prec.val() < findPrecedence(self.peek_token.type).val()) {
@@ -288,7 +285,7 @@ pub const Parser = struct {
         self.next();
         const exp = try self.parseExpression(.lowest);
         if (!self.expectPeek(.right_parenthesis)) {
-            return error.ParserError;
+            return self.fail("Expected ')' but found '{}'");
         }
         return exp;
     }
@@ -304,18 +301,18 @@ pub const Parser = struct {
             .false_pong = undefined,
         };
         if (!self.expectPeek(.left_parenthesis)) {
-            return error.ParserError;
+            return self.fail("Expected '(' but found '{}'");
         }
 
         self.next();
         exp.condition = try self.parseExpression(.lowest);
 
         if (!self.expectPeek(.right_parenthesis)) {
-            return error.ParserError;
+            return self.fail("Expected ')' but found '{}'");
         }
 
         if (!self.expectPeek(.left_brace)) {
-            return error.ParserError;
+            return self.fail("Expected '{' but found '{}'");
         }
 
         exp.true_pong = try self.parseBlockStatement();
@@ -324,7 +321,7 @@ pub const Parser = struct {
             self.next();
 
             if (!self.expectPeek(.left_brace)) {
-                return error.ParserError;
+                return self.fail("Expected '{' but found '{}'");
             }
 
             exp.false_pong = try self.parseBlockStatement();
@@ -367,13 +364,13 @@ pub const Parser = struct {
         };
 
         if (!self.expectPeek(.left_parenthesis)) {
-            return error.ParserError;
+            return self.fail("Expected '(' but found '{}'");
         }
 
         func.params = try self.parseFunctionParameters();
 
         if (!self.expectPeek(.left_brace)) {
-            return error.ParserError;
+            return self.fail("Expected '{' but found '{}'");
         }
 
         func.body = try self.parseBlockStatement();
@@ -403,7 +400,7 @@ pub const Parser = struct {
         }
 
         if (!self.expectPeek(.right_parenthesis)) {
-            return error.ParserError;
+            return self.fail("Expected ')' but found '{}'");
         }
 
         return list.toOwnedSlice();
@@ -442,7 +439,7 @@ pub const Parser = struct {
         }
 
         if (!self.expectPeek(end_type)) {
-            return error.ParserError;
+            return self.fail("Expected '{}' but found '{}'");
         }
 
         return list.toOwnedSlice();
@@ -468,12 +465,12 @@ pub const Parser = struct {
             const pair = try self.parsePair();
             try pairs.append(pair);
             if (!self.peekIsType(.right_brace) and !self.expectPeek(.comma)) {
-                return error.ParserError;
+                return self.fail("Expected token ',' but found {}");
             }
         }
 
         if (!self.expectPeek(.right_brace)) {
-            return error.ParserError;
+            return self.fail("Expected '}' but found '{}'");
         }
 
         map.value = pairs.toOwnedSlice();
@@ -487,7 +484,7 @@ pub const Parser = struct {
         pair.* = .{ .token = self.current_token, .key = try self.parseExpression(.lowest), .value = undefined };
 
         if (!self.expectPeek(.colon)) {
-            return error.ParserError;
+            return self.fail("Expected ':' but found '{}'");
         }
 
         // skip over colon
@@ -507,7 +504,7 @@ pub const Parser = struct {
         index.index = try self.parseExpression(.lowest);
 
         if (token.type != .period and !self.expectPeek(.right_bracket)) {
-            return self.fail("Expected } but found {}");
+            return self.fail("Expected '}' but found '{}'");
         }
 
         return Node{ .index = index };

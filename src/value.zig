@@ -15,7 +15,7 @@ pub const Type = enum {
     function,
     list,
     map,
-    builtin,
+    native,
 };
 
 /// Value depending on its type
@@ -31,13 +31,14 @@ pub const Value = union(Type) {
     },
     list: List,
     map: Map,
-    builtin: struct {
-        func: builtinFn,
+    native: struct {
+        func: BuiltinFn,
+        arg_len: usize,
     },
 
-    pub const True = Value{ .boolean = true };
-    pub const False = Value{ .boolean = false };
-    pub const Nil = Value{ .nil = {} };
+    pub var True = Value{ .boolean = true };
+    pub var False = Value{ .boolean = false };
+    pub var Nil = Value{ .nil = {} };
 
     /// Frees Value's memory
     pub fn deinit(self: Value, alloc: *Allocator) void {
@@ -56,11 +57,11 @@ pub const Value = union(Type) {
         }
     }
 
-    fn hash(key: Value) u32 {
+    fn hash(key: *const Value) u32 {
         const hashFn = std.hash.autoHash;
         var hasher = std.hash.Wyhash.init(0);
 
-        switch (key) {
+        switch (key.*) {
             .integer => |int| hashFn(&hasher, int),
             .boolean => |boolean| hashFn(&hasher, boolean),
             .string => |str| hasher.update(str),
@@ -75,15 +76,15 @@ pub const Value = union(Type) {
                 hashFn(&hasher, map.items().len);
                 hashFn(&hasher, map.items().ptr);
             },
-            .builtin => |builtin| hashFn(&hasher, builtin.func),
+            .native => |native| hashFn(&hasher, native.func),
             .nil => {},
             else => unreachable,
         }
         return @truncate(u32, hasher.final());
     }
 
-    fn eql(a: Value, b: Value) bool {
-        return switch (a) {
+    fn eql(a: *const Value, b: *const Value) bool {
+        return switch (a.*) {
             .integer => a.integer == b.integer,
             .boolean => a.boolean == b.boolean,
             .nil => true,
@@ -106,13 +107,17 @@ pub const Value = union(Type) {
         };
     }
 
-    pub const List = std.ArrayList(Value);
-    pub const Map = std.HashMap(Value, Value, hash, eql, true);
+    pub const List = std.ArrayList(*Value);
+    pub const Map = std.HashMap(*const Value, *Value, hash, eql, true);
 
     pub const builtins = std.ComptimeStringMap(Value, .{
         .{ "len", len_func },
         .{ "add", add_func },
     });
+
+    pub const builtin_keys = &[_][]const u8{
+        "len", "add",
+    };
 };
 
 /// Scope maps identifiers to their names and can be used
@@ -171,16 +176,16 @@ pub const Scope = struct {
     }
 };
 
-const BuiltinError = error{ OutOfMemory, UnsupportedType, MismatchingTypes };
-const builtinFn = fn (args: []Value) BuiltinError!*Value;
-const len_func = Value{ .builtin = .{ .func = len } };
-const add_func = Value{ .builtin = .{ .func = add } };
+pub const BuiltinError = error{ OutOfMemory, UnsupportedType, MismatchingTypes };
+const BuiltinFn = fn (args: []*Value) BuiltinError!*Value;
+const len_func = Value{ .native = .{ .func = len, .arg_len = 0 } };
+const add_func = Value{ .native = .{ .func = add, .arg_len = 1 } };
 
 /// Returns the length of the `Value`.
 /// Supports strings, arrays and maps.
-fn len(args: []Value) BuiltinError!*Value {
+fn len(args: []*Value) BuiltinError!*Value {
     std.debug.assert(args.len == 1);
-    const length: i64 = switch (args[0]) {
+    const length: i64 = switch (args[0].*) {
         .string => |val| @intCast(i64, val.len),
         .list => |list| @intCast(i64, list.items.len),
         .map => |map| @intCast(i64, map.items().len),
@@ -190,30 +195,33 @@ fn len(args: []Value) BuiltinError!*Value {
 }
 
 /// Appends a new value to the list
-fn add(args: []Value) BuiltinError!*Value {
+fn add(args: []*Value) BuiltinError!*Value {
     std.debug.assert(args.len >= 2);
-    return switch (args[0]) {
+    return switch (args[0].*) {
         .list => |*list| {
+            const val = args[args.len - 1];
             if (list.items.len > 0) {
-                if (list.items[0] != std.meta.activeTag(args[1])) {
+                if (list.items[0].* != std.meta.activeTag(val.*)) {
                     return BuiltinError.MismatchingTypes;
                 }
             }
-            try list.append(args[1]);
-            return &args[0];
+            try list.append(val);
+            return args[0];
         },
         .map => |*map| {
+            const key = args[args.len - 2];
+            const val = args[args.len - 1];
             if (map.items().len > 0) {
                 const entry = map.items()[0];
-                if (entry.key != std.meta.activeTag(args[1])) {
+                if (entry.key.* != std.meta.activeTag(key.*)) {
                     return BuiltinError.MismatchingTypes;
                 }
-                if (entry.value != std.meta.activeTag(args[2])) {
+                if (entry.value.* != std.meta.activeTag(val.*)) {
                     return BuiltinError.MismatchingTypes;
                 }
             }
-            try map.put(args[1], args[2]);
-            return &args[0];
+            try map.put(key, val);
+            return args[0];
         },
         else => BuiltinError.UnsupportedType,
     };

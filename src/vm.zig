@@ -2,8 +2,10 @@ const std = @import("std");
 const compiler = @import("compiler.zig");
 const ByteCode = compiler.Compiler.ByteCode;
 const byte_code = @import("bytecode.zig");
-const Value = @import("value.zig").Value;
-const Type = @import("value.zig").Type;
+const _value = @import("value.zig");
+const Value = _value.Value;
+const Type = _value.Type;
+const BuiltinError = _value.BuiltinError;
 const testing = std.testing;
 const Allocator = std.mem.Allocator;
 
@@ -37,7 +39,7 @@ pub const Vm = struct {
     ip: usize = 0,
     /// Stack has a max of 2048 Value's that it can hold
     /// This is pre-allocated.
-    stack: [2048]Value = undefined,
+    stack: [2048]*Value = undefined,
     /// Globals that live inside the VM
     /// Currently allows 65536 Values
     globals: Value.List,
@@ -45,12 +47,12 @@ pub const Vm = struct {
     arena: std.heap.ArenaAllocator,
     call_stack: CallStack,
 
-    pub const Error = error{ OutOfMemory, MissingValue, InvalidOperator };
+    pub const Error = error{ OutOfMemory, MissingValue, InvalidOperator } || BuiltinError;
     const CallStack = std.ArrayList(Frame);
     /// Function `Frame` on the callstack
     const Frame = struct {
         /// Frame pointer which contains the actual function `Value`
-        fp: *Value,
+        fp: *const Value,
         /// `Instruction` pointer to the position of the function in the bytecode's instruction set
         ip: usize,
         /// Stack pointer. Mostly used to reset the stack pointer between scope changes
@@ -69,24 +71,29 @@ pub const Vm = struct {
     pub fn run(self: *Vm, code: ByteCode) Error!void {
         while (self.ip < code.instructions.len) : (self.ip += 1) {
             const inst = code.instructions[self.ip];
-
             switch (inst.op) {
-                .load_const => try self.push(code.constants[inst.ptr]),
+                .load_const => {
+                    const val = try self.allocator.create(Value);
+                    val.* = code.constants[inst.ptr];
+                    try self.push(val);
+                },
                 .equal, .not_equal, .less_than, .greater_than => try self.analCmp(inst.op),
                 .add, .sub, .mul, .div => try self.analBinOp(inst.op),
                 .pop => _ = self.pop(),
-                .load_true => try self.push(Value.True),
-                .load_false => try self.push(Value.False),
+                .load_true => try self.push(&Value.True),
+                .load_false => try self.push(&Value.False),
                 .minus => try self.analNegation(),
                 .bang => try self.analBang(),
-                .load_nil => try self.push(Value.Nil),
+                .load_nil => try self.push(&Value.Nil),
                 .jump => self.ip = inst.ptr - 1,
                 .jump_false => {
                     const condition = self.pop().?;
                     if (!isTrue(condition)) self.ip = inst.ptr - 1;
                 },
                 .bind_global => try self.globals.append(self.pop().?),
-                .load_global => try self.push(self.globals.items[inst.ptr]),
+                .load_global => {
+                    try self.push(self.globals.items[inst.ptr]);
+                },
                 .make_array => try self.analArray(inst),
                 .make_map => try self.analMap(inst),
                 .index => try self.analIndex(),
@@ -95,7 +102,7 @@ pub const Vm = struct {
                     self.ip = cur_frame.ip;
 
                     _ = self.pop();
-                    try self.push(Value.Nil);
+                    try self.push(&Value.Nil);
                 },
                 .return_value => {
                     // remove the frame from the call stack
@@ -122,14 +129,17 @@ pub const Vm = struct {
                     const val = self.stack[self.frame().?.sp + inst.ptr];
                     try self.push(val);
                 },
-                //else => {},
+                .load_builtin => {
+                    const key = Value.builtin_keys[inst.ptr];
+                    try self.push(&(Value.builtins.get(key).?));
+                }, //else => {},
             }
         }
     }
 
     /// Pushes a new `Value` on top of the `stack` and increases
     /// the stack pointer by 1.
-    fn push(self: *Vm, value: Value) Error!void {
+    fn push(self: *Vm, value: *Value) Error!void {
         if (self.sp > self.stack.len - 1) return Error.OutOfMemory;
 
         self.stack[self.sp] = value;
@@ -138,7 +148,7 @@ pub const Vm = struct {
 
     /// Returns the `Value` from the `stack` and decreases the stack
     /// pointer by 1. Returns null if stack is empty.
-    fn pop(self: *Vm) ?Value {
+    fn pop(self: *Vm) ?*Value {
         if (self.sp == 0) return null;
         self.sp -= 1;
         return self.stack[self.sp];
@@ -147,7 +157,7 @@ pub const Vm = struct {
     /// Returns the previously popped `Value`
     /// Note that this results in UB if the stack is empty.
     fn popped(self: *Vm) Value {
-        return self.stack[self.sp];
+        return self.stack[self.sp].*;
     }
 
     /// Returns the current `Frame` of the call stack
@@ -163,10 +173,10 @@ pub const Vm = struct {
         const right = self.pop() orelse return Error.MissingValue;
         const left = self.pop() orelse return Error.MissingValue;
 
-        if (std.meta.activeTag(left) == std.meta.activeTag(right) and left == .integer) {
+        if (std.meta.activeTag(left.*) == std.meta.activeTag(right.*) and left.* == .integer) {
             return self.analIntOp(op, left.integer, right.integer);
         }
-        if (std.meta.activeTag(left) == std.meta.activeTag(right) and left == .string) {
+        if (std.meta.activeTag(left.*) == std.meta.activeTag(right.*) and left.* == .string) {
             return self.analStringOp(op, left.string, right.string);
         }
     }
@@ -181,13 +191,17 @@ pub const Vm = struct {
             else => return Error.InvalidOperator,
         };
 
-        return self.push(.{ .integer = result });
+        const res = try self.allocator.create(Value);
+        res.* = .{ .integer = result };
+        return self.push(res);
     }
 
     fn analStringOp(self: *Vm, op: byte_code.Opcode, left: []const u8, right: []const u8) Error!void {
         if (op != .add) return Error.InvalidOperator;
 
-        return self.push(.{ .string = try std.mem.concat(&self.arena.allocator, u8, &[_][]const u8{ left, right }) });
+        const res = try self.allocator.create(Value);
+        res.* = .{ .string = try std.mem.concat(self.allocator, u8, &[_][]const u8{left, right}) };
+        return self.push(res);
     }
 
     /// Analyzes a then executes a comparison and pushes the return value on the stack
@@ -196,14 +210,14 @@ pub const Vm = struct {
         const right = self.pop() orelse return Error.MissingValue;
         const left = self.pop() orelse return Error.MissingValue;
 
-        if (std.meta.activeTag(left) == std.meta.activeTag(right) and left == .integer) {
+        if (std.meta.activeTag(left.*) == std.meta.activeTag(right.*) and left.* == .integer) {
             return self.analIntCmp(op, left.integer, right.integer);
         }
 
         // for now just assume it's a boolean
         switch (op) {
-            .equal => try self.push(if (left.boolean == right.boolean) Value.True else Value.False),
-            .not_equal => try self.push(if (left.boolean != right.boolean) Value.True else Value.False),
+            .equal => try self.push(if (left.boolean == right.boolean) &Value.True else &Value.False),
+            .not_equal => try self.push(if (left.boolean != right.boolean) &Value.True else &Value.False),
             else => return Error.InvalidOperator,
         }
     }
@@ -218,26 +232,28 @@ pub const Vm = struct {
             else => return Error.InvalidOperator,
         };
 
-        return self.push(if (boolean) Value.True else Value.False);
+        return self.push(if (boolean) &Value.True else &Value.False);
     }
 
     /// Analyzes and executes a negation
     fn analNegation(self: *Vm) Error!void {
         const right = self.pop() orelse return Error.MissingValue;
-        if (right != .integer) return Error.InvalidOperator;
+        if (right.* != .integer) return Error.InvalidOperator;
 
-        return self.push(.{ .integer = -right.integer });
+        const res = try self.allocator.create(Value);
+        res.* = .{ .integer = -right.integer };
+        return self.push(res);
     }
     /// Analyzes and executes the '!' operator
     fn analBang(self: *Vm) Error!void {
         const right = self.pop() orelse return Error.MissingValue;
 
-        const val = switch (right) {
+        const val = switch (right.*) {
             .boolean => !right.boolean,
             .nil => true,
             else => false,
         };
-        return self.push(if (val) Value.True else Value.False);
+        return self.push(if (val) &Value.True else &Value.False);
     }
 
     /// Analyzes the instruction and builds an array
@@ -246,7 +262,11 @@ pub const Vm = struct {
         var list = try Value.List.initCapacity(&self.arena.allocator, len);
         errdefer list.deinit();
 
-        if (len == 0) return self.push(.{ .list = list });
+        const res = try self.allocator.create(Value);
+        if (len == 0) {
+            res.* = .{ .list = list };
+            return self.push(res);
+        }
 
         var index = self.sp - len;
         var list_type: Type = undefined;
@@ -258,14 +278,15 @@ pub const Vm = struct {
         }) {
             const val = self.stack[index];
             if (i == 0)
-                list_type = std.meta.activeTag(val)
+                list_type = std.meta.activeTag(val.*)
             else {
-                if (list_type != std.meta.activeTag(val)) return Error.MissingValue;
+                if (list_type != std.meta.activeTag(val.*)) return Error.MissingValue;
             }
             try list.insert(i, val);
         }
 
-        return self.push(.{ .list = list });
+        res.* = .{ .list = list };
+        return self.push(res);
     }
 
     /// Analyzes and creates a new map
@@ -273,7 +294,12 @@ pub const Vm = struct {
         const len = inst.ptr / 2;
         var map = Value.Map.init(&self.arena.allocator);
         errdefer map.deinit();
-        if (len == 0) return self.push(.{ .map = map });
+
+        const res = try self.allocator.create(Value);
+        if (len == 0) {
+            res.* = .{ .map = map };
+            return self.push(res);
+        }
 
         try map.ensureCapacity(len);
 
@@ -290,17 +316,18 @@ pub const Vm = struct {
             const value = self.stack[index + 1];
 
             if (i == 0) {
-                key_type = std.meta.activeTag(key);
-                value_type = std.meta.activeTag(value);
+                key_type = std.meta.activeTag(key.*);
+                value_type = std.meta.activeTag(value.*);
             } else {
-                if (key_type != std.meta.activeTag(key)) return Error.MissingValue;
-                if (value_type != std.meta.activeTag(value)) return Error.MissingValue;
+                if (key_type != std.meta.activeTag(key.*)) return Error.MissingValue;
+                if (value_type != std.meta.activeTag(value.*)) return Error.MissingValue;
             }
 
             map.putAssumeCapacity(key, value);
         }
 
-        return self.push(.{ .map = map });
+        res.* = .{ .map = map };
+        return self.push(res);
     }
 
     /// Analyzes an index/reference pushes the value on the stack
@@ -308,22 +335,38 @@ pub const Vm = struct {
         const index = self.pop() orelse return Error.MissingValue;
         const left = self.pop() orelse return Error.MissingValue;
 
-        //TODO implement builtins and references
-        if (left == .list and index == .integer) {
+        if (index.* == .native) {
+            const native = index.native;
+            const args = try self.allocator.alloc(*Value, native.arg_len + 1);
+            defer self.allocator.free(args);
+            args[0] = left;
+            var i: usize = 1;
+            while (i <= native.arg_len) : (i += 1) args[i] = self.stack[self.sp + native.arg_len + i];
+            const result = try native.func(args);
+
+            //std.debug.print("Result: {}\n", .{result});
+            if (result.* == .list) std.debug.print("List length: {}\n", .{result.list.items.len});
+
+            return self.push(result);
+        }
+
+        //TODO implement references
+        if (left.* == .list and index.* == .integer) {
             const i = index.integer;
             const list = left.list;
             if (i < 0 or i > list.items.len) return Error.OutOfMemory;
 
             return self.push(list.items[@intCast(u64, i)]);
-        } else if (left == .map) {
+        } else if (left.* == .map) {
             const map: Value.Map = left.map;
             if (map.get(index)) |val| {
                 return self.push(val);
             }
-            return self.push(Value.Nil);
+            return self.push(&Value.Nil);
         }
 
-        return Error.MissingValue;
+        std.debug.print("Got: {} {}\n", .{ left, index });
+        //return Error.MissingValue;
     }
 
     /// Analyzes the current instruction to execture a function call
@@ -331,7 +374,10 @@ pub const Vm = struct {
     /// This will also return the new instruction pointer
     fn analFunctionCall(self: *Vm, inst: byte_code.Instruction) Error!void {
         const arg_len = inst.ptr;
-        const val = &self.stack[self.sp - (1 + arg_len)];
+        const val = self.stack[self.sp - (1 + arg_len)];
+
+        //builtin function calls are handled by analIndex
+        if (val.* == .native) return self.analBuiltinFunctionCall(val);
         if (val.* != .function) return error.InvalidOperator;
 
         if (arg_len != val.function.arg_len) return Error.MissingValue;
@@ -342,12 +388,32 @@ pub const Vm = struct {
         });
         self.ip = val.function.offset - 1;
     }
+
+    /// Analyzes for argument length and then calls the builtin function
+    /// Returns the result on the stack
+    fn analBuiltinFunctionCall(self: *Vm, val: *const Value) Error!void {
+        std.debug.assert(val.* == .native);
+
+        // insert the arguments lower on the stack
+        // so they can be called correctly by analIndex
+        var i: usize = 0;
+        while (i < val.native.arg_len) : (i += 1)
+            self.stack[self.sp - val.native.arg_len - i] = self.pop().?;
+
+        //self.sp -= arg_len - 1;
+        //ireturn self.push(result);
+    }
+
+    /// Creates a new Value on the heap which will be freed on scope exits (call_stack pops)
+    fn newValue(self: *Vm) !*Value{
+        return self.arena.allocator.create(Value);
+    }
 };
 
 /// Checks each given type if they are equal or not
-fn resolveType(values: []Value) Vm.Error!Type {
+fn resolveType(values: []*const Value) Vm.Error!Type {
     std.debug.assert(values.len > 0);
-    const cur_tag: Type = std.meta.activeTag(values[0]);
+    const cur_tag: Type = std.meta.activeTag(values[0].*);
     if (values.len == 1) return cur_tag;
 
     for (values[1..]) |value|
@@ -356,8 +422,8 @@ fn resolveType(values: []Value) Vm.Error!Type {
 
 /// Evalutes if the given `Value` is truthy.
 /// Only accepts booleans and 'Nil'.
-fn isTrue(value: Value) bool {
-    return switch (value) {
+fn isTrue(value: *const Value) bool {
+    return switch (value.*) {
         .nil => false,
         .boolean => |val| val,
         else => true,
@@ -512,12 +578,12 @@ test "Maps" {
     }
 }
 
-test "Index array/map" {
+test "Index" {
     const test_cases = .{
-        .{ .input = "[1, 2, 3][1]", .expected = 2 },
-        .{ .input = "{1: 5}[1]", .expected = 5 },
-        .{ .input = "{2: 5}[0]", .expected = Value.Nil },
-        .{ .input = "{\"foo\": 15}[\"foo\"]", .expected = 15 },
+        //.{ .input = "[1, 2, 3][1]", .expected = 2 },
+        //.{ .input = "{1: 5}[1]", .expected = 5 },
+        //.{ .input = "{2: 5}[0]", .expected = Value.Nil },
+        //.{ .input = "{\"foo\": 15}[\"foo\"]", .expected = 15 },
     };
 
     inline for (test_cases) |case| {
@@ -590,5 +656,22 @@ test "Functions with arguments" {
             testing.expectEqual(@as(i64, case.expected), vm.popped().integer)
         else
             testing.expectEqual(case.expected, vm.popped());
+    }
+}
+
+test "Builtins" {
+    const test_cases = .{
+        //.{ .input = "\"Hello world\".len", .expected = 11 },
+        //.{ .input = "[1,5,2].len", .expected = 3 },
+        .{ .input = "const x = [1] x.add(2) x.len", .expected = 2 },
+    };
+
+    inline for (test_cases) |case| {
+        const code = try compiler.compile(testing.allocator, case.input);
+        defer code.deinit();
+        var vm = try run(code, testing.allocator);
+        defer vm.deinit();
+
+        testing.expectEqual(@as(i64, case.expected), vm.popped().integer);
     }
 }
