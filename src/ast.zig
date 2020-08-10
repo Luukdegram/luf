@@ -39,6 +39,7 @@ pub const Node = union(NodeType) {
     map: *MapLiteral,
     map_pair: *MapPair,
     index: *IndexExpression,
+    while_loop: *WhileLoop,
 
     /// Possible Nodes which are supported
     pub const NodeType = enum {
@@ -59,6 +60,7 @@ pub const Node = union(NodeType) {
         map,
         map_pair,
         index,
+        while_loop,
     };
 
     /// Represents a String
@@ -163,7 +165,7 @@ pub const Node = union(NodeType) {
                     .greater_than => .greater_than,
                     .equal => .equal,
                     .not_equal => .not_equal,
-                    else => @panic("Unexpected token"),
+                    else => @panic("Unexpected token"), //TODO replace this hard panic
                 };
             }
         };
@@ -217,5 +219,12 @@ pub const Node = union(NodeType) {
         token: Token,
         function: Node,
         arguments: []Node,
+    };
+
+    /// Represents a while loop, contains the condition and the block
+    pub const WhileLoop = struct {
+        token: Token,
+        condition: Node,
+        block: Node,
     };
 };

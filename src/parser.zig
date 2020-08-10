@@ -187,6 +187,7 @@ pub const Parser = struct {
             .function => try self.parseFunctionLiteral(),
             .left_bracket => try self.parseArray(),
             .left_brace => try self.parseMap(),
+            .while_loop => try self.parseWhile(),
             else => return self.fail("Unexpected token '{}'"),
         };
 
@@ -331,6 +332,8 @@ pub const Parser = struct {
     }
 
     /// Parses the tokens into a `Node.BlockStatement` until a right brace is found
+    /// Indirectly asserts a closing bracket is found
+    /// Parse statements using this function do not have to assert for it.
     fn parseBlockStatement(self: *Parser) !Node {
         const block = try self.allocator.create(Node.BlockStatement);
         block.* = .{
@@ -508,6 +511,32 @@ pub const Parser = struct {
         }
 
         return Node{ .index = index };
+    }
+
+    /// Parses a while token into a while node
+    fn parseWhile(self: *Parser) Error!Node {
+        const node = try self.allocator.create(Node.WhileLoop);
+        node.* = .{
+            .token = self.current_token,
+            .condition = undefined,
+            .block = undefined,
+        };
+
+        if (!self.expectPeek(.left_parenthesis)) return self.fail("Expected token '(' but got '{}'");
+
+        // skip ( token
+        self.next();
+
+        node.condition = try self.parseExpression(.lowest);
+
+        if (!self.expectPeek(.right_parenthesis)) return self.fail("Expected token ')' but got'{}");
+
+        if (!self.expectPeek(.left_brace)) return self.fail("Expected token '{' but got '{}'");
+
+        // parseBlockStatement already asserts for a closing bracket, so return after parsing
+        node.block = try self.parseBlockStatement();
+
+        return Node{ .while_loop = node };
     }
 
     /// Determines if the next token is the expected token or not.
@@ -895,4 +924,20 @@ test "Map Literal" {
         testing.expectEqualSlices(u8, case.key, pair.key.string_lit.value);
         testing.expect(case.value == pair.value.int_lit.value);
     }
+}
+
+test "While loop" {
+    const input = "while(x < y) { x }";
+    const allocator = testing.allocator;
+
+    const tree = try parse(allocator, input);
+    defer tree.deinit();
+
+    testing.expect(tree.nodes.len == 1);
+
+    const loop = tree.nodes[0].expression.value.while_loop;
+
+    testing.expect(loop.condition.infix.operator == .less_than);
+    testing.expect(loop.block.block_statement.nodes.len == 1);
+    testing.expectEqualStrings("x", loop.block.block_statement.nodes[0].expression.value.identifier.value);
 }

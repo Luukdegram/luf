@@ -116,7 +116,8 @@ pub const Compiler = struct {
         }
 
         /// Defines a new symbol and saves it in the symbol table
-        fn define(self: *Scope, name: []const u8, mutable: bool) !Symbol {
+        fn define(self: *Scope, name: []const u8, mutable: bool) Error!Symbol {
+            if (self.resolve(name)) |s| return s;
             const index = if (self.id == .root)
                 self.symbols.items().len - Value.builtin_keys.len
             else
@@ -240,7 +241,10 @@ pub const Compiler = struct {
         switch (node) {
             .expression => |exp| {
                 try self.compile(exp.value);
-                _ = try self.emit(.pop);
+
+                if (!self.lastInstIs(.noop)) {
+                    _ = try self.emit(.pop);
+                }
             },
             .block_statement => |block| for (block.nodes) |bnode| try self.compile(bnode),
             .infix => |inf| {
@@ -303,8 +307,10 @@ pub const Compiler = struct {
                 self.instructions.items[jump_pos].ptr = @truncate(u16, len);
             },
             .declaration => |decl| {
-                try self.compile(decl.value);
                 const symbol = try self.scope.define(decl.name.identifier.value, decl.mutable);
+
+                try self.compile(decl.value);
+
                 const opcode: bytecode.Opcode = if (symbol.scope == .root)
                     .bind_global
                 else
@@ -376,8 +382,7 @@ pub const Compiler = struct {
                     },
                 }));
 
-                const jump = &self.instructions.items[jump_pos];
-                jump.ptr = @truncate(u16, last_pos);
+                self.instructions.items[jump_pos].ptr = @intCast(u16, last_pos);
             },
             .call_expression => |call| {
                 try self.compile(call.function);
@@ -390,7 +395,23 @@ pub const Compiler = struct {
                 try self.compile(ret.value);
                 _ = try self.emit(.return_value);
             },
-            //else => return Error.CompilerError,
+            .while_loop => |loop| {
+                // beginning of while
+                const start_jump = self.instructions.items.len;
+                try self.compile(loop.condition);
+
+                // jump position if condition equals false
+                const false_jump = try self.emit(.jump_false);
+
+                try self.compile(loop.block);
+
+                _ = try self.emitOp(.jump, @intCast(u16, start_jump));
+
+                const end = try self.emit(.noop);
+
+                // jump to end
+                self.instructions.items[false_jump].ptr = @intCast(u16, end);
+            }, //else => return Error.CompilerError,
         }
     }
 };
@@ -632,14 +653,26 @@ test "Compile AST to bytecode" {
                 .bind_global,
             },
         },
+        .{
+            .input = "while (true) { 10 }",
+            .consts = &[_]i64{10},
+            .opcodes = &[_]bytecode.Opcode{
+                .load_true,
+                .jump_false,
+                .load_const,
+                .pop,
+                .jump,
+                .noop,
+            },
+        },
     };
 
     inline for (test_cases) |case| {
         const code = try compile(testing.allocator, case.input);
         defer code.deinit();
 
-        testing.expect(case.consts.len == code.constants.len);
-        testing.expect(case.opcodes.len == code.instructions.len);
+        testing.expectEqual(case.consts.len, code.constants.len);
+        testing.expectEqual(case.opcodes.len, code.instructions.len);
         for (case.consts) |constant, i| {
             if (@TypeOf(constant) == i64)
                 testing.expect(constant == code.constants[i].integer)
@@ -655,6 +688,7 @@ test "Compile AST to bytecode" {
             }
         }
         for (case.opcodes) |op, i| {
+            //std.debug.print("Instr: {}\n", .{code.instructions[i]});
             testing.expectEqual(op, code.instructions[i].op);
         }
     }

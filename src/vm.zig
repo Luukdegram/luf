@@ -91,9 +91,7 @@ pub const Vm = struct {
                     if (!isTrue(condition)) self.ip = inst.ptr - 1;
                 },
                 .bind_global => try self.globals.append(self.pop().?),
-                .load_global => {
-                    try self.push(self.globals.items[inst.ptr]);
-                },
+                .load_global => try self.push(self.globals.items[inst.ptr]),
                 .make_array => try self.analArray(inst),
                 .make_map => try self.analMap(inst),
                 .index => try self.analIndex(),
@@ -108,9 +106,8 @@ pub const Vm = struct {
                     // remove the frame from the call stack
                     const cur_frame = self.call_stack.pop();
                     self.ip = cur_frame.ip;
-                    //self.sp = cur_frame.sp;
 
-                    // // get return value from stack
+                    // get return value from stack
                     const rv = self.pop().?;
                     self.sp = cur_frame.sp;
 
@@ -132,7 +129,8 @@ pub const Vm = struct {
                 .load_builtin => {
                     const key = Value.builtin_keys[inst.ptr];
                     try self.push(&(Value.builtins.get(key).?));
-                }, //else => {},
+                },
+                else => {},
             }
         }
     }
@@ -364,8 +362,7 @@ pub const Vm = struct {
             return self.push(&Value.Nil);
         }
 
-        std.debug.print("Got: {} {}\n", .{ left, index });
-        //return Error.MissingValue;
+        return Error.MissingValue;
     }
 
     /// Analyzes the current instruction to execture a function call
@@ -398,9 +395,6 @@ pub const Vm = struct {
         var i: usize = 0;
         while (i < val.native.arg_len) : (i += 1)
             self.stack[self.sp - val.native.arg_len - i] = self.pop().?;
-
-        //self.sp -= arg_len - 1;
-        //ireturn self.push(result);
     }
 
     /// Creates a new Value on the heap which will be freed on scope exits (call_stack pops)
@@ -672,5 +666,25 @@ test "Builtins" {
         defer vm.deinit();
 
         testing.expectEqual(@as(i64, case.expected), vm.peek().integer);
+    }
+}
+
+test "While loop" {
+    const test_cases = .{
+        //.{ .input = "mut i = 0 while (i > 10) {mut i = 10}", .expected = &Value.False },
+        .{ .input = "mut i = 0 while (i < 10) {mut i = 10}", .expected = 10 },
+    };
+
+    inline for (test_cases) |case| {
+        const code = try compiler.compile(testing.allocator, case.input);
+        defer code.deinit();
+        var vm = try run(code, testing.allocator);
+        defer vm.deinit();
+
+        std.debug.print("Peek: {}\n", .{vm.peek()});
+        if (@TypeOf(case.expected) == comptime_int)
+            testing.expectEqual(@as(i64, case.expected), vm.peek().integer)
+        else
+            testing.expectEqual(case.expected, vm.peek());
     }
 }

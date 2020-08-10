@@ -44,6 +44,7 @@ pub const Token = struct {
         function,
         mutable,
         constant,
+        while_loop,
         // underscores because reserved words in Zig
         _true,
         _false,
@@ -57,6 +58,7 @@ pub const Token = struct {
         .{ "fn", .function },
         .{ "mut", .mutable },
         .{ "const", .constant },
+        .{ "while", .while_loop },
         .{ "true", ._true },
         .{ "false", ._false },
         .{ "if", ._if },
@@ -97,6 +99,7 @@ pub const Token = struct {
             .function => "fn",
             .mutable => "mut",
             .constant => "const",
+            .while_loop => "while",
             // underscores because reserved words in Zig
             ._true => "true",
             ._false => "false",
