@@ -73,7 +73,7 @@ pub const Vm = struct {
             const inst = code.instructions[self.ip];
             switch (inst.op) {
                 .load_const => {
-                    const val = try self.allocator.create(Value);
+                    const val = try self.newValue();
                     val.* = code.constants[inst.ptr];
                     try self.push(val);
                 },
@@ -156,8 +156,8 @@ pub const Vm = struct {
 
     /// Returns the previously popped `Value`
     /// Note that this results in UB if the stack is empty.
-    fn popped(self: *Vm) Value {
-        return self.stack[self.sp].*;
+    fn peek(self: *Vm) *Value {
+        return self.stack[self.sp];
     }
 
     /// Returns the current `Frame` of the call stack
@@ -191,7 +191,7 @@ pub const Vm = struct {
             else => return Error.InvalidOperator,
         };
 
-        const res = try self.allocator.create(Value);
+        const res = try self.newValue();
         res.* = .{ .integer = result };
         return self.push(res);
     }
@@ -199,8 +199,8 @@ pub const Vm = struct {
     fn analStringOp(self: *Vm, op: byte_code.Opcode, left: []const u8, right: []const u8) Error!void {
         if (op != .add) return Error.InvalidOperator;
 
-        const res = try self.allocator.create(Value);
-        res.* = .{ .string = try std.mem.concat(self.allocator, u8, &[_][]const u8{left, right}) };
+        const res = try self.newValue();
+        res.* = .{ .string = try std.mem.concat(&self.arena.allocator, u8, &[_][]const u8{ left, right }) };
         return self.push(res);
     }
 
@@ -240,7 +240,7 @@ pub const Vm = struct {
         const right = self.pop() orelse return Error.MissingValue;
         if (right.* != .integer) return Error.InvalidOperator;
 
-        const res = try self.allocator.create(Value);
+        const res = try self.newValue();
         res.* = .{ .integer = -right.integer };
         return self.push(res);
     }
@@ -262,7 +262,7 @@ pub const Vm = struct {
         var list = try Value.List.initCapacity(&self.arena.allocator, len);
         errdefer list.deinit();
 
-        const res = try self.allocator.create(Value);
+        const res = try self.newValue();
         if (len == 0) {
             res.* = .{ .list = list };
             return self.push(res);
@@ -295,7 +295,7 @@ pub const Vm = struct {
         var map = Value.Map.init(&self.arena.allocator);
         errdefer map.deinit();
 
-        const res = try self.allocator.create(Value);
+        const res = try self.newValue();
         if (len == 0) {
             res.* = .{ .map = map };
             return self.push(res);
@@ -342,12 +342,11 @@ pub const Vm = struct {
             args[0] = left;
             var i: usize = 1;
             while (i <= native.arg_len) : (i += 1) args[i] = self.stack[self.sp + native.arg_len + i];
-            const result = try native.func(args);
+            const result = (try native.func(args)).*;
 
-            //std.debug.print("Result: {}\n", .{result});
-            if (result.* == .list) std.debug.print("List length: {}\n", .{result.list.items.len});
-
-            return self.push(result);
+            const res = try self.newValue();
+            res.* = result;
+            return self.push(res);
         }
 
         //TODO implement references
@@ -405,7 +404,7 @@ pub const Vm = struct {
     }
 
     /// Creates a new Value on the heap which will be freed on scope exits (call_stack pops)
-    fn newValue(self: *Vm) !*Value{
+    fn newValue(self: *Vm) !*Value {
         return self.arena.allocator.create(Value);
     }
 };
@@ -447,7 +446,7 @@ test "Integer arithmetic" {
         defer code.deinit();
         var vm = try run(code, testing.allocator);
         defer vm.deinit();
-        testing.expect(case.expected == vm.popped().integer);
+        testing.expect(case.expected == vm.peek().integer);
     }
 }
 
@@ -468,7 +467,7 @@ test "Boolean" {
         defer code.deinit();
         var vm = try run(code, testing.allocator);
         defer vm.deinit();
-        testing.expect(case.expected == vm.popped().boolean);
+        testing.expect(case.expected == vm.peek().boolean);
     }
 }
 
@@ -487,9 +486,9 @@ test "Conditional" {
         var vm = try run(code, testing.allocator);
         defer vm.deinit();
         if (@TypeOf(case.expected) == comptime_int) {
-            testing.expect(case.expected == vm.popped().integer);
+            testing.expect(case.expected == vm.peek().integer);
         } else {
-            testing.expect(vm.popped() == .nil);
+            testing.expect(vm.peek().* == .nil);
         }
     }
 }
@@ -506,7 +505,7 @@ test "Declaration" {
         defer code.deinit();
         var vm = try run(code, testing.allocator);
         defer vm.deinit();
-        testing.expect(case.expected == vm.popped().integer);
+        testing.expect(case.expected == vm.peek().integer);
     }
 }
 
@@ -521,7 +520,7 @@ test "Strings" {
         defer code.deinit();
         var vm = try run(code, testing.allocator);
         defer vm.deinit();
-        testing.expectEqualStrings(case.expected, vm.popped().string);
+        testing.expectEqualStrings(case.expected, vm.peek().string);
     }
 }
 
@@ -538,7 +537,7 @@ test "Arrays" {
         var vm = try run(code, testing.allocator);
         defer vm.deinit();
 
-        const list = vm.popped().list;
+        const list = vm.peek().list;
         testing.expect(list.items.len == case.expected.len);
         inline for (case.expected) |int, i| {
             const items = list.items;
@@ -560,7 +559,7 @@ test "Maps" {
         var vm = try run(code, testing.allocator);
         defer vm.deinit();
 
-        const map = vm.popped().map;
+        const map = vm.peek().map;
         testing.expect(map.items().len == case.expected.len);
         inline for (case.expected) |int, i| {
             const items = map.items();
@@ -580,10 +579,10 @@ test "Maps" {
 
 test "Index" {
     const test_cases = .{
-        //.{ .input = "[1, 2, 3][1]", .expected = 2 },
-        //.{ .input = "{1: 5}[1]", .expected = 5 },
-        //.{ .input = "{2: 5}[0]", .expected = Value.Nil },
-        //.{ .input = "{\"foo\": 15}[\"foo\"]", .expected = 15 },
+        .{ .input = "[1, 2, 3][1]", .expected = 2 },
+        .{ .input = "{1: 5}[1]", .expected = 5 },
+        .{ .input = "{2: 5}[0]", .expected = &Value.Nil },
+        .{ .input = "{\"foo\": 15}[\"foo\"]", .expected = 15 },
     };
 
     inline for (test_cases) |case| {
@@ -593,9 +592,9 @@ test "Index" {
         defer vm.deinit();
 
         if (@TypeOf(case.expected) == comptime_int)
-            testing.expectEqual(@as(i64, case.expected), vm.popped().integer)
+            testing.expectEqual(@as(i64, case.expected), vm.peek().integer)
         else
-            testing.expectEqual(case.expected, vm.popped());
+            testing.expectEqual(case.expected, vm.peek());
     }
 }
 
@@ -604,7 +603,7 @@ test "Basic function calls with no arguments" {
         .{ .input = "const x = fn() { 1 + 2 } x()", .expected = 3 },
         .{ .input = "const x = fn() { 1 } const y = fn() { 5 } x() + y()", .expected = 6 },
         .{ .input = "const x = fn() { return 5 10 } x()", .expected = 5 },
-        .{ .input = "const x = fn() { } x()", .expected = Value.Nil },
+        .{ .input = "const x = fn() { } x()", .expected = &Value.Nil },
     };
 
     inline for (test_cases) |case| {
@@ -614,9 +613,9 @@ test "Basic function calls with no arguments" {
         defer vm.deinit();
 
         if (@TypeOf(case.expected) == comptime_int)
-            testing.expectEqual(@as(i64, case.expected), vm.popped().integer)
+            testing.expectEqual(@as(i64, case.expected), vm.peek().integer)
         else
-            testing.expectEqual(case.expected, vm.popped());
+            testing.expectEqual(case.expected, vm.peek());
     }
 }
 
@@ -633,9 +632,9 @@ test "Globals vs Locals" {
         defer vm.deinit();
 
         if (@TypeOf(case.expected) == comptime_int)
-            testing.expectEqual(@as(i64, case.expected), vm.popped().integer)
+            testing.expectEqual(@as(i64, case.expected), vm.peek().integer)
         else
-            testing.expectEqual(case.expected, vm.popped());
+            testing.expectEqual(case.expected, vm.peek().*);
     }
 }
 
@@ -653,16 +652,16 @@ test "Functions with arguments" {
         defer vm.deinit();
 
         if (@TypeOf(case.expected) == comptime_int)
-            testing.expectEqual(@as(i64, case.expected), vm.popped().integer)
+            testing.expectEqual(@as(i64, case.expected), vm.peek().integer)
         else
-            testing.expectEqual(case.expected, vm.popped());
+            testing.expectEqual(case.expected, vm.peek());
     }
 }
 
 test "Builtins" {
     const test_cases = .{
-        //.{ .input = "\"Hello world\".len", .expected = 11 },
-        //.{ .input = "[1,5,2].len", .expected = 3 },
+        .{ .input = "\"Hello world\".len", .expected = 11 },
+        .{ .input = "[1,5,2].len", .expected = 3 },
         .{ .input = "const x = [1] x.add(2) x.len", .expected = 2 },
     };
 
@@ -672,6 +671,6 @@ test "Builtins" {
         var vm = try run(code, testing.allocator);
         defer vm.deinit();
 
-        testing.expectEqual(@as(i64, case.expected), vm.popped().integer);
+        testing.expectEqual(@as(i64, case.expected), vm.peek().integer);
     }
 }
