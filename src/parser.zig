@@ -115,6 +115,8 @@ pub const Parser = struct {
 
     /// Parses the statement into a node
     fn parseStatement(self: *Parser) Error!Node {
+        if (self.peekIsType(.assign)) return self.parseAssignment();
+
         return switch (self.current_token.type) {
             .constant, .mutable => self.parseDeclaration(),
             ._return => self.parseReturn(),
@@ -539,6 +541,24 @@ pub const Parser = struct {
         return Node{ .while_loop = node };
     }
 
+    /// Parses the current expression as an assignment. Compiler does checking for mutating
+    fn parseAssignment(self: *Parser) Error!Node {
+        const node = try self.allocator.create(Node.Assignment);
+        node.* = .{
+            .token = self.peek_token,
+            .name = try self.parseIdentifier(),
+            .value = undefined,
+        };
+
+        // Skip name and '=' token
+        self.next();
+        self.next();
+
+        node.value = try self.parseExpression(.lowest);
+
+        return Node{ .assignment = node };
+    }
+
     /// Determines if the next token is the expected token or not.
     /// Incase the next token is the wanted token, retun true and retrieve next token.
     fn expectPeek(self: *Parser, token_type: Token.TokenType) bool {
@@ -561,12 +581,6 @@ pub const Parser = struct {
 };
 
 test "Parse Delcaration" {
-    const input =
-        \\const x = 5
-        \\mut y = 54
-        \\const z = 1571
-    ;
-
     var allocator = testing.allocator;
     const test_cases = .{
         .{ .input = "const x = 5", .id = "x", .expected = 5, .mutable = false },
@@ -940,4 +954,21 @@ test "While loop" {
     testing.expect(loop.condition.infix.operator == .less_than);
     testing.expect(loop.block.block_statement.nodes.len == 1);
     testing.expectEqualStrings("x", loop.block.block_statement.nodes[0].expression.value.identifier.value);
+}
+
+test "Assignment" {
+    var allocator = testing.allocator;
+    const test_cases = .{
+        .{ .input = "x = 5", .id = "x", .expected = 5 },
+        .{ .input = "y = 50", .id = "y", .expected = 50 },
+        .{ .input = "x = 2 y = 5", .id = "y", .expected = 5 },
+    };
+
+    inline for (test_cases) |case, i| {
+        const tree = try parse(allocator, case.input);
+        defer tree.deinit();
+        const node = tree.nodes[tree.nodes.len - 1].assignment;
+        testing.expectEqualSlices(u8, case.id, node.name.identifier.value);
+        testing.expect(case.expected == node.value.int_lit.value);
+    }
 }

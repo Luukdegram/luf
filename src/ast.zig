@@ -40,6 +40,7 @@ pub const Node = union(NodeType) {
     map_pair: *MapPair,
     index: *IndexExpression,
     while_loop: *WhileLoop,
+    assignment: *Assignment,
 
     /// Possible Nodes which are supported
     pub const NodeType = enum {
@@ -61,6 +62,7 @@ pub const Node = union(NodeType) {
         map_pair,
         index,
         while_loop,
+        assignment,
     };
 
     /// Represents a String
@@ -226,5 +228,12 @@ pub const Node = union(NodeType) {
         token: Token,
         condition: Node,
         block: Node,
+    };
+
+    /// Represents an assignment '=' for setting the value of an existing variable
+    pub const Assignment = struct {
+        token: Token,
+        name: Node,
+        value: Node,
     };
 };

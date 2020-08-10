@@ -19,6 +19,7 @@ pub const Opcode = enum(u8) {
     _return,
     return_value,
     noop,
+    assign,
 
     make_array,
     make_map,
