@@ -137,6 +137,7 @@ pub const Vm = struct {
                     if (identifier.* == .integer) {
                         identifier.integer = value.integer;
                     }
+
                     std.debug.print("Id: {}\n", .{identifier});
                     std.debug.print("Val: {}\n", .{value});
                 },

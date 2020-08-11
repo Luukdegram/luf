@@ -107,6 +107,21 @@ pub const Value = union(Type) {
         };
     }
 
+    /// Returns true if the `Value` is of given type `Type`
+    pub fn is(self: *const Value, tag: Type) bool {
+        return std.meta.activeTag(self.*) == tag;
+    }
+
+    /// Returns the `Type` of the `Value`
+    pub fn lufType(self: *const Value) Type {
+        return std.meta.activeTag(self.*);
+    }
+
+    /// Returns the Zig type of `Value`
+    pub fn zigType(self: *const Value) type {
+        return std.meta.TagPayloadType(Value, self.lufType());
+    }
+
     pub const List = std.ArrayList(*Value);
     pub const Map = std.HashMap(*const Value, *Value, hash, eql, true);
 
