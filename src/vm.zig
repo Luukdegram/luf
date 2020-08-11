@@ -220,8 +220,12 @@ pub const Vm = struct {
         const right = self.pop() orelse return Error.MissingValue;
         const left = self.pop() orelse return Error.MissingValue;
 
-        if (std.meta.activeTag(left.*) == std.meta.activeTag(right.*) and left.* == .integer) {
+        if (left.lufType() == right.lufType() and left.is(.integer)) {
             return self.analIntCmp(op, left.integer, right.integer);
+        }
+
+        if (left.lufType() == right.lufType() and left.is(.string)) {
+            return self.analStringCmp(op, left.string, right.string);
         }
 
         // for now just assume it's a boolean
@@ -243,6 +247,18 @@ pub const Vm = struct {
         };
 
         return self.push(if (boolean) &Value.True else &Value.False);
+    }
+
+    /// Analyzes and compares 2 strings
+    fn analStringCmp(self: *Vm, op: byte_code.Opcode, left: []const u8, right: []const u8) Error!void {
+        var eql = std.mem.eql(u8, left, right);
+        switch (op) {
+            .equal => {},
+            .not_equal => eql = !eql,
+            else => return Error.InvalidOperator,
+        }
+
+        return self.push(if (eql) &Value.True else &Value.False);
     }
 
     /// Analyzes and executes a negation
