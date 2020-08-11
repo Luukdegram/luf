@@ -130,6 +130,16 @@ pub const Vm = struct {
                     const key = Value.builtin_keys[inst.ptr];
                     try self.push(&(Value.builtins.get(key).?));
                 },
+                .assign => {
+                    const identifier = self.pop().?;
+                    const value = self.pop().?;
+
+                    if (identifier.* == .integer) {
+                        identifier.integer = value.integer;
+                    }
+                    std.debug.print("Id: {}\n", .{identifier});
+                    std.debug.print("Val: {}\n", .{value});
+                },
                 else => {},
             }
         }
@@ -671,8 +681,8 @@ test "Builtins" {
 
 test "While loop" {
     const test_cases = .{
-        //.{ .input = "mut i = 0 while (i > 10) {mut i = 10}", .expected = &Value.False },
-        .{ .input = "mut i = 0 while (i < 10) {mut i = 10}", .expected = 10 },
+        .{ .input = "mut i = 0 while (i > 10) {mut i = 10}", .expected = &Value.False },
+        .{ .input = "mut i = 0 while (i < 10) {i = 10}", .expected = &Value.False },
     };
 
     inline for (test_cases) |case| {
@@ -683,7 +693,7 @@ test "While loop" {
 
         std.debug.print("Peek: {}\n", .{vm.peek()});
         if (@TypeOf(case.expected) == comptime_int)
-            testing.expectEqual(@as(i64, case.expected), vm.peek().integer)
+            testing.expectEqual(@as(i64, case.expected), vm.stack[vm.sp - 1].integer)
         else
             testing.expectEqual(case.expected, vm.peek());
     }

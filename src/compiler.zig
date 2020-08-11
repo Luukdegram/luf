@@ -411,6 +411,21 @@ pub const Compiler = struct {
 
                 // jump to end
                 self.instructions.items[false_jump].ptr = @intCast(u16, end);
+            },
+            .assignment => |asg| {
+                if (asg.name != .identifier) return Error.CompilerError;
+                const symbol = self.resolveSymbol(self.scope, asg.name.identifier.value) orelse return Error.CompilerError;
+
+                if (!symbol.mutable) return Error.CompilerError;
+
+                try self.compile(asg.value);
+
+                if (symbol.scope == .root)
+                    _ = try self.emitOp(.load_global, symbol.index)
+                else
+                    _ = try self.emitOp(.load_local, symbol.index);
+
+                _ = try self.emit(.assign);
             }, //else => return Error.CompilerError,
         }
     }
@@ -663,6 +678,17 @@ test "Compile AST to bytecode" {
                 .pop,
                 .jump,
                 .noop,
+            },
+        },
+        .{
+            .input = "mut x = 5 x = 6",
+            .consts = &[_]i64{ 5, 6 },
+            .opcodes = &[_]bytecode.Opcode{
+                .load_const,
+                .bind_global,
+                .load_const,
+                .load_global,
+                .assign,
             },
         },
     };
