@@ -372,6 +372,14 @@ pub const Vm = struct {
                 return self.push(val);
             }
             return self.push(&Value.Nil);
+        } else if (left.* == .string and index.* == .integer) {
+            const i = index.integer;
+            const string = left.string;
+            if (i < 0 or i > string.len) return Error.OutOfMemory;
+
+            const val = try self.newValue();
+            val.* = .{ .string = string[@intCast(usize, i)..@intCast(usize, i + 1)] };
+            return self.push(val);
         }
 
         return Error.MissingValue;
@@ -589,6 +597,7 @@ test "Index" {
         .{ .input = "{1: 5}[1]", .expected = 5 },
         .{ .input = "{2: 5}[0]", .expected = &Value.Nil },
         .{ .input = "{\"foo\": 15}[\"foo\"]", .expected = 15 },
+        .{ .input = "\"hello\"[1]", .expected = "e" },
     };
 
     inline for (test_cases) |case| {
@@ -599,6 +608,8 @@ test "Index" {
 
         if (@TypeOf(case.expected) == comptime_int)
             testing.expectEqual(@as(i64, case.expected), vm.peek().integer)
+        else if (@TypeOf(case.expected) == *const [1:0]u8)
+            testing.expectEqualStrings(case.expected, vm.peek().string)
         else
             testing.expectEqual(case.expected, vm.peek());
     }
