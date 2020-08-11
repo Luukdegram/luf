@@ -90,7 +90,13 @@ pub const Vm = struct {
                     const condition = self.pop().?;
                     if (!isTrue(condition)) self.ip = inst.ptr - 1;
                 },
-                .bind_global => try self.globals.append(self.pop().?),
+                .bind_global => {
+                    const val = self.pop().?;
+                    if (self.globals.items.len > inst.ptr)
+                        self.globals.items[inst.ptr] = val
+                    else
+                        try self.globals.append(val);
+                },
                 .load_global => try self.push(self.globals.items[inst.ptr]),
                 .make_array => try self.analArray(inst),
                 .make_map => try self.analMap(inst),
