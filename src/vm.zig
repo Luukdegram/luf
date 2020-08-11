@@ -680,6 +680,7 @@ test "Builtins" {
         .{ .input = "\"Hello world\".len", .expected = 11 },
         .{ .input = "[1,5,2].len", .expected = 3 },
         .{ .input = "const x = [1] x.add(2) x.len", .expected = 2 },
+        .{ .input = "const x = [1, 2] x.pop() x.len", .expected = 1 },
     };
 
     inline for (test_cases) |case| {
