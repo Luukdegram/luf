@@ -134,12 +134,7 @@ pub const Vm = struct {
                     const identifier = self.pop().?;
                     const value = self.pop().?;
 
-                    if (identifier.* == .integer) {
-                        identifier.integer = value.integer;
-                    }
-
-                    std.debug.print("Id: {}\n", .{identifier});
-                    std.debug.print("Val: {}\n", .{value});
+                    identifier.* = value.*;
                 },
                 else => {},
             }
@@ -692,7 +687,6 @@ test "While loop" {
         var vm = try run(code, testing.allocator);
         defer vm.deinit();
 
-        std.debug.print("Peek: {}\n", .{vm.peek()});
         if (@TypeOf(case.expected) == comptime_int)
             testing.expectEqual(@as(i64, case.expected), vm.stack[vm.sp - 1].integer)
         else
