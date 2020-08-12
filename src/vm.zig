@@ -515,6 +515,8 @@ test "Conditional" {
         .{ .input = "if (false) { 10 } else { 20 }", .expected = 20 },
         .{ .input = "if (1 < 2) { 10 }", .expected = 10 },
         .{ .input = "if (1 > 2) { 10 }", .expected = null },
+        .{ .input = "if (1 > 2) { 10 } else if (2 > 3) { 20 } else { 5 }", .expected = 5 },
+        .{ .input = "if (1 > 2) { 10 } else if (2 < 3) { 20 } else { 5 }", .expected = 20 },
     };
 
     inline for (test_cases) |case| {

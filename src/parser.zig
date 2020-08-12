@@ -326,6 +326,12 @@ pub const Parser = struct {
         if (self.peekIsType(._else)) {
             self.next();
 
+            if (self.peekIsType(._if)) {
+                self.next();
+                exp.false_pong = try self.parseStatement();
+                return Node{ .if_expression = exp };
+            }
+
             if (!self.expectPeek(.left_brace)) {
                 return self.fail("Expected '{' but found '{}'");
             }
@@ -811,6 +817,25 @@ test "If else expression" {
         if_exp.false_pong.?.block_statement.nodes[0].expression.value.identifier.value,
         "y",
     );
+}
+
+test "If else-if expression" {
+    const allocator = testing.allocator;
+    const input = "if (x < y) { x } else if(x == 0) { y } else { z }";
+    const tree = try parse(allocator, input);
+    defer tree.deinit();
+
+    testing.expect(tree.nodes.len == 1);
+    const if_exp = tree.nodes[0].expression.value.if_expression;
+    testing.expect(if_exp.true_pong.block_statement.nodes[0] == .expression);
+    testing.expectEqualSlices(
+        u8,
+        if_exp.true_pong.block_statement.nodes[0].expression.value.identifier.value,
+        "x",
+    );
+    testing.expect(if_exp.false_pong != null);
+    testing.expect(if_exp.false_pong.?.expression.value == .if_expression);
+    testing.expect(if_exp.false_pong.?.expression.value.if_expression.false_pong != null);
 }
 
 test "Function literal" {
