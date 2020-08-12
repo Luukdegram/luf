@@ -37,7 +37,7 @@ const Precedence = enum(u4) {
 fn findPrecedence(token_type: Token.TokenType) Precedence {
     return switch (token_type) {
         .equal, .not_equal => .equals,
-        .less_than, .greater_than => .less_greater,
+        .less_than, .greater_than, .less_than_equal, .greater_than_equal => .less_greater,
         .plus, .minus => .sum,
         .slash, .asterisk => .product,
         .left_parenthesis => .call,
@@ -212,6 +212,8 @@ pub const Parser = struct {
                 .not_equal,
                 .less_than,
                 .greater_than,
+                .less_than_equal,
+                .greater_than_equal,
                 => blk: {
                     self.next();
                     break :blk try self.parseInfixExpression(left);

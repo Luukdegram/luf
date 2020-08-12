@@ -33,7 +33,9 @@ pub const Opcode = enum(u8) {
     equal,
     not_equal,
     greater_than,
+    greater_than_equal,
     less_than,
+    less_than_equal,
     minus,
     bang,
 

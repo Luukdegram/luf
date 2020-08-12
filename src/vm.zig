@@ -138,7 +138,7 @@ pub const Vm = struct {
                 },
                 .assign_global => {
                     const value = self.pop().?;
-                    if(self.globals.items.len > inst.ptr) 
+                    if (self.globals.items.len > inst.ptr)
                         self.globals.items[inst.ptr] = value
                     else
                         try self.globals.append(value);
@@ -247,7 +247,9 @@ pub const Vm = struct {
             .equal => left == right,
             .not_equal => left != right,
             .greater_than => left > right,
+            .greater_than_equal => left >= right,
             .less_than => left < right,
+            .less_than_equal => left <= right,
             else => return Error.InvalidOperator,
         };
 

@@ -48,8 +48,18 @@ pub const Lexer = struct {
                 return Token{ .type = .comment, .start = start + 2, .end = self.position };
             } else .slash,
             '*' => .asterisk,
-            '<' => .less_than,
-            '>' => .greater_than,
+            '<' => if (self.peekChar() == '=') {
+                const start = self.position;
+                self.readChar();
+                self.readChar();
+                return Token{ .type = .less_than_equal, .start = start, .end = self.position };
+            } else .less_than,
+            '>' => if (self.peekChar() == '=') {
+                const start = self.position;
+                self.readChar();
+                self.readChar();
+                return Token{ .type = .greater_than_equal, .start = start, .end = self.position };
+            } else .greater_than,
             '{' => .left_brace,
             '}' => .right_brace,
             '.' => .period,
