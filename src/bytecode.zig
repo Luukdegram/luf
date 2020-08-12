@@ -12,6 +12,8 @@ pub const Opcode = enum(u8) {
     bind_global,
     load_local,
     bind_local,
+    assign_global,
+    assign_local,
     load_builtin,
     jump_false,
     jump,
@@ -19,7 +21,6 @@ pub const Opcode = enum(u8) {
     _return,
     return_value,
     noop,
-    assign,
 
     make_array,
     make_map,

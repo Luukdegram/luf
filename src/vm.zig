@@ -136,11 +136,16 @@ pub const Vm = struct {
                     const key = Value.builtin_keys[inst.ptr];
                     try self.push(&(Value.builtins.get(key).?));
                 },
-                .assign => {
-                    const identifier = self.pop().?;
+                .assign_global => {
                     const value = self.pop().?;
-
-                    identifier.* = value.*;
+                    if(self.globals.items.len > inst.ptr) 
+                        self.globals.items[inst.ptr] = value
+                    else
+                        try self.globals.append(value);
+                },
+                .assign_local => {
+                    const current_frame = self.frame().?;
+                    self.stack[current_frame.sp + inst.ptr] = self.pop().?;
                 },
                 else => {},
             }

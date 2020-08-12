@@ -35,7 +35,7 @@ pub fn compile(
             .scope = .builtin,
             .name = key,
             .mutable = false,
-            .index = @truncate(u16, i),
+            .index = @intCast(u16, i),
         });
     }
 
@@ -126,7 +126,7 @@ pub const Compiler = struct {
             const symbol = Symbol{
                 .name = name,
                 .mutable = mutable,
-                .index = @truncate(u16, index),
+                .index = @intCast(u16, index),
                 .scope = self.id,
             };
             try self.symbols.put(name, symbol);
@@ -173,7 +173,7 @@ pub const Compiler = struct {
     /// Adds a new constant to the compiler and returns the length of the list
     fn addConstant(self: *Compiler, val: Value) !u16 {
         try self.constants.append(val);
-        return @truncate(u16, self.constants.items.len - 1);
+        return @intCast(u16, self.constants.items.len - 1);
     }
 
     /// Appends a new instruction to the compiler and returns the current position
@@ -259,7 +259,7 @@ pub const Compiler = struct {
                     .greater_than => _ = try self.emit(.greater_than),
                     .equal => _ = try self.emit(.equal),
                     .not_equal => _ = try self.emit(.not_equal),
-                    .assign => return Error.CompilerError,
+                    else => unreachable,
                 }
             },
             .prefix => |pfx| {
@@ -292,7 +292,7 @@ pub const Compiler = struct {
                 const cur_pos = self.instructions.items.len;
 
                 // Point the position of the false jump to the current position
-                self.instructions.items[false_pos].ptr = @truncate(u16, cur_pos);
+                self.instructions.items[false_pos].ptr = @intCast(u16, cur_pos);
 
                 if (if_exp.false_pong) |pong| {
                     try self.compile(pong);
@@ -304,7 +304,7 @@ pub const Compiler = struct {
 
                 // set the true jump to the current stack position
                 const len = self.instructions.items.len;
-                self.instructions.items[jump_pos].ptr = @truncate(u16, len);
+                self.instructions.items[jump_pos].ptr = @intCast(u16, len);
             },
             .declaration => |decl| {
                 const symbol = try self.scope.define(decl.name.identifier.value, decl.mutable);
@@ -334,11 +334,11 @@ pub const Compiler = struct {
                 for (array.value) |element| {
                     try self.compile(element);
                 }
-                _ = try self.emitOp(.make_array, @truncate(u16, array.value.len));
+                _ = try self.emitOp(.make_array, @intCast(u16, array.value.len));
             },
             .map => |map| {
                 for (map.value) |pair| try self.compile(pair);
-                _ = try self.emitOp(.make_map, @truncate(u16, map.value.len * 2));
+                _ = try self.emitOp(.make_map, @intCast(u16, map.value.len * 2));
             },
             .map_pair => |pair| {
                 try self.compile(pair.key);
@@ -389,7 +389,7 @@ pub const Compiler = struct {
                 for (call.arguments) |arg| {
                     try self.compile(arg);
                 }
-                _ = try self.emitOp(.call, @truncate(u16, call.arguments.len));
+                _ = try self.emitOp(.call, @intCast(u16, call.arguments.len));
             },
             ._return => |ret| {
                 try self.compile(ret.value);
@@ -421,11 +421,9 @@ pub const Compiler = struct {
                 try self.compile(asg.value);
 
                 if (symbol.scope == .root)
-                    _ = try self.emitOp(.load_global, symbol.index)
+                    _ = try self.emitOp(.assign_global, symbol.index)
                 else
-                    _ = try self.emitOp(.load_local, symbol.index);
-
-                _ = try self.emit(.assign);
+                    _ = try self.emitOp(.assign_local, symbol.index);
             }, //else => return Error.CompilerError,
         }
     }
@@ -687,8 +685,7 @@ test "Compile AST to bytecode" {
                 .load_const,
                 .bind_global,
                 .load_const,
-                .load_global,
-                .assign,
+                .assign_global,
             },
         },
     };
