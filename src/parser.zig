@@ -118,6 +118,7 @@ pub const Parser = struct {
         if (self.peekIsType(.assign)) return self.parseAssignment();
 
         return switch (self.current_token.type) {
+            .comment => self.parseComment(),
             .constant, .mutable => self.parseDeclaration(),
             ._return => self.parseReturn(),
             else => self.parseExpressionStatement(),
@@ -559,6 +560,18 @@ pub const Parser = struct {
         return Node{ .assignment = node };
     }
 
+    /// Parses a comment token into a `Comment` node
+    fn parseComment(self: *Parser) Error!Node {
+        const comment = try self.allocator.create(Node.Comment);
+        const token = self.current_token;
+        comment.* = .{
+            .token = self.current_token,
+            .value = self.source[token.start..token.end],
+        };
+
+        return Node{ .comment = comment };
+    }
+
     /// Determines if the next token is the expected token or not.
     /// Incase the next token is the wanted token, retun true and retrieve next token.
     fn expectPeek(self: *Parser, token_type: Token.TokenType) bool {
@@ -971,4 +984,17 @@ test "Assignment" {
         testing.expectEqualSlices(u8, case.id, node.name.identifier.value);
         testing.expect(case.expected == node.value.int_lit.value);
     }
+}
+
+test "Comment expression" {
+    const input = "//This is a comment";
+    const allocator = testing.allocator;
+
+    const tree = try parse(allocator, input);
+    defer tree.deinit();
+
+    testing.expect(tree.nodes.len == 1);
+
+    const comment = tree.nodes[0].comment;
+    testing.expectEqualStrings("This is a comment", comment.value);
 }

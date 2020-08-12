@@ -20,6 +20,7 @@ pub const Token = struct {
         identifier,
         integer,
         string,
+        comment,
         // operators
         assign,
         plus,
@@ -75,6 +76,7 @@ pub const Token = struct {
             .identifier => "[identifier]",
             .integer => "[integer]",
             .string => "[string]",
+            .comment => "[comment]",
             // operators
             .assign => "=",
             .plus => "+",

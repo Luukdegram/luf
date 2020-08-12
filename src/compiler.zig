@@ -424,7 +424,8 @@ pub const Compiler = struct {
                     _ = try self.emitOp(.assign_global, symbol.index)
                 else
                     _ = try self.emitOp(.assign_local, symbol.index);
-            }, //else => return Error.CompilerError,
+            },
+            else => {},
         }
     }
 };

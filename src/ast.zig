@@ -41,6 +41,7 @@ pub const Node = union(NodeType) {
     index: *IndexExpression,
     while_loop: *WhileLoop,
     assignment: *Assignment,
+    comment: *Comment,
 
     /// Possible Nodes which are supported
     pub const NodeType = enum {
@@ -63,6 +64,7 @@ pub const Node = union(NodeType) {
         index,
         while_loop,
         assignment,
+        comment,
     };
 
     /// Represents a String
@@ -235,5 +237,11 @@ pub const Node = union(NodeType) {
         token: Token,
         name: Node,
         value: Node,
+    };
+
+    /// Represents a single line comment
+    pub const Comment = struct {
+        token: Token,
+        value: []const u8,
     };
 };

@@ -42,7 +42,11 @@ pub const Lexer = struct {
                 self.readChar(); // So we don't read '=' token again
                 return Token{ .type = .not_equal, .start = start, .end = self.position };
             } else .bang,
-            '/' => .slash,
+            '/' => if (self.peekChar() == '/') {
+                const start = self.position;
+                self.readLine();
+                return Token{ .type = .comment, .start = start + 2, .end = self.position };
+            } else .slash,
             '*' => .asterisk,
             '<' => .less_than,
             '>' => .greater_than,
@@ -55,7 +59,7 @@ pub const Lexer = struct {
             '"' => {
                 self.readChar();
                 const start = self.position;
-                _ = self.readString();
+                self.readString();
                 defer self.readChar();
                 return Token{ .type = .string, .start = start, .end = self.position };
             },
@@ -66,7 +70,7 @@ pub const Lexer = struct {
                 return Token{ .type = token.findType(ident), .start = start, .end = self.position };
             } else if (isDigit(c)) {
                 const start = self.position;
-                _ = self.readNumber();
+                self.readNumber();
                 return Token{ .type = .integer, .start = start, .end = self.position };
             } else .illegal,
         };
@@ -117,7 +121,7 @@ pub const Lexer = struct {
         }
     }
 
-    /// Reads the next characters as identifier
+    /// Reads the next characters as identifier and returns the identifier
     fn readIdentifier(self: *Lexer) []const u8 {
         const pos = self.position;
         while (isLetter(self.char)) {
@@ -127,22 +131,22 @@ pub const Lexer = struct {
     }
 
     /// Reads the next characters as number
-    fn readNumber(self: *Lexer) []const u8 {
-        const pos = self.position;
-        while (isDigit(self.char)) {
+    fn readNumber(self: *Lexer) void {
+        while (isDigit(self.char))
             self.readChar();
-        }
-        return self.source[pos..self.position];
     }
 
     /// Reads a string from the current character
-    fn readString(self: *Lexer) []const u8 {
+    fn readString(self: *Lexer) void {
         self.readChar(); // skip initial "
-        const pos = self.position;
-        while (self.char != '"' and self.char != 0) {
+        while (self.char != '"' and self.char != 0)
             self.readChar();
-        }
-        return self.source[pos..self.position];
+    }
+
+    /// Reads until the end of the line or EOF
+    fn readLine(self: *Lexer) void {
+        while (self.char != '\n' and self.char != 0)
+            self.readChar();
     }
 };
 
@@ -195,6 +199,7 @@ test "All supported tokens" {
         \\"foo".len
         \\[1, 2]
         \\{"key":1}
+        \\//this is a comment
     ;
 
     const tests = &[_]Token{
@@ -275,7 +280,8 @@ test "All supported tokens" {
         .{ .type = .colon, .start = 227, .end = 228 },
         .{ .type = .integer, .start = 228, .end = 229 },
         .{ .type = .right_brace, .start = 229, .end = 230 },
-        .{ .type = .eof, .start = 230, .end = 231 },
+        .{ .type = .comment, .start = 233, .end = 250 },
+        .{ .type = .eof, .start = 250, .end = 251 },
     };
 
     var lexer = Lexer.init(input);
