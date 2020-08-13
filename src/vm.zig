@@ -123,7 +123,7 @@ pub const Vm = struct {
                     // push the return value back to the stack
                     try self.push(rv);
                 },
-                .call => try self.analFunctionCall(inst),
+                .call => try self.analFunctionCall(inst, code.instructions[self.ip + 1]),
                 .bind_local => {
                     const current_frame = self.frame().?;
                     self.stack[current_frame.sp + inst.ptr] = self.stack[self.sp - 1];
@@ -411,7 +411,9 @@ pub const Vm = struct {
     /// Analyzes the current instruction to execture a function call
     /// Expects the current instruction pointer.
     /// This will also return the new instruction pointer
-    fn analFunctionCall(self: *Vm, inst: byte_code.Instruction) Error!void {
+    ///
+    /// `instructions` is required to detect if we can optimize tail recursion
+    fn analFunctionCall(self: *Vm, inst: byte_code.Instruction, next: byte_code.Instruction) Error!void {
         const arg_len = inst.ptr;
         const val = self.stack[self.sp - (1 + arg_len)];
 
@@ -420,6 +422,18 @@ pub const Vm = struct {
         if (val.* != .function) return error.InvalidOperator;
 
         if (arg_len != val.function.arg_len) return Error.MissingValue;
+
+        if (self.frame()) |cur_frame| {
+            if (cur_frame.fp == val and next.op == .return_value) {
+                var i: usize = 0;
+                while (i < arg_len) : (i += 1) {
+                    self.stack[cur_frame.sp + i] = self.stack[self.sp - arg_len + i];
+                    self.sp -= arg_len + 1;
+                    self.ip = val.function.offset - 1;
+                    return;
+                }
+            }
+        }
         try self.call_stack.append(.{
             .fp = val,
             .ip = self.ip,
@@ -735,4 +749,22 @@ test "While loop" {
         else
             testing.expectEqual(case.expected, vm.peek());
     }
+}
+
+test "Tail recursion" {
+    const input =
+        \\const func = fn(a) {
+        \\  if (a == 10) {
+        \\      return a
+        \\  }
+        \\  return func(a + 1)  
+        \\}
+        \\func(1) 
+    ;
+    const code = try compiler.compile(testing.allocator, input);
+    defer code.deinit();
+    var vm = try run(code, testing.allocator);
+    defer vm.deinit();
+
+    testing.expectEqual(@as(i64, 10), vm.peek().integer);
 }
