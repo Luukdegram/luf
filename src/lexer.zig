@@ -29,7 +29,7 @@ pub const Lexer = struct {
                 const start = self.position;
                 self.readChar();
                 self.readChar(); // So we don't read '=' token again
-                return Token{ .type = .equal, .start = start, .end = self.position };
+                return Token{ .token_type = .equal, .start = start, .end = self.position };
             } else .assign,
             '(' => .left_parenthesis,
             ')' => .right_parenthesis,
@@ -40,25 +40,25 @@ pub const Lexer = struct {
                 const start = self.position;
                 self.readChar();
                 self.readChar(); // So we don't read '=' token again
-                return Token{ .type = .not_equal, .start = start, .end = self.position };
+                return Token{ .token_type = .not_equal, .start = start, .end = self.position };
             } else .bang,
             '/' => if (self.peekChar() == '/') {
                 const start = self.position;
                 self.readLine();
-                return Token{ .type = .comment, .start = start + 2, .end = self.position };
+                return Token{ .token_type = .comment, .start = start + 2, .end = self.position };
             } else .slash,
             '*' => .asterisk,
             '<' => if (self.peekChar() == '=') {
                 const start = self.position;
                 self.readChar();
                 self.readChar();
-                return Token{ .type = .less_than_equal, .start = start, .end = self.position };
+                return Token{ .token_type = .less_than_equal, .start = start, .end = self.position };
             } else .less_than,
             '>' => if (self.peekChar() == '=') {
                 const start = self.position;
                 self.readChar();
                 self.readChar();
-                return Token{ .type = .greater_than_equal, .start = start, .end = self.position };
+                return Token{ .token_type = .greater_than_equal, .start = start, .end = self.position };
             } else .greater_than,
             '{' => .left_brace,
             '}' => .right_brace,
@@ -71,17 +71,17 @@ pub const Lexer = struct {
                 const start = self.position;
                 self.readString();
                 defer self.readChar();
-                return Token{ .type = .string, .start = start, .end = self.position };
+                return Token{ .token_type = .string, .start = start, .end = self.position };
             },
             0 => .eof,
             else => |c| if (isLetter(c)) {
                 const start = self.position;
                 const ident = self.readIdentifier();
-                return Token{ .type = token.findType(ident), .start = start, .end = self.position };
+                return Token{ .token_type = token.findType(ident), .start = start, .end = self.position };
             } else if (isDigit(c)) {
                 const start = self.position;
                 self.readNumber();
-                return Token{ .type = .integer, .start = start, .end = self.position };
+                return Token{ .token_type = .integer, .start = start, .end = self.position };
             } else .illegal,
         };
 
@@ -90,7 +90,7 @@ pub const Lexer = struct {
         defer self.readChar();
 
         return Token{
-            .type = token_type,
+            .token_type = token_type,
             .start = self.position,
             .end = self.read_position,
         };
@@ -103,7 +103,7 @@ pub const Lexer = struct {
         while (true) {
             const tok: *Token = try token_list.addOne();
             tok.* = self.next();
-            if (tok.type == .eof) {
+            if (tok.token_type == .eof) {
                 return token_list.toOwnedSlice();
             }
         }
@@ -210,88 +210,90 @@ test "All supported tokens" {
         \\[1, 2]
         \\{"key":1}
         \\//this is a comment
+        \\nil
     ;
 
     const tests = &[_]Token{
-        .{ .type = .constant, .start = 0, .end = 5 },
-        .{ .type = .identifier, .start = 6, .end = 10 },
-        .{ .type = .assign, .start = 11, .end = 12 },
-        .{ .type = .integer, .start = 13, .end = 14 },
-        .{ .type = .constant, .start = 15, .end = 20 },
-        .{ .type = .identifier, .start = 21, .end = 24 },
-        .{ .type = .assign, .start = 25, .end = 26 },
-        .{ .type = .integer, .start = 27, .end = 29 },
-        .{ .type = .constant, .start = 30, .end = 35 },
-        .{ .type = .identifier, .start = 36, .end = 39 },
-        .{ .type = .assign, .start = 40, .end = 41 },
-        .{ .type = .function, .start = 42, .end = 44 },
-        .{ .type = .left_parenthesis, .start = 44, .end = 45 },
-        .{ .type = .identifier, .start = 45, .end = 46 },
-        .{ .type = .comma, .start = 46, .end = 47 },
-        .{ .type = .identifier, .start = 48, .end = 49 },
-        .{ .type = .right_parenthesis, .start = 49, .end = 50 },
-        .{ .type = .left_brace, .start = 51, .end = 52 },
-        .{ .type = .identifier, .start = 55, .end = 56 },
-        .{ .type = .plus, .start = 57, .end = 58 },
-        .{ .type = .identifier, .start = 59, .end = 60 },
-        .{ .type = .right_brace, .start = 65, .end = 66 },
-        .{ .type = .constant, .start = 68, .end = 73 },
-        .{ .type = .identifier, .start = 74, .end = 80 },
-        .{ .type = .assign, .start = 81, .end = 82 },
-        .{ .type = .identifier, .start = 83, .end = 86 },
-        .{ .type = .left_parenthesis, .start = 86, .end = 87 },
-        .{ .type = .identifier, .start = 87, .end = 91 },
-        .{ .type = .comma, .start = 91, .end = 92 },
-        .{ .type = .identifier, .start = 93, .end = 96 },
-        .{ .type = .right_parenthesis, .start = 96, .end = 97 },
-        .{ .type = .bang, .start = 98, .end = 99 },
-        .{ .type = .minus, .start = 99, .end = 100 },
-        .{ .type = .slash, .start = 100, .end = 101 },
-        .{ .type = .asterisk, .start = 101, .end = 102 },
-        .{ .type = .integer, .start = 102, .end = 103 },
-        .{ .type = .integer, .start = 104, .end = 105 },
-        .{ .type = .less_than, .start = 106, .end = 107 },
-        .{ .type = .integer, .start = 108, .end = 110 },
-        .{ .type = .greater_than, .start = 111, .end = 112 },
-        .{ .type = .integer, .start = 113, .end = 114 },
-        .{ .type = ._if, .start = 116, .end = 118 },
-        .{ .type = .left_parenthesis, .start = 119, .end = 120 },
-        .{ .type = .integer, .start = 120, .end = 121 },
-        .{ .type = .less_than, .start = 122, .end = 123 },
-        .{ .type = .integer, .start = 124, .end = 126 },
-        .{ .type = .right_parenthesis, .start = 126, .end = 127 },
-        .{ .type = .left_brace, .start = 128, .end = 129 },
-        .{ .type = ._return, .start = 132, .end = 138 },
-        .{ .type = ._true, .start = 139, .end = 143 },
-        .{ .type = .right_brace, .start = 144, .end = 145 },
-        .{ .type = ._else, .start = 146, .end = 150 },
-        .{ .type = .left_brace, .start = 151, .end = 152 },
-        .{ .type = ._return, .start = 155, .end = 161 },
-        .{ .type = ._false, .start = 162, .end = 167 },
-        .{ .type = .right_brace, .start = 168, .end = 169 },
-        .{ .type = .integer, .start = 171, .end = 173 },
-        .{ .type = .equal, .start = 174, .end = 176 },
-        .{ .type = .integer, .start = 177, .end = 179 },
-        .{ .type = .integer, .start = 180, .end = 182 },
-        .{ .type = .not_equal, .start = 183, .end = 185 },
-        .{ .type = .integer, .start = 186, .end = 187 },
-        .{ .type = .string, .start = 189, .end = 192 },
-        .{ .type = .string, .start = 195, .end = 202 },
-        .{ .type = .string, .start = 205, .end = 208 },
-        .{ .type = .period, .start = 209, .end = 210 },
-        .{ .type = .identifier, .start = 210, .end = 213 },
-        .{ .type = .left_bracket, .start = 214, .end = 215 },
-        .{ .type = .integer, .start = 215, .end = 216 },
-        .{ .type = .comma, .start = 216, .end = 217 },
-        .{ .type = .integer, .start = 218, .end = 219 },
-        .{ .type = .right_bracket, .start = 219, .end = 220 },
-        .{ .type = .left_brace, .start = 221, .end = 222 },
-        .{ .type = .string, .start = 223, .end = 226 },
-        .{ .type = .colon, .start = 227, .end = 228 },
-        .{ .type = .integer, .start = 228, .end = 229 },
-        .{ .type = .right_brace, .start = 229, .end = 230 },
-        .{ .type = .comment, .start = 233, .end = 250 },
-        .{ .type = .eof, .start = 250, .end = 251 },
+        .{ .token_type = .constant, .start = 0, .end = 5 },
+        .{ .token_type = .identifier, .start = 6, .end = 10 },
+        .{ .token_type = .assign, .start = 11, .end = 12 },
+        .{ .token_type = .integer, .start = 13, .end = 14 },
+        .{ .token_type = .constant, .start = 15, .end = 20 },
+        .{ .token_type = .identifier, .start = 21, .end = 24 },
+        .{ .token_type = .assign, .start = 25, .end = 26 },
+        .{ .token_type = .integer, .start = 27, .end = 29 },
+        .{ .token_type = .constant, .start = 30, .end = 35 },
+        .{ .token_type = .identifier, .start = 36, .end = 39 },
+        .{ .token_type = .assign, .start = 40, .end = 41 },
+        .{ .token_type = .function, .start = 42, .end = 44 },
+        .{ .token_type = .left_parenthesis, .start = 44, .end = 45 },
+        .{ .token_type = .identifier, .start = 45, .end = 46 },
+        .{ .token_type = .comma, .start = 46, .end = 47 },
+        .{ .token_type = .identifier, .start = 48, .end = 49 },
+        .{ .token_type = .right_parenthesis, .start = 49, .end = 50 },
+        .{ .token_type = .left_brace, .start = 51, .end = 52 },
+        .{ .token_type = .identifier, .start = 55, .end = 56 },
+        .{ .token_type = .plus, .start = 57, .end = 58 },
+        .{ .token_type = .identifier, .start = 59, .end = 60 },
+        .{ .token_type = .right_brace, .start = 65, .end = 66 },
+        .{ .token_type = .constant, .start = 68, .end = 73 },
+        .{ .token_type = .identifier, .start = 74, .end = 80 },
+        .{ .token_type = .assign, .start = 81, .end = 82 },
+        .{ .token_type = .identifier, .start = 83, .end = 86 },
+        .{ .token_type = .left_parenthesis, .start = 86, .end = 87 },
+        .{ .token_type = .identifier, .start = 87, .end = 91 },
+        .{ .token_type = .comma, .start = 91, .end = 92 },
+        .{ .token_type = .identifier, .start = 93, .end = 96 },
+        .{ .token_type = .right_parenthesis, .start = 96, .end = 97 },
+        .{ .token_type = .bang, .start = 98, .end = 99 },
+        .{ .token_type = .minus, .start = 99, .end = 100 },
+        .{ .token_type = .slash, .start = 100, .end = 101 },
+        .{ .token_type = .asterisk, .start = 101, .end = 102 },
+        .{ .token_type = .integer, .start = 102, .end = 103 },
+        .{ .token_type = .integer, .start = 104, .end = 105 },
+        .{ .token_type = .less_than, .start = 106, .end = 107 },
+        .{ .token_type = .integer, .start = 108, .end = 110 },
+        .{ .token_type = .greater_than, .start = 111, .end = 112 },
+        .{ .token_type = .integer, .start = 113, .end = 114 },
+        .{ .token_type = ._if, .start = 116, .end = 118 },
+        .{ .token_type = .left_parenthesis, .start = 119, .end = 120 },
+        .{ .token_type = .integer, .start = 120, .end = 121 },
+        .{ .token_type = .less_than, .start = 122, .end = 123 },
+        .{ .token_type = .integer, .start = 124, .end = 126 },
+        .{ .token_type = .right_parenthesis, .start = 126, .end = 127 },
+        .{ .token_type = .left_brace, .start = 128, .end = 129 },
+        .{ .token_type = ._return, .start = 132, .end = 138 },
+        .{ .token_type = ._true, .start = 139, .end = 143 },
+        .{ .token_type = .right_brace, .start = 144, .end = 145 },
+        .{ .token_type = ._else, .start = 146, .end = 150 },
+        .{ .token_type = .left_brace, .start = 151, .end = 152 },
+        .{ .token_type = ._return, .start = 155, .end = 161 },
+        .{ .token_type = ._false, .start = 162, .end = 167 },
+        .{ .token_type = .right_brace, .start = 168, .end = 169 },
+        .{ .token_type = .integer, .start = 171, .end = 173 },
+        .{ .token_type = .equal, .start = 174, .end = 176 },
+        .{ .token_type = .integer, .start = 177, .end = 179 },
+        .{ .token_type = .integer, .start = 180, .end = 182 },
+        .{ .token_type = .not_equal, .start = 183, .end = 185 },
+        .{ .token_type = .integer, .start = 186, .end = 187 },
+        .{ .token_type = .string, .start = 189, .end = 192 },
+        .{ .token_type = .string, .start = 195, .end = 202 },
+        .{ .token_type = .string, .start = 205, .end = 208 },
+        .{ .token_type = .period, .start = 209, .end = 210 },
+        .{ .token_type = .identifier, .start = 210, .end = 213 },
+        .{ .token_type = .left_bracket, .start = 214, .end = 215 },
+        .{ .token_type = .integer, .start = 215, .end = 216 },
+        .{ .token_type = .comma, .start = 216, .end = 217 },
+        .{ .token_type = .integer, .start = 218, .end = 219 },
+        .{ .token_type = .right_bracket, .start = 219, .end = 220 },
+        .{ .token_type = .left_brace, .start = 221, .end = 222 },
+        .{ .token_type = .string, .start = 223, .end = 226 },
+        .{ .token_type = .colon, .start = 227, .end = 228 },
+        .{ .token_type = .integer, .start = 228, .end = 229 },
+        .{ .token_type = .right_brace, .start = 229, .end = 230 },
+        .{ .token_type = .comment, .start = 233, .end = 250 },
+        .{ .token_type = .nil, .start = 251, .end = 254 },
+        .{ .token_type = .eof, .start = 254, .end = 255 },
     };
 
     var lexer = Lexer.init(input);
@@ -301,6 +303,6 @@ test "All supported tokens" {
 
         testing.expectEqual(unit.start, current_token.start);
         testing.expectEqual(unit.end, current_token.end);
-        testing.expectEqual(unit.type, current_token.type);
+        testing.expectEqual(unit.token_type, current_token.token_type);
     }
 }

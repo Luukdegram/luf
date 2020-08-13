@@ -7,7 +7,7 @@ const testing = std.testing;
 
 /// Type Luf uses to define a token in the language
 pub const Token = struct {
-    type: TokenType,
+    token_type: TokenType,
     start: usize,
     end: usize,
 
@@ -48,6 +48,7 @@ pub const Token = struct {
         mutable,
         constant,
         while_loop,
+        nil,
         // underscores because reserved words in Zig
         _true,
         _false,
@@ -62,6 +63,7 @@ pub const Token = struct {
         .{ "mut", .mutable },
         .{ "const", .constant },
         .{ "while", .while_loop },
+        .{ "nil", .nil },
         .{ "true", ._true },
         .{ "false", ._false },
         .{ "if", ._if },
@@ -71,7 +73,7 @@ pub const Token = struct {
 
     /// Returns the string value of the token
     pub fn string(self: Token) []const u8 {
-        return switch (self.type) {
+        return switch (self.token_type) {
             .illegal => "[illegal]",
             .eof => "[eof]",
             // identifiers + literals
@@ -104,6 +106,7 @@ pub const Token = struct {
             .mutable => "mut",
             .constant => "const",
             .while_loop => "while",
+            .nil => "nil",
             // underscores because reserved words in Zig
             ._true => "true",
             ._false => "false",
@@ -127,9 +130,12 @@ test "Keywords" {
         "mut",
         "const",
         "true",
+        "false",
         "if",
         "else",
         "return",
+        "while",
+        "nil",
     };
 
     for (keywords) |keyword| {

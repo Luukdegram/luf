@@ -42,6 +42,7 @@ pub const Node = union(NodeType) {
     while_loop: *WhileLoop,
     assignment: *Assignment,
     comment: *Comment,
+    nil: *Nil,
 
     /// Possible Nodes which are supported
     pub const NodeType = enum {
@@ -65,6 +66,7 @@ pub const Node = union(NodeType) {
         while_loop,
         assignment,
         comment,
+        nil,
     };
 
     /// Represents a String
@@ -130,7 +132,7 @@ pub const Node = union(NodeType) {
             bang,
 
             pub fn fromToken(token: Token) Op {
-                return switch (token.type) {
+                return switch (token.token_type) {
                     .minus => .minus,
                     .bang => .bang,
                     else => @panic("Unexpected token"),
@@ -159,7 +161,7 @@ pub const Node = union(NodeType) {
 
             /// Returns the corresponding `Op` based on the given `Token`
             pub fn fromToken(token: Token) Op {
-                return switch (token.type) {
+                return switch (token.token_type) {
                     .plus => .add,
                     .minus => .sub,
                     .assign => .assign,
@@ -243,5 +245,10 @@ pub const Node = union(NodeType) {
     pub const Comment = struct {
         token: Token,
         value: []const u8,
+    };
+
+    /// Represents "Nil"
+    pub const Nil = struct {
+        token: Token,
     };
 };

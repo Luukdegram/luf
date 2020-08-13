@@ -117,7 +117,7 @@ pub const Parser = struct {
     fn parseStatement(self: *Parser) Error!Node {
         if (self.peekIsType(.assign)) return self.parseAssignment();
 
-        return switch (self.current_token.type) {
+        return switch (self.current_token.token_type) {
             .comment => self.parseComment(),
             .constant, .mutable => self.parseDeclaration(),
             ._return => self.parseReturn(),
@@ -146,7 +146,7 @@ pub const Parser = struct {
             .token = tmp_token,
             .name = name,
             .value = try self.parseExpression(.lowest),
-            .mutable = tmp_token.type == .mutable,
+            .mutable = tmp_token.token_type == .mutable,
         };
 
         return Node{ .declaration = decl };
@@ -178,7 +178,7 @@ pub const Parser = struct {
 
     /// Determines the correct expression type based on the current token type
     fn parseExpression(self: *Parser, prec: Precedence) Error!Node {
-        var left = switch (self.current_token.type) {
+        var left = switch (self.current_token.token_type) {
             .identifier => try self.parseIdentifier(),
             .integer => try self.parseIntegerLiteral(),
             .string => try self.parseStringLiteral(),
@@ -191,11 +191,12 @@ pub const Parser = struct {
             .left_bracket => try self.parseArray(),
             .left_brace => try self.parseMap(),
             .while_loop => try self.parseWhile(),
+            .nil => try self.parseNil(),
             else => return self.fail("Unexpected token '{}'"),
         };
 
-        while (prec.val() < findPrecedence(self.peek_token.type).val()) {
-            left = switch (self.peek_token.type) {
+        while (prec.val() < findPrecedence(self.peek_token.token_type).val()) {
+            left = switch (self.peek_token.token_type) {
                 .left_parenthesis => blk: {
                     self.next();
                     break :blk try self.parseCallExpression(left);
@@ -251,7 +252,7 @@ pub const Parser = struct {
             .right = undefined,
         };
 
-        const prec = findPrecedence(self.current_token.type);
+        const prec = findPrecedence(self.current_token.token_type);
         self.next();
         expression.right = try self.parseExpression(prec);
 
@@ -517,7 +518,7 @@ pub const Parser = struct {
 
         index.index = try self.parseExpression(.lowest);
 
-        if (token.type != .period and !self.expectPeek(.right_bracket)) {
+        if (token.token_type != .period and !self.expectPeek(.right_bracket)) {
             return self.fail("Expected '}' but found '{}'");
         }
 
@@ -580,6 +581,14 @@ pub const Parser = struct {
         return Node{ .comment = comment };
     }
 
+    /// Literal Nil value parsing
+    fn parseNil(self: *Parser) Error!Node {
+        const nil = try self.allocator.create(Node.Nil);
+        nil.* = .{
+            .token = self.current_token,
+        };
+        return Node{ .nil = nil };
+    }
     /// Determines if the next token is the expected token or not.
     /// Incase the next token is the wanted token, retun true and retrieve next token.
     fn expectPeek(self: *Parser, token_type: Token.TokenType) bool {
@@ -592,12 +601,12 @@ pub const Parser = struct {
 
     /// Helper function to check if the peek token is of given type
     fn peekIsType(self: Parser, token_type: Token.TokenType) bool {
-        return @enumToInt(self.peek_token.type) == @enumToInt(token_type);
+        return @enumToInt(self.peek_token.token_type) == @enumToInt(token_type);
     }
 
     /// Helper function to check if the current token is of given type
     fn currentIsType(self: Parser, token_type: Token.TokenType) bool {
-        return @enumToInt(self.current_token.type) == @enumToInt(token_type);
+        return @enumToInt(self.current_token.token_type) == @enumToInt(token_type);
     }
 };
 
@@ -654,7 +663,7 @@ test "Parse identifier expression" {
     testing.expect(tree.nodes.len == 1);
 
     const identifier = tree.nodes[0].expression.value.identifier;
-    testing.expect(identifier.token.type == .identifier);
+    testing.expect(identifier.token.token_type == .identifier);
     testing.expectEqualSlices(u8, identifier.value, input);
 }
 
@@ -666,7 +675,7 @@ test "Parse integer literal" {
 
     testing.expect(tree.nodes.len == 1);
     const literal = tree.nodes[0].expression.value.int_lit;
-    testing.expect(literal.token.type == .integer);
+    testing.expect(literal.token.token_type == .integer);
     testing.expect(literal.value == 124);
 }
 
@@ -924,7 +933,7 @@ test "Member expression" {
     const index = tree.nodes[0].expression.value.index;
     testing.expectEqualSlices(u8, "bar", index.index.identifier.value);
     testing.expectEqualSlices(u8, "foo", index.left.identifier.value);
-    testing.expect(index.token.type == .period);
+    testing.expect(index.token.token_type == .period);
 }
 
 test "Array literal" {

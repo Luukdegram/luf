@@ -430,6 +430,7 @@ pub const Compiler = struct {
                 else
                     _ = try self.emitOp(.assign_local, symbol.index);
             },
+            .nil => _ = try self.emit(.load_nil),
             else => {},
         }
     }
