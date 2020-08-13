@@ -47,7 +47,7 @@ pub const Vm = struct {
     arena: std.heap.ArenaAllocator,
     call_stack: CallStack,
 
-    pub const Error = error{ OutOfMemory, MissingValue, InvalidOperator } || BuiltinError;
+    pub const Error = error{ OutOfMemory, OutOfBounds, MissingValue, InvalidOperator } || BuiltinError;
     const CallStack = std.ArrayList(Frame);
     /// Function `Frame` on the callstack
     const Frame = struct {
@@ -100,7 +100,8 @@ pub const Vm = struct {
                 .load_global => try self.push(self.globals.items[inst.ptr]),
                 .make_array => try self.analArray(inst),
                 .make_map => try self.analMap(inst),
-                .index => try self.analIndex(),
+                .get_by_index => try self.analGetValue(),
+                .set_by_index => try self.analSetValue(),
                 ._return => {
                     const cur_frame = self.call_stack.pop();
                     self.ip = cur_frame.ip;
@@ -364,11 +365,11 @@ pub const Vm = struct {
     }
 
     /// Analyzes an index/reference pushes the value on the stack
-    fn analIndex(self: *Vm) Error!void {
+    fn analGetValue(self: *Vm) Error!void {
         const index = self.pop() orelse return Error.MissingValue;
         const left = self.pop() orelse return Error.MissingValue;
 
-        if (index.* == .native) {
+        if (index.is(.native)) {
             const native = index.native;
             const args = try self.allocator.alloc(*Value, native.arg_len + 1);
             defer self.allocator.free(args);
@@ -382,29 +383,58 @@ pub const Vm = struct {
             return self.push(res);
         }
 
-        //TODO implement references
-        if (left.* == .list and index.* == .integer) {
+        if (left.is(.list) and index.is(.integer)) {
             const i = index.integer;
             const list = left.list;
-            if (i < 0 or i > list.items.len) return Error.OutOfMemory;
+            if (i < 0 or i > list.items.len) return Error.OutOfBounds;
 
             return self.push(list.items[@intCast(u64, i)]);
-        } else if (left.* == .map) {
+        } else if (left.is(.map)) {
             const map: Value.Map = left.map;
             if (map.get(index)) |val| {
                 return self.push(val);
             }
+            // We return null to the user so they have something to check against
+            // to see if a key exists or not.
             return self.push(&Value.Nil);
-        } else if (left.* == .string and index.* == .integer) {
+        } else if (left.is(.string) and index.is(.integer)) {
             const i = index.integer;
             const string = left.string;
-            if (i < 0 or i > string.len) return Error.OutOfMemory;
+            if (i < 0 or i > string.len) return Error.OutOfBounds;
 
             const val = try self.newValue();
             val.* = .{ .string = string[@intCast(usize, i)..@intCast(usize, i + 1)] };
             return self.push(val);
         }
 
+        // replace with more descriptive Error
+        return Error.MissingValue;
+    }
+
+    /// Sets the lhs by the value on top of the current stack
+    /// This also does type checking to ensure the lhs and rhs are equal types
+    fn analSetValue(self: *Vm) Error!void {
+        const value = self.pop() orelse return Error.MissingValue;
+        const right = self.pop() orelse return Error.MissingValue;
+        const left = self.pop() orelse return Error.MissingValue;
+
+        if (left.is(.list) and right.is(.integer)) {
+            const list = left.list;
+            if (right.integer < 0 or right.integer > list.items.len) return Error.OutOfBounds;
+            list.items[@intCast(usize, right.integer)].* = value.*;
+            return self.push(&Value.Nil);
+        } else if (left.is(.map)) {
+            const map = left.map;
+            if (map.get(right)) |val| {
+                val.* = value.*;
+                return self.push(&Value.Nil);
+            } else {
+                // replace with more descriptive Error
+                return Error.MissingValue;
+            }
+        }
+
+        // replace with more descriptive Error
         return Error.MissingValue;
     }
 
@@ -633,8 +663,11 @@ test "Maps" {
 test "Index" {
     const test_cases = .{
         .{ .input = "[1, 2, 3][1]", .expected = 2 },
+        .{ .input = "const list = [1, 2, 3] list[1] = 10 list[1]", .expected = 10 },
         .{ .input = "{1: 5}[1]", .expected = 5 },
         .{ .input = "{2: 5}[0]", .expected = &Value.Nil },
+        .{ .input = "{2: 5}[2] = 1", .expected = &Value.Nil },
+        .{ .input = "const map = {2: 5} map[2] = 1 map[2]", .expected = 1 },
         .{ .input = "{\"foo\": 15}[\"foo\"]", .expected = 15 },
         .{ .input = "\"hello\"[1]", .expected = "e" },
     };

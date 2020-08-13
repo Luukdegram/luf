@@ -39,7 +39,8 @@ pub const Opcode = enum(u8) {
     bang,
 
     // referencing
-    index,
+    get_by_index,
+    set_by_index,
 
     /// specifically removes a value from the stack
     pop,

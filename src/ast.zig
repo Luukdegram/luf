@@ -237,8 +237,8 @@ pub const Node = union(NodeType) {
     /// Represents an assignment '=' for setting the value of an existing variable
     pub const Assignment = struct {
         token: Token,
-        name: Node,
-        value: Node,
+        left: Node,
+        right: Node,
     };
 
     /// Represents a single line comment

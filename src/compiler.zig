@@ -351,7 +351,7 @@ pub const Compiler = struct {
             .index => |index| {
                 try self.compile(index.left);
                 try self.compile(index.index);
-                _ = try self.emit(.index);
+                _ = try self.emit(.get_by_index);
             },
             .func_lit => |function| {
                 const jump_pos = try self.emit(.jump);
@@ -418,17 +418,26 @@ pub const Compiler = struct {
                 self.instructions.items[false_jump].ptr = @intCast(u16, end);
             },
             .assignment => |asg| {
-                if (asg.name != .identifier) return Error.CompilerError;
-                const symbol = self.resolveSymbol(self.scope, asg.name.identifier.value) orelse return Error.CompilerError;
+                if (asg.left == .identifier) {
+                    const symbol = self.resolveSymbol(self.scope, asg.left.identifier.value) orelse return Error.CompilerError;
 
-                if (!symbol.mutable) return Error.CompilerError;
+                    if (!symbol.mutable) return Error.CompilerError;
 
-                try self.compile(asg.value);
+                    try self.compile(asg.right);
 
-                if (symbol.scope == .root)
-                    _ = try self.emitOp(.assign_global, symbol.index)
-                else
-                    _ = try self.emitOp(.assign_local, symbol.index);
+                    if (symbol.scope == .root)
+                        _ = try self.emitOp(.assign_global, symbol.index)
+                    else
+                        _ = try self.emitOp(.assign_local, symbol.index);
+                } else if (asg.left == .index) {
+                    const index = asg.left.index;
+                    try self.compile(index.left);
+                    try self.compile(index.index);
+                    try self.compile(asg.right);
+                    _ = try self.emit(.set_by_index);
+                } else {
+                    return Error.CompilerError;
+                }
             },
             .nil => _ = try self.emit(.load_nil),
             else => {},
@@ -557,7 +566,7 @@ test "Compile AST to bytecode" {
                 .load_const,
                 .make_array,
                 .load_const,
-                .index,
+                .get_by_index,
                 .pop,
             },
         },
@@ -569,7 +578,7 @@ test "Compile AST to bytecode" {
                 .load_const,
                 .make_map,
                 .load_const,
-                .index,
+                .get_by_index,
                 .pop,
             },
         },
@@ -670,7 +679,7 @@ test "Compile AST to bytecode" {
             .opcodes = &[_]bytecode.Opcode{
                 .load_const,
                 .load_builtin,
-                .index,
+                .get_by_index,
                 .bind_global,
             },
         },
@@ -695,11 +704,12 @@ test "Compile AST to bytecode" {
                 .bind_global,
                 .load_const,
                 .assign_global,
+                .pop,
             },
         },
     };
 
-    inline for (test_cases) |case| {
+    inline for (test_cases) |case, in| {
         const code = try compile(testing.allocator, case.input);
         defer code.deinit();
 

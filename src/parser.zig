@@ -18,14 +18,15 @@ const Errors = @import("error.zig").Errors;
 /// This means a function call will be executed before a prefix,
 /// and the product will be calculated before the sum.
 const Precedence = enum(u4) {
-    lowest = 1,
-    equals = 2,
-    less_greater = 3,
-    sum = 4,
-    product = 5,
-    prefix = 6,
-    call = 7,
-    index = 8,
+    lowest,
+    assign,
+    equals,
+    less_greater,
+    sum,
+    product,
+    prefix,
+    call,
+    index,
 
     /// Returns the integer value of the enum
     fn val(self: Precedence) u4 {
@@ -36,6 +37,7 @@ const Precedence = enum(u4) {
 /// Determines the Precendence based on the given Token Type
 fn findPrecedence(token_type: Token.TokenType) Precedence {
     return switch (token_type) {
+        .assign => .assign,
         .equal, .not_equal => .equals,
         .less_than, .greater_than, .less_than_equal, .greater_than_equal => .less_greater,
         .plus, .minus => .sum,
@@ -115,8 +117,6 @@ pub const Parser = struct {
 
     /// Parses the statement into a node
     fn parseStatement(self: *Parser) Error!Node {
-        if (self.peekIsType(.assign)) return self.parseAssignment();
-
         return switch (self.current_token.token_type) {
             .comment => self.parseComment(),
             .constant, .mutable => self.parseDeclaration(),
@@ -204,6 +204,10 @@ pub const Parser = struct {
                 .left_bracket, .period => blk: {
                     self.next();
                     break :blk try self.parseIndexExpression(left);
+                },
+                .assign => blk: {
+                    self.next();
+                    break :blk try self.parseAssignment(left);
                 },
                 .plus,
                 .minus,
@@ -552,19 +556,22 @@ pub const Parser = struct {
     }
 
     /// Parses the current expression as an assignment. Compiler does checking for mutating
-    fn parseAssignment(self: *Parser) Error!Node {
+    fn parseAssignment(self: *Parser, left: Node) Error!Node {
+        switch (left) {
+            .identifier, .index => {},
+            else => return self.fail("Expected identifier or index on lhs but got '{}'"),
+        }
+
         const node = try self.allocator.create(Node.Assignment);
         node.* = .{
             .token = self.peek_token,
-            .name = try self.parseIdentifier(),
-            .value = undefined,
+            .left = left,
+            .right = undefined,
         };
 
-        // Skip name and '=' token
-        self.next();
         self.next();
 
-        node.value = try self.parseExpression(.lowest);
+        node.right = try self.parseExpression(.lowest);
 
         return Node{ .assignment = node };
     }
@@ -1016,9 +1023,9 @@ test "Assignment" {
     inline for (test_cases) |case, i| {
         const tree = try parse(allocator, case.input);
         defer tree.deinit();
-        const node = tree.nodes[tree.nodes.len - 1].assignment;
-        testing.expectEqualSlices(u8, case.id, node.name.identifier.value);
-        testing.expect(case.expected == node.value.int_lit.value);
+        const node = tree.nodes[tree.nodes.len - 1].expression.value.assignment;
+        testing.expectEqualSlices(u8, case.id, node.left.identifier.value);
+        testing.expect(case.expected == node.right.int_lit.value);
     }
 }
 
