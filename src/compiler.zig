@@ -241,12 +241,16 @@ pub const Compiler = struct {
         switch (node) {
             .expression => |exp| {
                 try self.compile(exp.value);
-
-                if (!self.lastInstIs(.noop)) {
-                    _ = try self.emit(.pop);
-                }
+                _ = try self.emit(.pop);
             },
-            .block_statement => |block| for (block.nodes) |bnode| try self.compile(bnode),
+            .block_statement => |block| {
+                for (block.nodes) |bnode| try self.compile(bnode);
+
+                if (self.lastInstIs(.pop))
+                    self.removeLastInst()
+                else if (!self.lastInstIs(.return_value))
+                    _ = try self.emit(.load_nil);
+            },
             .infix => |inf| {
                 try self.compile(inf.left);
                 try self.compile(inf.right);
@@ -405,10 +409,11 @@ pub const Compiler = struct {
 
                 try self.compile(loop.block);
 
+                _ = try self.emit(.pop);
+
                 _ = try self.emitOp(.jump, @intCast(u16, start_jump));
 
-                const end = try self.emit(.noop);
-
+                const end = try self.emit(.load_nil);
                 // jump to end
                 self.instructions.items[false_jump].ptr = @intCast(u16, end);
             },
@@ -575,7 +580,7 @@ test "Compile AST to bytecode" {
                 .load_const,
                 .load_const,
                 .add,
-                .return_value,
+                ._return,
                 .load_const,
                 .pop,
             },
@@ -585,6 +590,7 @@ test "Compile AST to bytecode" {
             .consts = &[_]Value{Value{ .function = .{ .offset = 1, .arg_len = 0 } }},
             .opcodes = &[_]bytecode.Opcode{
                 .jump,
+                .load_nil,
                 ._return,
                 .load_const,
                 .pop,
@@ -596,7 +602,7 @@ test "Compile AST to bytecode" {
             .opcodes = &[_]bytecode.Opcode{
                 .jump,
                 .load_const,
-                .return_value,
+                ._return,
                 .load_const,
                 .call,
                 .pop,
@@ -608,7 +614,7 @@ test "Compile AST to bytecode" {
             .opcodes = &[_]bytecode.Opcode{
                 .jump,
                 .load_const,
-                .return_value,
+                ._return,
                 .load_const,
                 .bind_global,
                 .load_global,
@@ -617,7 +623,7 @@ test "Compile AST to bytecode" {
             },
         },
         .{
-            .input = "const x = 5 fn(){ x }",
+            .input = "const x = 5 fn(){ return x }",
             .consts = &[_]Value{ Value{ .integer = 5 }, Value{ .function = .{ .offset = 3, .arg_len = 0 } } },
             .opcodes = &[_]bytecode.Opcode{
                 .load_const,
@@ -630,7 +636,7 @@ test "Compile AST to bytecode" {
             },
         },
         .{
-            .input = "fn(){ const x = 5 x }",
+            .input = "fn(){ const x = 5 return x }",
             .consts = &[_]Value{ Value{ .integer = 5 }, Value{ .function = .{ .offset = 1, .arg_len = 0 } } },
             .opcodes = &[_]bytecode.Opcode{
                 .jump,
@@ -643,7 +649,7 @@ test "Compile AST to bytecode" {
             },
         },
         .{
-            .input = "const func = fn(x){ x } func(5)",
+            .input = "const func = fn(x){ return x } func(5)",
             .consts = &[_]Value{ Value{ .function = .{ .offset = 1, .arg_len = 1 } }, Value{ .integer = 5 } },
             .opcodes = &[_]bytecode.Opcode{
                 .jump,
@@ -676,7 +682,8 @@ test "Compile AST to bytecode" {
                 .load_const,
                 .pop,
                 .jump,
-                .noop,
+                .load_nil,
+                .pop,
             },
         },
         .{

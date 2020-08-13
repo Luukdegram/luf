@@ -642,8 +642,8 @@ test "Index" {
 
 test "Basic function calls with no arguments" {
     const test_cases = .{
-        .{ .input = "const x = fn() { 1 + 2 } x()", .expected = 3 },
-        .{ .input = "const x = fn() { 1 } const y = fn() { 5 } x() + y()", .expected = 6 },
+        .{ .input = "const x = fn() { return 1 + 2 } x()", .expected = 3 },
+        .{ .input = "const x = fn() { return 1 } const y = fn() { return 5 } x() + y()", .expected = 6 },
         .{ .input = "const x = fn() { return 5 10 } x()", .expected = 5 },
         .{ .input = "const x = fn() { } x()", .expected = &Value.Nil },
     };
@@ -663,8 +663,8 @@ test "Basic function calls with no arguments" {
 
 test "Globals vs Locals" {
     const test_cases = .{
-        .{ .input = "const x = fn() { const x = 5 x } x()", .expected = 5 },
-        .{ .input = "const x = fn() { const y = 1 const z = 2 y + z } x()", .expected = 3 },
+        .{ .input = "const x = fn() { const x = 5 return x } x()", .expected = 5 },
+        .{ .input = "const x = fn() { const y = 1 const z = 2 return y + z } x()", .expected = 3 },
     };
 
     inline for (test_cases) |case| {
@@ -682,9 +682,9 @@ test "Globals vs Locals" {
 
 test "Functions with arguments" {
     const test_cases = .{
-        .{ .input = "const x = fn(x) { x } x(3)", .expected = 3 },
-        .{ .input = "const x = fn(a, b) { a + b } x(3,5)", .expected = 8 },
-        .{ .input = "const x = fn(a, b) { const z = a + b z } x(3,5)", .expected = 8 },
+        .{ .input = "const x = fn(x) { return x } x(3)", .expected = 3 },
+        .{ .input = "const x = fn(a, b) { return a + b } x(3,5)", .expected = 8 },
+        .{ .input = "const x = fn(a, b) { const z = a + b return z } x(3,5)", .expected = 8 },
     };
 
     inline for (test_cases) |case| {
@@ -720,8 +720,8 @@ test "Builtins" {
 
 test "While loop" {
     const test_cases = .{
-        .{ .input = "mut i = 0 while (i > 10) {mut i = 10}", .expected = &Value.False },
-        .{ .input = "mut i = 0 while (i < 10) {i = 10}", .expected = &Value.False },
+        .{ .input = "mut i = 0 while (i > 10) {mut i = 10}", .expected = &Value.Nil },
+        .{ .input = "mut i = 0 while (i < 10) {i = 10}", .expected = &Value.Nil },
     };
 
     inline for (test_cases) |case| {
