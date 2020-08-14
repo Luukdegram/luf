@@ -699,6 +699,7 @@ test "Strings" {
     const test_cases = .{
         .{ .input = "\"foo\"", .expected = "foo" },
         .{ .input = "\"foo\" + \"bar\"", .expected = "foobar" },
+        .{ .input = "const x = \"foo\" x+=\"bar\" x", .expected = "foobar" },
     };
 
     inline for (test_cases) |case| {
