@@ -95,6 +95,11 @@ pub const Vm = struct {
                 .shift_left,
                 .shift_right,
                 => try self.analBinOp(inst.op),
+                .assign_add,
+                .assign_div,
+                .assign_mul,
+                .assign_sub,
+                => try self.analAssignAndBinOp(inst.op),
                 .pop => _ = self.pop(),
                 .load_true => try self.push(&Value.True),
                 .load_false => try self.push(&Value.False),
@@ -246,12 +251,45 @@ pub const Vm = struct {
         return self.push(res);
     }
 
+    /// Concats two strings together
     fn analStringOp(self: *Vm, op: byte_code.Opcode, left: []const u8, right: []const u8) Error!void {
         if (op != .add) return Error.InvalidOperator;
 
         const res = try self.newValue();
         res.* = .{ .string = try std.mem.concat(&self.arena.allocator, u8, &[_][]const u8{ left, right }) };
         return self.push(res);
+    }
+
+    /// Analyzes the instruction, ensures the lhs is an identifier and the rhs is an integer or string.
+    /// Strings are only valid for the `assign_add` bytecode instruction
+    fn analAssignAndBinOp(self: *Vm, op: byte_code.Opcode) Error!void {
+        const right = self.pop() orelse return Error.MissingValue;
+        const left = self.pop() orelse return Error.MissingValue;
+
+        if (left.lufType() != right.lufType()) return Error.InvalidOperator;
+
+        if (left.is(.integer)) {
+            try self.analIntOp(switch (op) {
+                .assign_add => .add,
+                .assign_div => .div,
+                .assign_mul => .mul,
+                .assign_sub => .sub,
+                else => unreachable,
+            }, left.integer, right.integer);
+            const val = self.pop().?;
+            left.* = val.*;
+            return self.push(&Value.Nil);
+        }
+        if (left.is(.string)) {
+            if (op != .assign_add) return Error.InvalidOperator;
+
+            try self.analStringOp(.add, left.string, right.string);
+            const val = self.pop().?;
+            left.* = val.*;
+            return self.push(&Value.Nil);
+        }
+
+        return Error.InvalidOperator;
     }
 
     /// Analyzes a then executes a comparison and pushes the return value on the stack
@@ -575,6 +613,10 @@ test "Integer arithmetic" {
         .{ .input = "4 >> 2", .expected = 1 },
         .{ .input = "~1", .expected = -2 },
         .{ .input = "(5 + 10 * 2 + 15 / 3) * 2 + -10", .expected = 50 },
+        .{ .input = "mut x = 0 x+= 1 x", .expected = 1 },
+        .{ .input = "mut x = 2 x*= 2 x", .expected = 4 },
+        .{ .input = "mut x = 10 x/= 2 x", .expected = 5 },
+        .{ .input = "mut x = 1 x-= 1 x", .expected = 0 },
     };
 
     inline for (test_cases) |case| {

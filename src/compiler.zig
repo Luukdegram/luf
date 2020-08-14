@@ -272,6 +272,10 @@ pub const Compiler = struct {
                     .not => .bitwise_not,
                     .shift_left => .shift_left,
                     .shift_right => .shift_right,
+                    .assign_add => .assign_add,
+                    .assign_sub => .assign_sub,
+                    .assign_mul => .assign_mul,
+                    .assign_div => .assign_div,
                     else => unreachable,
                 });
             },

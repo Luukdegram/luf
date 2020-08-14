@@ -169,6 +169,10 @@ pub const Node = union(NodeType) {
             shift_right,
             @"and",
             @"or",
+            assign_add,
+            assign_sub,
+            assign_mul,
+            assign_div,
 
             /// Returns the corresponding `Op` based on the given `Token`
             pub fn fromToken(token: Token) Op {
@@ -191,6 +195,10 @@ pub const Node = union(NodeType) {
                     .shift_right => .shift_right,
                     .@"and" => .@"and",
                     .@"or" => .@"or",
+                    .equal_add => .assign_add,
+                    .equal_div => .assign_div,
+                    .equal_mul => .assign_mul,
+                    .equal_sub => .assign_sub,
                     else => unreachable,
                 };
             }

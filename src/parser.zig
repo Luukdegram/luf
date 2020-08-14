@@ -47,7 +47,7 @@ fn findPrecedence(token_type: Token.TokenType) Precedence {
     return switch (token_type) {
         .@"or" => .@"or",
         .@"and" => .@"and",
-        .assign => .assign,
+        .assign, .equal_add, .equal_sub, .equal_mul, .equal_div => .assign,
         .equal, .not_equal => .equals,
         .less_than, .greater_than, .less_than_equal, .greater_than_equal => .less_greater,
         .ampersand => .bitwise_and,
@@ -242,6 +242,10 @@ pub const Parser = struct {
                 .shift_right,
                 .@"and",
                 .@"or",
+                .equal_add,
+                .equal_sub,
+                .equal_mul,
+                .equal_div,
                 => blk: {
                     self.next();
                     break :blk try self.parseInfixExpression(left);

@@ -46,6 +46,10 @@ pub const Opcode = enum(u8) {
     shift_right,
     @"and",
     @"or",
+    assign_add,
+    assign_sub,
+    assign_mul,
+    assign_div,
 
     // referencing
     get_by_index,
