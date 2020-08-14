@@ -135,7 +135,7 @@ pub const Node = union(NodeType) {
                 return switch (token.token_type) {
                     .minus => .minus,
                     .bang => .bang,
-                    else => @panic("Unexpected token"),
+                    else => unreachable,
                 };
             }
         };
@@ -152,12 +152,18 @@ pub const Node = union(NodeType) {
             assign,
             add,
             sub,
+            mod,
             multiply,
             divide,
             less_than,
             greater_than,
             equal,
             not_equal,
+            xor,
+            @"or",
+            @"and",
+            shift_left,
+            shift_right,
 
             /// Returns the corresponding `Op` based on the given `Token`
             pub fn fromToken(token: Token) Op {
@@ -166,12 +172,18 @@ pub const Node = union(NodeType) {
                     .minus => .sub,
                     .assign => .assign,
                     .asterisk => .multiply,
+                    .percent => .mod,
                     .slash => .divide,
                     .less_than => .less_than,
                     .greater_than => .greater_than,
                     .equal => .equal,
                     .not_equal => .not_equal,
-                    else => @panic("Unexpected token"), //TODO replace this hard panic
+                    .ampersand => .@"and",
+                    .caret => .xor,
+                    .vertical_line => .@"or",
+                    .shift_left => .shift_left,
+                    .shift_right => .shift_right,
+                    else => unreachable,
                 };
             }
         };

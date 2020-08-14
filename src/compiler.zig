@@ -254,17 +254,23 @@ pub const Compiler = struct {
             .infix => |inf| {
                 try self.compile(inf.left);
                 try self.compile(inf.right);
-                switch (inf.operator) {
-                    .add => _ = try self.emit(.add),
-                    .multiply => _ = try self.emit(.mul),
-                    .sub => _ = try self.emit(.sub),
-                    .divide => _ = try self.emit(.div),
-                    .less_than => _ = try self.emit(.less_than),
-                    .greater_than => _ = try self.emit(.greater_than),
-                    .equal => _ = try self.emit(.equal),
-                    .not_equal => _ = try self.emit(.not_equal),
+                _ = try self.emit(switch (inf.operator) {
+                    .add => .add,
+                    .multiply => .mul,
+                    .sub => .sub,
+                    .divide => .div,
+                    .less_than => .less_than,
+                    .greater_than => .greater_than,
+                    .equal => .equal,
+                    .not_equal => .not_equal,
+                    .mod => .mod,
+                    .@"and" => .bitwise_and,
+                    .@"or" => .bitwise_or,
+                    .xor => .bitwise_xor,
+                    .shift_left => .shift_left,
+                    .shift_right => .shift_right,
                     else => unreachable,
-                }
+                });
             },
             .prefix => |pfx| {
                 try self.compile(pfx.right);

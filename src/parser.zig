@@ -17,11 +17,17 @@ const Errors = @import("error.zig").Errors;
 /// The higher the value, the earlier it will be executed
 /// This means a function call will be executed before a prefix,
 /// and the product will be calculated before the sum.
+///
+/// Note that the order of these is important to determine the precedence in binary operations
 const Precedence = enum(u4) {
     lowest,
     assign,
     equals,
     less_greater,
+    @"or",
+    xor,
+    @"and",
+    shift,
     sum,
     product,
     prefix,
@@ -40,8 +46,12 @@ fn findPrecedence(token_type: Token.TokenType) Precedence {
         .assign => .assign,
         .equal, .not_equal => .equals,
         .less_than, .greater_than, .less_than_equal, .greater_than_equal => .less_greater,
+        .ampersand => .@"and",
+        .vertical_line => .@"or",
+        .caret => .xor,
+        .shift_left, .shift_right => .shift,
         .plus, .minus => .sum,
-        .slash, .asterisk => .product,
+        .slash, .asterisk, .percent => .product,
         .left_parenthesis => .call,
         .left_bracket => .index,
         .period => .index,
@@ -213,12 +223,18 @@ pub const Parser = struct {
                 .minus,
                 .slash,
                 .asterisk,
+                .percent,
+                .ampersand,
+                .vertical_line,
+                .caret,
                 .equal,
                 .not_equal,
                 .less_than,
                 .greater_than,
                 .less_than_equal,
                 .greater_than_equal,
+                .shift_left,
+                .shift_right,
                 => blk: {
                     self.next();
                     break :blk try self.parseInfixExpression(left);

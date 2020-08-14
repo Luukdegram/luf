@@ -34,8 +34,18 @@ pub const Lexer = struct {
             '(' => .left_parenthesis,
             ')' => .right_parenthesis,
             ',' => .comma,
-            '+' => .plus,
-            '-' => .minus,
+            '+' => if (self.peekChar() == '=') {
+                const start = self.position;
+                self.readChar();
+                self.readChar();
+                return Token{ .token_type = .equal_add, .start = start, .end = self.position };
+            } else .plus,
+            '-' => if (self.peekChar() == '=') {
+                const start = self.position;
+                self.readChar();
+                self.readChar();
+                return Token{ .token_type = .equal_sub, .start = start, .end = self.position };
+            } else .minus,
             '!' => if (self.peekChar() == '=') {
                 const start = self.position;
                 self.readChar();
@@ -46,19 +56,57 @@ pub const Lexer = struct {
                 const start = self.position;
                 self.readLine();
                 return Token{ .token_type = .comment, .start = start + 2, .end = self.position };
+            } else if (self.peekChar() == '=') {
+                const start = self.position;
+                self.readChar();
+                self.readChar();
+                return Token{ .token_type = .equal_div, .start = start, .end = self.position };
             } else .slash,
-            '*' => .asterisk,
+            '*' => if (self.peekChar() == '=') {
+                const start = self.position;
+                self.readChar();
+                self.readChar();
+                return Token{ .token_type = .equal_mul, .start = start, .end = self.position };
+            } else .asterisk,
+            '^' => if (self.peekChar() == '=') {
+                const start = self.position;
+                self.readChar();
+                self.readChar();
+                return Token{ .token_type = .equal_caret, .start = start, .end = self.position };
+            } else .caret,
+            '&' => if (self.peekChar() == '=') {
+                const start = self.position;
+                self.readChar();
+                self.readChar();
+                return Token{ .token_type = .equal_ampersand, .start = start, .end = self.position };
+            } else .ampersand,
+            '|' => if (self.peekChar() == '=') {
+                const start = self.position;
+                self.readChar();
+                self.readChar();
+                return Token{ .token_type = .equal_vertical_line, .start = start, .end = self.position };
+            } else .vertical_line,
             '<' => if (self.peekChar() == '=') {
                 const start = self.position;
                 self.readChar();
                 self.readChar();
                 return Token{ .token_type = .less_than_equal, .start = start, .end = self.position };
+            } else if (self.peekChar() == '<') {
+                const start = self.position;
+                self.readChar();
+                self.readChar();
+                return Token{ .token_type = .shift_left, .start = start, .end = self.position };
             } else .less_than,
             '>' => if (self.peekChar() == '=') {
                 const start = self.position;
                 self.readChar();
                 self.readChar();
                 return Token{ .token_type = .greater_than_equal, .start = start, .end = self.position };
+            } else if (self.peekChar() == '>') {
+                const start = self.position;
+                self.readChar();
+                self.readChar();
+                return Token{ .token_type = .shift_right, .start = start, .end = self.position };
             } else .greater_than,
             '{' => .left_brace,
             '}' => .right_brace,
@@ -73,6 +121,7 @@ pub const Lexer = struct {
                 defer self.readChar();
                 return Token{ .token_type = .string, .start = start, .end = self.position };
             },
+            '%' => .percent,
             0 => .eof,
             else => |c| if (isLetter(c)) {
                 const start = self.position;

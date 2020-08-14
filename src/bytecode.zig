@@ -29,6 +29,7 @@ pub const Opcode = enum(u8) {
     sub,
     mul,
     div,
+    mod,
     equal,
     not_equal,
     greater_than,
@@ -37,6 +38,11 @@ pub const Opcode = enum(u8) {
     less_than_equal,
     minus,
     bang,
+    bitwise_or,
+    bitwise_xor,
+    bitwise_and,
+    shift_left,
+    shift_right,
 
     // referencing
     get_by_index,

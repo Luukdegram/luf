@@ -78,7 +78,17 @@ pub const Vm = struct {
                     try self.push(val);
                 },
                 .equal, .not_equal, .less_than, .greater_than => try self.analCmp(inst.op),
-                .add, .sub, .mul, .div => try self.analBinOp(inst.op),
+                .add,
+                .sub,
+                .mul,
+                .div,
+                .mod,
+                .bitwise_and,
+                .bitwise_or,
+                .bitwise_xor,
+                .shift_left,
+                .shift_right,
+                => try self.analBinOp(inst.op),
                 .pop => _ = self.pop(),
                 .load_true => try self.push(&Value.True),
                 .load_false => try self.push(&Value.False),
@@ -189,10 +199,10 @@ pub const Vm = struct {
         const right = self.pop() orelse return Error.MissingValue;
         const left = self.pop() orelse return Error.MissingValue;
 
-        if (std.meta.activeTag(left.*) == std.meta.activeTag(right.*) and left.* == .integer) {
+        if (left.lufType() == right.lufType() and left.is(.integer)) {
             return self.analIntOp(op, left.integer, right.integer);
         }
-        if (std.meta.activeTag(left.*) == std.meta.activeTag(right.*) and left.* == .string) {
+        if (left.lufType() == right.lufType() and left.is(.string)) {
             return self.analStringOp(op, left.string, right.string);
         }
     }
@@ -203,7 +213,19 @@ pub const Vm = struct {
             .add => left + right,
             .sub => left - right,
             .mul => left * right,
+            .mod => if (right > 0) @mod(left, right) else return Error.InvalidOperator,
             .div => @divTrunc(left, right),
+            .bitwise_and => left & right,
+            .bitwise_xor => left ^ right,
+            .bitwise_or => left | right,
+            .shift_left => blk: {
+                if (right < 0) return Error.InvalidOperator;
+                break :blk if (right > std.math.maxInt(u6)) 0 else left << @intCast(u6, right);
+            },
+            .shift_right => blk: {
+                if (right < 0) return Error.InvalidOperator;
+                break :blk if (right > std.math.maxInt(u6)) 0 else left >> @intCast(u6, right);
+            },
             else => return Error.InvalidOperator,
         };
 
@@ -518,7 +540,13 @@ test "Integer arithmetic" {
         .{ .input = "1 * 3", .expected = 3 },
         .{ .input = "1 - 3", .expected = -2 },
         .{ .input = "10 / 2", .expected = 5 },
+        .{ .input = "10 % 2", .expected = 0 },
+        .{ .input = "1 | 2", .expected = 3 },
+        .{ .input = "2 ^ 4", .expected = 6 },
+        .{ .input = "3 & 6", .expected = 2 },
         .{ .input = "-2", .expected = -2 },
+        .{ .input = "1 << 2", .expected = 4 },
+        .{ .input = "4 >> 2", .expected = 1 },
         .{ .input = "(5 + 10 * 2 + 15 / 3) * 2 + -10", .expected = 50 },
     };
 

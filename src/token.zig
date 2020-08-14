@@ -25,6 +25,7 @@ pub const Token = struct {
         assign,
         plus,
         minus,
+        percent,
         bang,
         asterisk,
         slash,
@@ -34,6 +35,18 @@ pub const Token = struct {
         greater_than_equal,
         equal,
         not_equal,
+        ampersand,
+        caret,
+        vertical_line,
+        equal_add,
+        equal_sub,
+        equal_mul,
+        equal_div,
+        equal_ampersand,
+        equal_caret,
+        equal_vertical_line,
+        shift_left,
+        shift_right,
         // delimiters
         comma,
         left_parenthesis,
@@ -72,8 +85,8 @@ pub const Token = struct {
     });
 
     /// Returns the string value of the token
-    pub fn string(self: Token) []const u8 {
-        return switch (self.token_type) {
+    pub fn string(token_type: comptime Token.TokenType) []const u8 {
+        return switch (token_type) {
             .illegal => "[illegal]",
             .eof => "[eof]",
             // identifiers + literals
@@ -92,6 +105,20 @@ pub const Token = struct {
             .greater_than => ">",
             .equal => "==",
             .not_equal => "!=",
+            .less_than_equal => "<=",
+            .greater_than_equal => ">=",
+            .ampersand => "&",
+            .caret => "^",
+            .vertical_line => "|",
+            .equal_add => "+=",
+            .equal_sub => "-=",
+            .equal_mul => "*=",
+            .equal_div => "/=",
+            .equal_ampersand => "&=",
+            .equal_caret => "^=",
+            .equal_vertical_line => "|=",
+            .shift_left => "<<",
+            .shift_right => ">>",
             // delimiters
             .comma => ",",
             .left_parenthesis => "(",
