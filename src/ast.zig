@@ -130,11 +130,13 @@ pub const Node = union(NodeType) {
         pub const Op = enum {
             minus,
             bang,
+            bitwise_not,
 
             pub fn fromToken(token: Token) Op {
                 return switch (token.token_type) {
                     .minus => .minus,
                     .bang => .bang,
+                    .tilde => .bitwise_not,
                     else => unreachable,
                 };
             }
@@ -159,11 +161,14 @@ pub const Node = union(NodeType) {
             greater_than,
             equal,
             not_equal,
-            xor,
-            @"or",
-            @"and",
+            bitwise_xor,
+            bitwise_or,
+            bitwise_and,
+            not,
             shift_left,
             shift_right,
+            @"and",
+            @"or",
 
             /// Returns the corresponding `Op` based on the given `Token`
             pub fn fromToken(token: Token) Op {
@@ -178,11 +183,14 @@ pub const Node = union(NodeType) {
                     .greater_than => .greater_than,
                     .equal => .equal,
                     .not_equal => .not_equal,
-                    .ampersand => .@"and",
-                    .caret => .xor,
-                    .vertical_line => .@"or",
+                    .ampersand => .bitwise_and,
+                    .caret => .bitwise_xor,
+                    .tilde => .not,
+                    .vertical_line => .bitwise_or,
                     .shift_left => .shift_left,
                     .shift_right => .shift_right,
+                    .@"and" => .@"and",
+                    .@"or" => .@"or",
                     else => unreachable,
                 };
             }

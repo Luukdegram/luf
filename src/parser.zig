@@ -21,12 +21,14 @@ const Errors = @import("error.zig").Errors;
 /// Note that the order of these is important to determine the precedence in binary operations
 const Precedence = enum(u4) {
     lowest,
+    @"or",
+    @"and",
     assign,
     equals,
     less_greater,
-    @"or",
-    xor,
-    @"and",
+    bitwise_or,
+    bitwise_xor,
+    bitwise_and,
     shift,
     sum,
     product,
@@ -43,12 +45,14 @@ const Precedence = enum(u4) {
 /// Determines the Precendence based on the given Token Type
 fn findPrecedence(token_type: Token.TokenType) Precedence {
     return switch (token_type) {
+        .@"or" => .@"or",
+        .@"and" => .@"and",
         .assign => .assign,
         .equal, .not_equal => .equals,
         .less_than, .greater_than, .less_than_equal, .greater_than_equal => .less_greater,
-        .ampersand => .@"and",
-        .vertical_line => .@"or",
-        .caret => .xor,
+        .ampersand => .bitwise_and,
+        .vertical_line => .bitwise_or,
+        .caret => .bitwise_xor,
         .shift_left, .shift_right => .shift,
         .plus, .minus => .sum,
         .slash, .asterisk, .percent => .product,
@@ -194,6 +198,7 @@ pub const Parser = struct {
             .string => try self.parseStringLiteral(),
             .bang => try self.parsePrefixExpression(),
             .minus => try self.parsePrefixExpression(),
+            .tilde => try self.parsePrefixExpression(),
             ._true, ._false => try self.parseBoolean(),
             ._if => try self.parseIfExpression(),
             .left_parenthesis => try self.parseGroupedExpression(),
@@ -235,6 +240,8 @@ pub const Parser = struct {
                 .greater_than_equal,
                 .shift_left,
                 .shift_right,
+                .@"and",
+                .@"or",
                 => blk: {
                     self.next();
                     break :blk try self.parseInfixExpression(left);

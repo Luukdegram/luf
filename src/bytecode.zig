@@ -37,12 +37,15 @@ pub const Opcode = enum(u8) {
     less_than,
     less_than_equal,
     minus,
-    bang,
+    not,
     bitwise_or,
     bitwise_xor,
     bitwise_and,
+    bitwise_not,
     shift_left,
     shift_right,
+    @"and",
+    @"or",
 
     // referencing
     get_by_index,

@@ -122,6 +122,7 @@ pub const Lexer = struct {
                 return Token{ .token_type = .string, .start = start, .end = self.position };
             },
             '%' => .percent,
+            '~' => .tilde,
             0 => .eof,
             else => |c| if (isLetter(c)) {
                 const start = self.position;

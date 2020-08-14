@@ -77,7 +77,13 @@ pub const Vm = struct {
                     val.* = code.constants[inst.ptr];
                     try self.push(val);
                 },
-                .equal, .not_equal, .less_than, .greater_than => try self.analCmp(inst.op),
+                .equal,
+                .not_equal,
+                .less_than,
+                .greater_than,
+                .@"and",
+                .@"or",
+                => try self.analCmp(inst.op),
                 .add,
                 .sub,
                 .mul,
@@ -93,7 +99,8 @@ pub const Vm = struct {
                 .load_true => try self.push(&Value.True),
                 .load_false => try self.push(&Value.False),
                 .minus => try self.analNegation(),
-                .bang => try self.analBang(),
+                .not => try self.analNot(),
+                .bitwise_not => try self.analBitwiseNot(),
                 .load_nil => try self.push(&Value.Nil),
                 .jump => self.ip = inst.ptr - 1,
                 .jump_false => {
@@ -205,6 +212,8 @@ pub const Vm = struct {
         if (left.lufType() == right.lufType() and left.is(.string)) {
             return self.analStringOp(op, left.string, right.string);
         }
+
+        return Error.InvalidOperator;
     }
 
     /// Analyzes and executes a binary operation on an integer
@@ -214,7 +223,10 @@ pub const Vm = struct {
             .sub => left - right,
             .mul => left * right,
             .mod => if (right > 0) @mod(left, right) else return Error.InvalidOperator,
-            .div => @divTrunc(left, right),
+            .div => blk: {
+                if (right == 0) return Error.InvalidOperator;
+                break :blk @divTrunc(left, right);
+            },
             .bitwise_and => left & right,
             .bitwise_xor => left ^ right,
             .bitwise_or => left | right,
@@ -256,10 +268,13 @@ pub const Vm = struct {
             return self.analStringCmp(op, left.string, right.string);
         }
 
-        // for now just assume it's a boolean
+        if (!left.is(.boolean) or !right.is(.boolean)) return Error.InvalidOperator;
+
         switch (op) {
             .equal => try self.push(if (left.boolean == right.boolean) &Value.True else &Value.False),
             .not_equal => try self.push(if (left.boolean != right.boolean) &Value.True else &Value.False),
+            .@"and" => try self.push(if (left.boolean and right.boolean) &Value.True else &Value.False),
+            .@"or" => try self.push(if (left.boolean or right.boolean) &Value.True else &Value.False),
             else => return Error.InvalidOperator,
         }
     }
@@ -301,7 +316,7 @@ pub const Vm = struct {
         return self.push(res);
     }
     /// Analyzes and executes the '!' operator
-    fn analBang(self: *Vm) Error!void {
+    fn analNot(self: *Vm) Error!void {
         const right = self.pop() orelse return Error.MissingValue;
 
         const val = switch (right.*) {
@@ -310,6 +325,17 @@ pub const Vm = struct {
             else => false,
         };
         return self.push(if (val) &Value.True else &Value.False);
+    }
+
+    /// Executes the ~ operator
+    fn analBitwiseNot(self: *Vm) Error!void {
+        const value = self.pop() orelse return Error.MissingValue;
+
+        if (!value.is(.integer)) return Error.InvalidOperator;
+
+        const ret = try self.newValue();
+        ret.* = .{ .integer = ~value.integer };
+        return self.push(ret);
     }
 
     /// Analyzes the instruction and builds an array
@@ -547,6 +573,7 @@ test "Integer arithmetic" {
         .{ .input = "-2", .expected = -2 },
         .{ .input = "1 << 2", .expected = 4 },
         .{ .input = "4 >> 2", .expected = 1 },
+        .{ .input = "~1", .expected = -2 },
         .{ .input = "(5 + 10 * 2 + 15 / 3) * 2 + -10", .expected = 50 },
     };
 
@@ -569,6 +596,12 @@ test "Boolean" {
         .{ .input = "1 != 1", .expected = false },
         .{ .input = "true != true", .expected = false },
         .{ .input = "!true", .expected = false },
+        .{ .input = "true and true", .expected = true },
+        .{ .input = "true and false", .expected = false },
+        .{ .input = "false and false", .expected = false },
+        .{ .input = "true or false", .expected = true },
+        .{ .input = "true or true", .expected = true },
+        .{ .input = "false or false", .expected = false },
     };
 
     inline for (test_cases) |case| {

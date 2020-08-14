@@ -264,9 +264,12 @@ pub const Compiler = struct {
                     .equal => .equal,
                     .not_equal => .not_equal,
                     .mod => .mod,
-                    .@"and" => .bitwise_and,
-                    .@"or" => .bitwise_or,
-                    .xor => .bitwise_xor,
+                    .@"and" => .@"and",
+                    .@"or" => .@"or",
+                    .bitwise_xor => .bitwise_xor,
+                    .bitwise_or => .bitwise_or,
+                    .bitwise_and => .bitwise_and,
+                    .not => .bitwise_not,
                     .shift_left => .shift_left,
                     .shift_right => .shift_right,
                     else => unreachable,
@@ -276,7 +279,8 @@ pub const Compiler = struct {
                 try self.compile(pfx.right);
                 switch (pfx.operator) {
                     .minus => _ = try self.emit(.minus),
-                    .bang => _ = try self.emit(.bang),
+                    .bang => _ = try self.emit(.not),
+                    .bitwise_not => _ = try self.emit(.bitwise_not),
                 }
             },
             .boolean => |boolean| _ = try self.emit(if (boolean.value) .load_true else .load_false),
@@ -511,7 +515,7 @@ test "Compile AST to bytecode" {
         .{
             .input = "!true",
             .consts = &[_]i64{},
-            .opcodes = &[_]bytecode.Opcode{ .load_true, .bang, .pop },
+            .opcodes = &[_]bytecode.Opcode{ .load_true, .not, .pop },
         },
         .{
             .input = "if (true) { 5 } 10",

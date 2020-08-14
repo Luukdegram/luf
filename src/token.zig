@@ -38,6 +38,7 @@ pub const Token = struct {
         ampersand,
         caret,
         vertical_line,
+        tilde,
         equal_add,
         equal_sub,
         equal_mul,
@@ -62,6 +63,8 @@ pub const Token = struct {
         constant,
         while_loop,
         nil,
+        @"and",
+        @"or",
         // underscores because reserved words in Zig
         _true,
         _false,
@@ -82,6 +85,8 @@ pub const Token = struct {
         .{ "if", ._if },
         .{ "else", ._else },
         .{ "return", ._return },
+        .{ "and", .@"and" },
+        .{ "or", .@"or" },
     });
 
     /// Returns the string value of the token
@@ -134,6 +139,8 @@ pub const Token = struct {
             .constant => "const",
             .while_loop => "while",
             .nil => "nil",
+            .@"and" => "and",
+            .@"or" => "or",
             // underscores because reserved words in Zig
             ._true => "true",
             ._false => "false",
@@ -163,6 +170,8 @@ test "Keywords" {
         "return",
         "while",
         "nil",
+        "or",
+        "and",
     };
 
     for (keywords) |keyword| {
