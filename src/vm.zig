@@ -211,10 +211,10 @@ pub const Vm = struct {
         const right = self.pop() orelse return Error.MissingValue;
         const left = self.pop() orelse return Error.MissingValue;
 
-        if (left.lufType() == right.lufType() and left.is(.integer)) {
+        if (left.lufType() == right.lufType() and left.isType(.integer)) {
             return self.analIntOp(op, left.integer, right.integer);
         }
-        if (left.lufType() == right.lufType() and left.is(.string)) {
+        if (left.lufType() == right.lufType() and left.isType(.string)) {
             return self.analStringOp(op, left.string, right.string);
         }
 
@@ -268,7 +268,7 @@ pub const Vm = struct {
 
         if (left.lufType() != right.lufType()) return Error.InvalidOperator;
 
-        if (left.is(.integer)) {
+        if (left.isType(.integer)) {
             try self.analIntOp(switch (op) {
                 .assign_add => .add,
                 .assign_div => .div,
@@ -280,7 +280,7 @@ pub const Vm = struct {
             left.* = val.*;
             return self.push(&Value.Nil);
         }
-        if (left.is(.string)) {
+        if (left.isType(.string)) {
             if (op != .assign_add) return Error.InvalidOperator;
 
             try self.analStringOp(.add, left.string, right.string);
@@ -298,15 +298,15 @@ pub const Vm = struct {
         const right = self.pop() orelse return Error.MissingValue;
         const left = self.pop() orelse return Error.MissingValue;
 
-        if (left.lufType() == right.lufType() and left.is(.integer)) {
+        if (left.lufType() == right.lufType() and left.isType(.integer)) {
             return self.analIntCmp(op, left.integer, right.integer);
         }
 
-        if (left.lufType() == right.lufType() and left.is(.string)) {
+        if (left.lufType() == right.lufType() and left.isType(.string)) {
             return self.analStringCmp(op, left.string, right.string);
         }
 
-        if (!left.is(.boolean) or !right.is(.boolean)) return Error.InvalidOperator;
+        if (!left.isType(.boolean) or !right.isType(.boolean)) return Error.InvalidOperator;
 
         switch (op) {
             .equal => try self.push(if (left.boolean == right.boolean) &Value.True else &Value.False),
@@ -315,6 +315,8 @@ pub const Vm = struct {
             .@"or" => try self.push(if (left.boolean or right.boolean) &Value.True else &Value.False),
             else => return Error.InvalidOperator,
         }
+
+        return Error.InvalidOperator;
     }
 
     /// Analyzes and compares 2 integers depending on the given operator
@@ -369,7 +371,7 @@ pub const Vm = struct {
     fn analBitwiseNot(self: *Vm) Error!void {
         const value = self.pop() orelse return Error.MissingValue;
 
-        if (!value.is(.integer)) return Error.InvalidOperator;
+        if (!value.isType(.integer)) return Error.InvalidOperator;
 
         const ret = try self.newValue();
         ret.* = .{ .integer = ~value.integer };
@@ -455,7 +457,7 @@ pub const Vm = struct {
         const index = self.pop() orelse return Error.MissingValue;
         const left = self.pop() orelse return Error.MissingValue;
 
-        if (index.is(.native)) {
+        if (index.isType(.native)) {
             const native = index.native;
             const args = try self.allocator.alloc(*Value, native.arg_len + 1);
             defer self.allocator.free(args);
@@ -469,13 +471,13 @@ pub const Vm = struct {
             return self.push(res);
         }
 
-        if (left.is(.list) and index.is(.integer)) {
+        if (left.isType(.list) and index.isType(.integer)) {
             const i = index.integer;
             const list = left.list;
             if (i < 0 or i > list.items.len) return Error.OutOfBounds;
 
             return self.push(list.items[@intCast(u64, i)]);
-        } else if (left.is(.map)) {
+        } else if (left.isType(.map)) {
             const map: Value.Map = left.map;
             if (map.get(index)) |val| {
                 return self.push(val);
@@ -483,7 +485,7 @@ pub const Vm = struct {
             // We return null to the user so they have something to check against
             // to see if a key exists or not.
             return self.push(&Value.Nil);
-        } else if (left.is(.string) and index.is(.integer)) {
+        } else if (left.isType(.string) and index.isType(.integer)) {
             const i = index.integer;
             const string = left.string;
             if (i < 0 or i > string.len) return Error.OutOfBounds;
@@ -504,12 +506,12 @@ pub const Vm = struct {
         const right = self.pop() orelse return Error.MissingValue;
         const left = self.pop() orelse return Error.MissingValue;
 
-        if (left.is(.list) and right.is(.integer)) {
+        if (left.isType(.list) and right.isType(.integer)) {
             const list = left.list;
             if (right.integer < 0 or right.integer > list.items.len) return Error.OutOfBounds;
             list.items[@intCast(usize, right.integer)].* = value.*;
             return self.push(&Value.Nil);
-        } else if (left.is(.map)) {
+        } else if (left.isType(.map)) {
             const map = left.map;
             if (map.get(right)) |val| {
                 val.* = value.*;

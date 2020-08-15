@@ -65,6 +65,7 @@ pub const Token = struct {
         nil,
         @"and",
         @"or",
+        import,
         // underscores because reserved words in Zig
         _true,
         _false,
@@ -87,6 +88,7 @@ pub const Token = struct {
         .{ "return", ._return },
         .{ "and", .@"and" },
         .{ "or", .@"or" },
+        .{ "import", .import },
     });
 
     /// Returns the string value of the token
@@ -141,6 +143,7 @@ pub const Token = struct {
             .nil => "nil",
             .@"and" => "and",
             .@"or" => "or",
+            .import => "import",
             // underscores because reserved words in Zig
             ._true => "true",
             ._false => "false",
@@ -172,6 +175,7 @@ test "Keywords" {
         "nil",
         "or",
         "and",
+        "return",
     };
 
     for (keywords) |keyword| {

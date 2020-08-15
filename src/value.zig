@@ -16,6 +16,7 @@ pub const Type = enum {
     list,
     map,
     native,
+    module,
 };
 
 /// Value depending on its type
@@ -34,6 +35,10 @@ pub const Value = union(Type) {
     native: struct {
         func: BuiltinFn,
         arg_len: usize,
+    },
+    module: struct {
+        name: []const u8,
+        attributes: *Value,
     },
 
     pub var True = Value{ .boolean = true };
@@ -108,7 +113,7 @@ pub const Value = union(Type) {
     }
 
     /// Returns true if the `Value` is of given type `Type`
-    pub fn is(self: *const Value, tag: Type) bool {
+    pub fn isType(self: *const Value, tag: Type) bool {
         return std.meta.activeTag(self.*) == tag;
     }
 

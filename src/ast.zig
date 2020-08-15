@@ -43,6 +43,7 @@ pub const Node = union(NodeType) {
     assignment: *Assignment,
     comment: *Comment,
     nil: *Nil,
+    import: *Import,
 
     /// Possible Nodes which are supported
     pub const NodeType = enum {
@@ -67,6 +68,7 @@ pub const Node = union(NodeType) {
         assignment,
         comment,
         nil,
+        import,
     };
 
     /// Represents a String
@@ -278,5 +280,11 @@ pub const Node = union(NodeType) {
     /// Represents "Nil"
     pub const Nil = struct {
         token: Token,
+    };
+
+    /// Represents the Node which imports other Luf files
+    pub const Import = struct {
+        token: Token,
+        value: Node,
     };
 };

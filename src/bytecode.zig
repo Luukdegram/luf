@@ -20,6 +20,7 @@ pub const Opcode = enum(u8) {
     call,
     _return,
     return_value,
+    load_module,
 
     make_array,
     make_map,

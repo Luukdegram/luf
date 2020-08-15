@@ -199,6 +199,7 @@ pub const Parser = struct {
             .bang => try self.parsePrefixExpression(),
             .minus => try self.parsePrefixExpression(),
             .tilde => try self.parsePrefixExpression(),
+            .import => try self.parseImportExpression(),
             ._true, ._false => try self.parseBoolean(),
             ._if => try self.parseIfExpression(),
             .left_parenthesis => try self.parseGroupedExpression(),
@@ -623,6 +624,22 @@ pub const Parser = struct {
         };
         return Node{ .nil = nil };
     }
+
+    /// Parses the import expression i.e. const std = import("std")
+    fn parseImportExpression(self: *Parser) Error!Node {
+        const import = try self.allocator.create(Node.Import);
+        import.* = .{ .token = self.current_token, .value = undefined };
+
+        if (!self.expectPeek(.left_parenthesis)) return self.fail("Expected token '(' but instead found '{}'");
+
+        self.next();
+        import.value = try self.parseExpression(.lowest);
+
+        if (!self.expectPeek(.right_parenthesis)) return self.fail("Expected token ')' but instead found '{}'");
+
+        return Node{ .import = import };
+    }
+
     /// Determines if the next token is the expected token or not.
     /// Incase the next token is the wanted token, retun true and retrieve next token.
     fn expectPeek(self: *Parser, token_type: Token.TokenType) bool {

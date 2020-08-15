@@ -454,6 +454,10 @@ pub const Compiler = struct {
                 }
             },
             .nil => _ = try self.emit(.load_nil),
+            .import => |imp| {
+                try self.compile(imp.value);
+                _ = try self.emit(.load_module);
+            },
             else => {},
         }
     }
