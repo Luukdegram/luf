@@ -25,6 +25,7 @@ pub fn run(code: ByteCode, allocator: *Allocator) Vm.Error!*Vm {
         .arena = arena,
         .call_stack = Vm.CallStack.init(allocator),
     };
+    errdefer vm.deinit();
     try vm.run(code);
     return vm;
 }
@@ -170,6 +171,7 @@ pub const Vm = struct {
                     const current_frame = self.frame().?;
                     self.stack[current_frame.sp + inst.ptr] = self.pop().?;
                 },
+                .load_module => try self.loadModule(),
                 else => {},
             }
         }
@@ -308,15 +310,13 @@ pub const Vm = struct {
 
         if (!left.isType(.boolean) or !right.isType(.boolean)) return Error.InvalidOperator;
 
-        switch (op) {
-            .equal => try self.push(if (left.boolean == right.boolean) &Value.True else &Value.False),
-            .not_equal => try self.push(if (left.boolean != right.boolean) &Value.True else &Value.False),
-            .@"and" => try self.push(if (left.boolean and right.boolean) &Value.True else &Value.False),
-            .@"or" => try self.push(if (left.boolean or right.boolean) &Value.True else &Value.False),
-            else => return Error.InvalidOperator,
-        }
-
-        return Error.InvalidOperator;
+        return switch (op) {
+            .equal => self.push(if (left.boolean == right.boolean) &Value.True else &Value.False),
+            .not_equal => self.push(if (left.boolean != right.boolean) &Value.True else &Value.False),
+            .@"and" => self.push(if (left.boolean and right.boolean) &Value.True else &Value.False),
+            .@"or" => self.push(if (left.boolean or right.boolean) &Value.True else &Value.False),
+            else => Error.InvalidOperator,
+        };
     }
 
     /// Analyzes and compares 2 integers depending on the given operator
@@ -457,46 +457,78 @@ pub const Vm = struct {
         const index = self.pop() orelse return Error.MissingValue;
         const left = self.pop() orelse return Error.MissingValue;
 
-        if (index.isType(.native)) {
-            const native = index.native;
-            const args = try self.allocator.alloc(*Value, native.arg_len + 1);
-            defer self.allocator.free(args);
-            args[0] = left;
-            var i: usize = 1;
-            while (i <= native.arg_len) : (i += 1) args[i] = self.stack[self.sp + native.arg_len + i];
-            const result = (try native.func(args)).*;
+        switch (left.*) {
+            .list => |list| {
+                switch (index.*) {
+                    .integer => |int| {
+                        if (int < 0 or int > list.items.len) return Error.OutOfBounds;
+                        return self.push(list.items[@intCast(u64, int)]);
+                    },
+                    .string => |name| {
+                        if (Value.builtins.get(name)) |val| {
+                            const builtin = val.native;
+                            const args = try self.allocator.alloc(*Value, builtin.arg_len + 1);
+                            defer self.allocator.free(args);
+                            args[0] = left;
+                            var i: usize = 1;
+                            while (i <= builtin.arg_len) : (i += 1) args[i] = self.stack[self.sp - (builtin.arg_len - 1 + i)];
+                            const result = (try builtin.func(args)).*;
 
-            const res = try self.newValue();
-            res.* = result;
-            return self.push(res);
+                            //create a shallow copy
+                            const res = try self.newValue();
+                            res.* = result;
+
+                            return self.push(res);
+                        }
+                    },
+                    else => return error.InvalidOperator,
+                }
+            },
+            .map => |map| {
+                if (map.get(index)) |val| {
+                    return self.push(val);
+                }
+                // We return null to the user so they have something to check against
+                // to see if a key exists or not.
+                return self.push(&Value.Nil);
+            },
+            .string => |string| {
+                switch (index.*) {
+                    .integer => |int| {
+                        if (int < 0 or int > string.len) return Error.OutOfBounds;
+
+                        const val = try self.newValue();
+                        val.* = .{ .string = string[@intCast(usize, int)..@intCast(usize, int + 1)] };
+                        return self.push(val);
+                    },
+                    .string => |name| {
+                        if (Value.builtins.get(name)) |val| {
+                            const builtin = val.native;
+                            const result = (try builtin.func(&[_]*Value{left})).*;
+
+                            //create a shallow copy
+                            const res = try self.newValue();
+                            res.* = result;
+
+                            return self.push(res);
+                        }
+                    },
+                    else => return Error.InvalidOperator,
+                }
+            },
+            .module => |mod| {
+                if (!index.isType(.string)) return error.InvalidOperator;
+
+                // Find the definition in the module, if it doesn't exist, it's an error.
+                // this differs from a regular map where we return null
+                if (mod.attributes.map.get(index)) |val| {
+                    return self.push(val);
+                } else {
+                    return error.MissingValue;
+                }
+            },
+            else => return error.InvalidOperator,
         }
-
-        if (left.isType(.list) and index.isType(.integer)) {
-            const i = index.integer;
-            const list = left.list;
-            if (i < 0 or i > list.items.len) return Error.OutOfBounds;
-
-            return self.push(list.items[@intCast(u64, i)]);
-        } else if (left.isType(.map)) {
-            const map: Value.Map = left.map;
-            if (map.get(index)) |val| {
-                return self.push(val);
-            }
-            // We return null to the user so they have something to check against
-            // to see if a key exists or not.
-            return self.push(&Value.Nil);
-        } else if (left.isType(.string) and index.isType(.integer)) {
-            const i = index.integer;
-            const string = left.string;
-            if (i < 0 or i > string.len) return Error.OutOfBounds;
-
-            const val = try self.newValue();
-            val.* = .{ .string = string[@intCast(usize, i)..@intCast(usize, i + 1)] };
-            return self.push(val);
-        }
-
-        // replace with more descriptive Error
-        return Error.MissingValue;
     }
 
     /// Sets the lhs by the value on top of the current stack
@@ -535,9 +567,8 @@ pub const Vm = struct {
         const arg_len = inst.ptr;
         const val = self.stack[self.sp - (1 + arg_len)];
 
-        //builtin function calls are handled by analIndex
-        if (val.* == .native) return self.analBuiltinFunctionCall(val);
-        if (val.* != .function) return error.InvalidOperator;
+        // if it's not a function call, we can expect it to be a builtin function
+        if (val.* != .function) return;
 
         if (arg_len != val.function.arg_len) return Error.MissingValue;
 
@@ -570,6 +601,75 @@ pub const Vm = struct {
         var i: usize = 0;
         while (i < val.native.arg_len) : (i += 1)
             self.stack[self.sp - val.native.arg_len - i] = self.pop().?;
+    }
+
+    /// Reads the file name, open it, and compile its source code.
+    /// After compilator, the symbols will be saved in a map and returned
+    fn importModule(self: *Vm, file_name: []const u8) Error!*Value {
+        const file = std.fs.cwd().openFile(file_name, .{}) catch {
+            return Error.InvalidOperator;
+        };
+        defer file.close();
+        const size = file.getEndPos() catch {
+            return Error.InvalidOperator;
+        };
+
+        const source = file.readAllAlloc(self.allocator, size, size) catch {
+            return Error.OutOfMemory;
+        };
+        defer self.allocator.free(source);
+        var code = compiler.compile(self.allocator, source) catch {
+            return Error.InvalidOperator;
+        };
+        defer code.deinit();
+        const last_ip = self.ip;
+        const last_sp = self.sp;
+
+        self.ip = 0;
+        self.sp = 0;
+
+        try self.run(code);
+        self.ip = last_ip;
+        self.sp = last_sp;
+        // Get all constants exposed by the source file
+        var attributes = Value.Map.init(&self.arena.allocator);
+        try attributes.ensureCapacity(code.symbols.items().len);
+        for (code.symbols.items()) |entry, i| {
+            // all builtins are stored as symbols first, so skip those symbols
+            if (i >= Value.builtin_keys.len) {
+                const symbol: compiler.Compiler.Symbol = entry.value;
+                std.debug.assert(symbol.scope == .root);
+
+                const name = try self.newValue();
+                name.* = .{ .string = try self.arena.allocator.dupe(u8, symbol.name) };
+                const value = try self.newValue();
+                value.* = code.constants[symbol.index];
+                attributes.putAssumeCapacityNoClobber(name, value);
+            }
+        }
+        const ret = try self.newValue();
+        ret.* = .{ .map = attributes };
+        return ret;
+    }
+
+    /// Loads a module, if not existing, compiles the source code of the given file name
+    fn loadModule(self: *Vm) Error!void {
+        const name = self.pop().?;
+        if (!name.isType(.string)) return Error.InvalidOperator;
+
+        const mod = try self.importModule(name.string);
+
+        const ret = try self.newValue();
+        ret.* = .{
+            .module = .{
+                .name = name.string,
+                .attributes = mod,
+            },
+        };
+
+        std.debug.print("LOADED MODULE\n", .{});
+
+        return self.push(ret);
     }
 
     /// Creates a new Value on the heap which will be freed on scope exits (call_stack pops)
@@ -622,7 +722,7 @@ test "Integer arithmetic" {
     };
 
     inline for (test_cases) |case| {
-        const code = try compiler.compile(testing.allocator, case.input);
+        var code = try compiler.compile(testing.allocator, case.input);
         defer code.deinit();
         var vm = try run(code, testing.allocator);
         defer vm.deinit();
@@ -649,7 +749,7 @@ test "Boolean" {
     };
 
     inline for (test_cases) |case| {
-        const code = try compiler.compile(testing.allocator, case.input);
+        var code = try compiler.compile(testing.allocator, case.input);
         defer code.deinit();
         var vm = try run(code, testing.allocator);
         defer vm.deinit();
@@ -669,7 +769,7 @@ test "Conditional" {
     };
 
     inline for (test_cases) |case| {
-        const code = try compiler.compile(testing.allocator, case.input);
+        var code = try compiler.compile(testing.allocator, case.input);
         defer code.deinit();
         var vm = try run(code, testing.allocator);
         defer vm.deinit();
@@ -689,7 +789,7 @@ test "Declaration" {
     };
 
     inline for (test_cases) |case| {
-        const code = try compiler.compile(testing.allocator, case.input);
+        var code = try compiler.compile(testing.allocator, case.input);
         defer code.deinit();
         var vm = try run(code, testing.allocator);
         defer vm.deinit();
@@ -705,7 +805,7 @@ test "Strings" {
     };
 
     inline for (test_cases) |case| {
-        const code = try compiler.compile(testing.allocator, case.input);
+        var code = try compiler.compile(testing.allocator, case.input);
         defer code.deinit();
         var vm = try run(code, testing.allocator);
         defer vm.deinit();
@@ -721,7 +821,7 @@ test "Arrays" {
     };
 
     inline for (test_cases) |case| {
-        const code = try compiler.compile(testing.allocator, case.input);
+        var code = try compiler.compile(testing.allocator, case.input);
         defer code.deinit();
         var vm = try run(code, testing.allocator);
         defer vm.deinit();
@@ -743,7 +843,7 @@ test "Maps" {
     };
 
     inline for (test_cases) |case| {
-        const code = try compiler.compile(testing.allocator, case.input);
+        var code = try compiler.compile(testing.allocator, case.input);
         defer code.deinit();
         var vm = try run(code, testing.allocator);
         defer vm.deinit();
@@ -779,7 +879,7 @@ test "Index" {
     };
 
     inline for (test_cases) |case| {
-        const code = try compiler.compile(testing.allocator, case.input);
+        var code = try compiler.compile(testing.allocator, case.input);
         defer code.deinit();
         var vm = try run(code, testing.allocator);
         defer vm.deinit();
@@ -802,7 +902,7 @@ test "Basic function calls with no arguments" {
     };
 
     inline for (test_cases) |case| {
-        const code = try compiler.compile(testing.allocator, case.input);
+        var code = try compiler.compile(testing.allocator, case.input);
         defer code.deinit();
         var vm = try run(code, testing.allocator);
         defer vm.deinit();
@@ -821,7 +921,7 @@ test "Globals vs Locals" {
     };
 
     inline for (test_cases) |case| {
-        const code = try compiler.compile(testing.allocator, case.input);
+        var code = try compiler.compile(testing.allocator, case.input);
         defer code.deinit();
         var vm = try run(code, testing.allocator);
         defer vm.deinit();
@@ -841,7 +941,7 @@ test "Functions with arguments" {
     };
 
     inline for (test_cases) |case| {
-        const code = try compiler.compile(testing.allocator, case.input);
+        var code = try compiler.compile(testing.allocator, case.input);
         defer code.deinit();
         var vm = try run(code, testing.allocator);
         defer vm.deinit();
@@ -862,7 +962,7 @@ test "Builtins" {
     };
 
     inline for (test_cases) |case| {
-        const code = try compiler.compile(testing.allocator, case.input);
+        var code = try compiler.compile(testing.allocator, case.input);
         defer code.deinit();
         var vm = try run(code, testing.allocator);
         defer vm.deinit();
@@ -878,7 +978,7 @@ test "While loop" {
     };
 
     inline for (test_cases) |case| {
-        const code = try compiler.compile(testing.allocator, case.input);
+        var code = try compiler.compile(testing.allocator, case.input);
         defer code.deinit();
         var vm = try run(code, testing.allocator);
         defer vm.deinit();
@@ -900,7 +1000,17 @@ test "Tail recursion" {
         \\}
         \\func(1) 
     ;
-    const code = try compiler.compile(testing.allocator, input);
+    var code = try compiler.compile(testing.allocator, input);
+    defer code.deinit();
+    var vm = try run(code, testing.allocator);
+    defer vm.deinit();
+
+    testing.expectEqual(@as(i64, 10), vm.peek().integer);
+}
+
+test "Imports" {
+    const input = "const imp = import(\"test/test.luf\") const sum = imp.sum const z = sum(5, 5)";
+    var code = try compiler.compile(testing.allocator, input);
     defer code.deinit();
     var vm = try run(code, testing.allocator);
     defer vm.deinit();

@@ -118,6 +118,7 @@ pub const Parser = struct {
 
     /// Returns `Error.ParserError` and appends an error message to the `errors` list.
     fn fail(self: *Parser, msg: []const u8) Error {
+        std.debug.print("Current token: {}\n source: {}\n", .{ self.current_token, self.source[self.current_token.start..self.current_token.end] });
         try self.errors.add(msg, self.current_token.start, .err);
         return Error.ParserError;
     }
@@ -548,7 +549,11 @@ pub const Parser = struct {
         index.* = .{ .token = token, .left = left, .index = undefined };
         self.next();
 
-        index.index = try self.parseExpression(.lowest);
+        index.index = if (token.token_type == .period) blk: {
+            if (!self.currentIsType(.identifier)) return self.fail("Expected identifier, but found '{}'");
+            break :blk try self.parseStringLiteral();
+        } else
+            try self.parseExpression(.lowest);
 
         if (token.token_type != .period and !self.expectPeek(.right_bracket)) {
             return self.fail("Expected '}' but found '{}'");
@@ -982,7 +987,7 @@ test "Member expression" {
     testing.expect(tree.nodes.len == 1);
 
     const index = tree.nodes[0].expression.value.index;
-    testing.expectEqualSlices(u8, "bar", index.index.identifier.value);
+    testing.expectEqualSlices(u8, "bar", index.index.string_lit.value);
     testing.expectEqualSlices(u8, "foo", index.left.identifier.value);
     testing.expect(index.token.token_type == .period);
 }
