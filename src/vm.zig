@@ -25,6 +25,13 @@ pub fn run(code: ByteCode, allocator: *Allocator) Vm.Error!*Vm {
         .arena = arena,
         .call_stack = Vm.CallStack.init(allocator),
     };
+
+    try vm.call_stack.append(.{
+        .fp = undefined,
+        .sp = 0,
+        .ip = 0,
+        .instructions = code.instructions,
+    });
     errdefer vm.deinit();
     try vm.run(code);
     return vm;
@@ -58,6 +65,8 @@ pub const Vm = struct {
         ip: usize,
         /// Stack pointer. Mostly used to reset the stack pointer between scope changes
         sp: usize,
+        /// Instructions to run on the current call stack
+        instructions: []const byte_code.Instruction,
     };
 
     /// Frees the Virtual Machine's memory
@@ -70,8 +79,11 @@ pub const Vm = struct {
 
     /// Runs the given `ByteCode` on the Virtual Machine
     pub fn run(self: *Vm, code: ByteCode) Error!void {
-        while (self.ip < code.instructions.len) : (self.ip += 1) {
-            const inst = code.instructions[self.ip];
+        while (self.frame().ip < self.frame().instructions.len) {
+            var current_frame = self.frame();
+            defer current_frame.ip += 1;
+            const inst = current_frame.instructions[current_frame.ip];
+
             switch (inst.op) {
                 .load_const => {
                     const val = try self.newValue();
@@ -108,10 +120,10 @@ pub const Vm = struct {
                 .not => try self.analNot(),
                 .bitwise_not => try self.analBitwiseNot(),
                 .load_nil => try self.push(&Value.Nil),
-                .jump => self.ip = inst.ptr - 1,
+                .jump => current_frame.ip = inst.ptr - 1,
                 .jump_false => {
                     const condition = self.pop().?;
-                    if (!isTrue(condition)) self.ip = inst.ptr - 1;
+                    if (!isTrue(condition)) current_frame.ip = inst.ptr - 1;
                 },
                 .bind_global => {
                     const val = self.pop().?;
@@ -127,7 +139,7 @@ pub const Vm = struct {
                 .set_by_index => try self.analSetValue(),
                 ._return => {
                     const cur_frame = self.call_stack.pop();
-                    self.ip = cur_frame.ip;
+                    current_frame.ip = cur_frame.ip;
 
                     _ = self.pop();
                     try self.push(&Value.Nil);
@@ -135,7 +147,7 @@ pub const Vm = struct {
                 .return_value => {
                     // remove the frame from the call stack
                     const cur_frame = self.call_stack.pop();
-                    self.ip = cur_frame.ip;
+                    current_frame.ip = cur_frame.ip;
 
                     // get return value from stack
                     const rv = self.pop().?;
@@ -147,13 +159,10 @@ pub const Vm = struct {
                     // push the return value back to the stack
                     try self.push(rv);
                 },
-                .call => try self.analFunctionCall(inst, code.instructions[self.ip + 1]),
-                .bind_local => {
-                    const current_frame = self.frame().?;
-                    self.stack[current_frame.sp + inst.ptr] = self.stack[self.sp - 1];
-                },
+                .call => try self.analFunctionCall(inst, current_frame.instructions[current_frame.ip + 1]),
+                .bind_local => self.stack[current_frame.sp + inst.ptr] = self.stack[self.sp - 1],
                 .load_local => {
-                    const val = self.stack[self.frame().?.sp + inst.ptr];
+                    const val = self.stack[self.frame().sp + inst.ptr];
                     try self.push(val);
                 },
                 .load_builtin => {
@@ -167,10 +176,7 @@ pub const Vm = struct {
                     else
                         try self.globals.append(value);
                 },
-                .assign_local => {
-                    const current_frame = self.frame().?;
-                    self.stack[current_frame.sp + inst.ptr] = self.pop().?;
-                },
+                .assign_local => self.stack[current_frame.sp + inst.ptr] = self.pop().?,
                 .load_module => try self.loadModule(),
                 else => {},
             }
@@ -180,7 +186,7 @@ pub const Vm = struct {
     /// Pushes a new `Value` on top of the `stack` and increases
     /// the stack pointer by 1.
     fn push(self: *Vm, value: *Value) Error!void {
-        if (self.sp > self.stack.len - 1) return Error.OutOfMemory;
+        if (self.sp >= self.stack.len - 1) return Error.OutOfMemory;
 
         self.stack[self.sp] = value;
         self.sp += 1;
@@ -201,10 +207,9 @@ pub const Vm = struct {
     }
 
     /// Returns the current `Frame` of the call stack
-    /// Returns null if the call stack is emtpy
-    fn frame(self: *Vm) ?Frame {
-        if (self.call_stack.items.len == 0) return null;
-        return self.call_stack.items[self.call_stack.items.len - 1];
+    /// Asserts the call stack is not empty
+    fn frame(self: *Vm) *Frame {
+        return &self.call_stack.items[(self.call_stack.items.len - 1)];
     }
 
     /// Analyzes and executes a binary operation.
@@ -400,10 +405,9 @@ pub const Vm = struct {
         }) {
             const val = self.stack[index];
             if (i == 0)
-                list_type = std.meta.activeTag(val.*)
-            else {
-                if (list_type != std.meta.activeTag(val.*)) return Error.MissingValue;
-            }
+                list_type = val.lufType()
+            else if (!val.isType(list_type)) return Error.MissingValue;
+
             try list.insert(i, val);
         }
 
@@ -438,11 +442,11 @@ pub const Vm = struct {
             const value = self.stack[index + 1];
 
             if (i == 0) {
-                key_type = std.meta.activeTag(key.*);
-                value_type = std.meta.activeTag(value.*);
+                key_type = key.lufType();
+                value_type = value.lufType();
             } else {
-                if (key_type != std.meta.activeTag(key.*)) return Error.MissingValue;
-                if (value_type != std.meta.activeTag(value.*)) return Error.MissingValue;
+                if (!key.isType(key_type)) return Error.MissingValue;
+                if (!value.isType(value_type)) return Error.MissingValue;
             }
 
             map.putAssumeCapacity(key, value);
@@ -572,23 +576,24 @@ pub const Vm = struct {
 
         if (arg_len != val.function.arg_len) return Error.MissingValue;
 
-        if (self.frame()) |cur_frame| {
-            if (cur_frame.fp == val and next.op == .return_value) {
-                var i: usize = 0;
-                while (i < arg_len) : (i += 1) {
-                    self.stack[cur_frame.sp + i] = self.stack[self.sp - arg_len + i];
-                    self.sp -= arg_len + 1;
-                    self.ip = val.function.offset - 1;
-                    return;
-                }
+        var cur_frame = self.frame();
+        if (cur_frame.fp == val and next.op == .return_value) {
+            var i: usize = 0;
+            while (i < arg_len) : (i += 1) {
+                self.stack[cur_frame.sp + i] = self.stack[self.sp - arg_len + i];
+                self.sp -= arg_len + 1;
+                cur_frame.ip = val.function.offset - 1;
+                return;
             }
         }
+
         try self.call_stack.append(.{
             .fp = val,
-            .ip = self.ip,
+            .ip = cur_frame.ip,
             .sp = self.sp - arg_len,
+            .instructions = val.function.instructions,
         });
-        self.ip = val.function.offset - 1;
+        //cur_frame.ip = val.function.offset - 1;
     }
 
     /// Analyzes for argument length and then calls the builtin function
@@ -614,23 +619,22 @@ pub const Vm = struct {
             return Error.InvalidOperator;
         };
 
-        const source = file.readAllAlloc(self.allocator, size, size) catch {
+        const source = file.readAllAlloc(&self.arena.allocator, size, size) catch {
             return Error.OutOfMemory;
         };
-        defer self.allocator.free(source);
-        var code = compiler.compile(self.allocator, source) catch {
+        //defer self.allocator.free(source);
+        var code = compiler.compile(&self.arena.allocator, source) catch {
             return Error.InvalidOperator;
         };
-        defer code.deinit();
+        //defer code.deinit();
         const last_ip = self.ip;
         const last_sp = self.sp;
 
         self.ip = 0;
-        self.sp = 0;
+        //self.sp = 0;
 
         try self.run(code);
-        self.ip = last_ip;
-        self.sp = last_sp;
+
         // Get all constants exposed by the source file
         var attributes = Value.Map.init(&self.arena.allocator);
         try attributes.ensureCapacity(code.symbols.items().len);
@@ -647,6 +651,9 @@ pub const Vm = struct {
                 attributes.putAssumeCapacityNoClobber(name, value);
             }
         }
+        self.ip = last_ip;
+        //self.sp = last_sp + 1;
+
         const ret = try self.newValue();
         ret.* = .{ .map = attributes };
         return ret;
@@ -667,8 +674,6 @@ pub const Vm = struct {
             },
         };
 
-        std.debug.print("LOADED MODULE\n", .{});
-
         return self.push(ret);
     }
 
@@ -681,11 +686,11 @@ pub const Vm = struct {
 /// Checks each given type if they are equal or not
 fn resolveType(values: []*const Value) Vm.Error!Type {
     std.debug.assert(values.len > 0);
-    const cur_tag: Type = std.meta.activeTag(values[0].*);
+    const cur_tag: Type = values[0].lufType();
     if (values.len == 1) return cur_tag;
 
     for (values[1..]) |value|
-        if (std.meta.activeTag(value) != cur_tag) return Vm.Error.MissingValue;
+        if (!value.isType(cur_tag)) return Vm.Error.MissingValue;
 }
 
 /// Evalutes if the given `Value` is truthy.
@@ -1009,11 +1014,12 @@ test "Tail recursion" {
 }
 
 test "Imports" {
-    const input = "const imp = import(\"test/test.luf\") const sum = imp.sum const z = sum(5, 5)";
+    const input = "const imp = import(\"test/test.luf\") const z = imp.sum z(5,5)";
     var code = try compiler.compile(testing.allocator, input);
     defer code.deinit();
     var vm = try run(code, testing.allocator);
     defer vm.deinit();
 
-    testing.expectEqual(@as(i64, 10), vm.peek().integer);
+    std.debug.print("X: {}\n", .{vm.peek()});
+    //testing.expectEqual(@as(i64, 10), vm.peek().integer);
 }

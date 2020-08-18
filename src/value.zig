@@ -29,6 +29,7 @@ pub const Value = union(Type) {
     function: struct {
         offset: usize,
         arg_len: usize,
+        instructions: []const @import("bytecode.zig").Instruction,
     },
     list: List,
     map: Map,
