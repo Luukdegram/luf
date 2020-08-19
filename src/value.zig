@@ -27,8 +27,8 @@ pub const Value = union(Type) {
     nil,
     _return: *Value,
     function: struct {
-        offset: usize,
         arg_len: usize,
+        locals: usize,
         instructions: []const @import("bytecode.zig").Instruction,
     },
     list: List,
@@ -72,7 +72,10 @@ pub const Value = union(Type) {
             .boolean => |boolean| hashFn(&hasher, boolean),
             .string => |str| hasher.update(str),
             .function => |func| {
-                hashFn(&hasher, func.offset);
+                hashFn(&hasher, func.arg_len);
+                hashFn(&hasher, func.locals);
+                hashFn(&hasher, func.instructions.len);
+                hashFn(&hasher, func.instructions.ptr);
             },
             .list => |list| {
                 hashFn(&hasher, list.items.len);

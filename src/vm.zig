@@ -138,33 +138,30 @@ pub const Vm = struct {
                 .get_by_index => try self.analGetValue(),
                 .set_by_index => try self.analSetValue(),
                 ._return => {
-                    const cur_frame = self.call_stack.pop();
-                    current_frame.ip = cur_frame.ip;
+                    const f = self.call_stack.pop();
+                    self.sp = f.sp;
 
-                    _ = self.pop();
+                    //_ = self.pop();
                     try self.push(&Value.Nil);
                 },
                 .return_value => {
-                    // remove the frame from the call stack
-                    const cur_frame = self.call_stack.pop();
-                    current_frame.ip = cur_frame.ip;
+                    const rv = self.pop().?;
+
+                    // remove the function frame from the call stack
+                    const f = self.call_stack.pop();
+                    self.sp = f.sp - 1;
 
                     // get return value from stack
-                    const rv = self.pop().?;
-                    self.sp = cur_frame.sp;
 
                     // remove function itself from stack
-                    _ = self.pop();
+                    //_ = self.pop();
 
                     // push the return value back to the stack
                     try self.push(rv);
                 },
                 .call => try self.analFunctionCall(inst, current_frame.instructions[current_frame.ip + 1]),
-                .bind_local => self.stack[current_frame.sp + inst.ptr] = self.stack[self.sp - 1],
-                .load_local => {
-                    const val = self.stack[self.frame().sp + inst.ptr];
-                    try self.push(val);
-                },
+                .bind_local => self.stack[current_frame.sp + inst.ptr] = self.pop().?,
+                .load_local => try self.push(self.stack[current_frame.sp + inst.ptr]),
                 .load_builtin => {
                     const key = Value.builtin_keys[inst.ptr];
                     try self.push(&(Value.builtins.get(key).?));
@@ -218,14 +215,13 @@ pub const Vm = struct {
         const right = self.pop() orelse return Error.MissingValue;
         const left = self.pop() orelse return Error.MissingValue;
 
-        if (left.lufType() == right.lufType() and left.isType(.integer)) {
-            return self.analIntOp(op, left.integer, right.integer);
-        }
-        if (left.lufType() == right.lufType() and left.isType(.string)) {
-            return self.analStringOp(op, left.string, right.string);
-        }
+        const luf_type = try resolveType(&[_]*Value{ left, right });
 
-        return Error.InvalidOperator;
+        return switch (luf_type) {
+            .integer => self.analIntOp(op, left.integer, right.integer),
+            .string => self.analStringOp(op, left.string, right.string),
+            else => Error.InvalidOperator,
+        };
     }
 
     /// Analyzes and executes a binary operation on an integer
@@ -579,21 +575,20 @@ pub const Vm = struct {
         var cur_frame = self.frame();
         if (cur_frame.fp == val and next.op == .return_value) {
             var i: usize = 0;
-            while (i < arg_len) : (i += 1) {
+            while (i < arg_len) : (i += 1)
                 self.stack[cur_frame.sp + i] = self.stack[self.sp - arg_len + i];
-                self.sp -= arg_len + 1;
-                cur_frame.ip = val.function.offset - 1;
-                return;
-            }
+            cur_frame.ip = 0;
+            return;
         }
 
         try self.call_stack.append(.{
             .fp = val,
-            .ip = cur_frame.ip,
+            .ip = 0,
             .sp = self.sp - arg_len,
             .instructions = val.function.instructions,
         });
-        //cur_frame.ip = val.function.offset - 1;
+
+        self.sp = self.frame().sp + val.function.locals + 1;
     }
 
     /// Analyzes for argument length and then calls the builtin function
@@ -690,7 +685,9 @@ fn resolveType(values: []*const Value) Vm.Error!Type {
     if (values.len == 1) return cur_tag;
 
     for (values[1..]) |value|
-        if (!value.isType(cur_tag)) return Vm.Error.MissingValue;
+        if (!value.isType(cur_tag)) return Vm.Error.InvalidOperator;
+
+    return cur_tag;
 }
 
 /// Evalutes if the given `Value` is truthy.
@@ -978,8 +975,8 @@ test "Builtins" {
 
 test "While loop" {
     const test_cases = .{
-        .{ .input = "mut i = 0 while (i > 10) {mut i = 10}", .expected = &Value.Nil },
-        .{ .input = "mut i = 0 while (i < 10) {i = 10}", .expected = &Value.Nil },
+        .{ .input = "mut i = 0 while (i > 10) {mut i = 10} i", .expected = 0 },
+        .{ .input = "mut i = 0 while (i < 10) {i = 10} i", .expected = 10 },
     };
 
     inline for (test_cases) |case| {
@@ -988,10 +985,7 @@ test "While loop" {
         var vm = try run(code, testing.allocator);
         defer vm.deinit();
 
-        if (@TypeOf(case.expected) == comptime_int)
-            testing.expectEqual(@as(i64, case.expected), vm.stack[vm.sp - 1].integer)
-        else
-            testing.expectEqual(case.expected, vm.peek());
+        testing.expectEqual(@as(i64, case.expected), vm.peek().integer);
     }
 }
 
@@ -1003,7 +997,7 @@ test "Tail recursion" {
         \\  }
         \\  return func(a + 1)  
         \\}
-        \\func(1) 
+        \\func(2) 
     ;
     var code = try compiler.compile(testing.allocator, input);
     defer code.deinit();
@@ -1014,7 +1008,7 @@ test "Tail recursion" {
 }
 
 test "Imports" {
-    const input = "const imp = import(\"test/test.luf\") const z = imp.sum z(5,5)";
+    const input = "const imp = import(\"test/test.luf\")";
     var code = try compiler.compile(testing.allocator, input);
     defer code.deinit();
     var vm = try run(code, testing.allocator);
