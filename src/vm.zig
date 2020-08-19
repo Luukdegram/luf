@@ -139,9 +139,8 @@ pub const Vm = struct {
                 .set_by_index => try self.analSetValue(),
                 ._return => {
                     const f = self.call_stack.pop();
-                    self.sp = f.sp;
+                    self.sp = f.sp - 1;
 
-                    //_ = self.pop();
                     try self.push(&Value.Nil);
                 },
                 .return_value => {
@@ -150,11 +149,6 @@ pub const Vm = struct {
                     // remove the function frame from the call stack
                     const f = self.call_stack.pop();
                     self.sp = f.sp - 1;
-
-                    // get return value from stack
-
-                    // remove function itself from stack
-                    //_ = self.pop();
 
                     // push the return value back to the stack
                     try self.push(rv);
@@ -614,19 +608,25 @@ pub const Vm = struct {
             return Error.InvalidOperator;
         };
 
-        const source = file.readAllAlloc(&self.arena.allocator, size, size) catch {
+        const source = file.readAllAlloc(self.allocator, size, size) catch {
             return Error.OutOfMemory;
         };
-        //defer self.allocator.free(source);
+        defer self.allocator.free(source);
+
+        // we should probably save this bytecode so we can free it at a later point
         var code = compiler.compile(&self.arena.allocator, source) catch {
             return Error.InvalidOperator;
         };
-        //defer code.deinit();
+
         const last_ip = self.ip;
         const last_sp = self.sp;
 
-        self.ip = 0;
-        //self.sp = 0;
+        try self.call_stack.append(.{
+            .fp = undefined, //TODO make this optional for safety
+            .sp = 0,
+            .ip = 0,
+            .instructions = code.instructions,
+        });
 
         try self.run(code);
 
@@ -634,21 +634,17 @@ pub const Vm = struct {
         var attributes = Value.Map.init(&self.arena.allocator);
         try attributes.ensureCapacity(code.symbols.items().len);
         for (code.symbols.items()) |entry, i| {
-            // all builtins are stored as symbols first, so skip those symbols
-            if (i >= Value.builtin_keys.len) {
-                const symbol: compiler.Compiler.Symbol = entry.value;
-                std.debug.assert(symbol.scope == .root);
+            const symbol: compiler.Compiler.Symbol = entry.value;
+            std.debug.assert(symbol.scope == .root);
 
-                const name = try self.newValue();
-                name.* = .{ .string = try self.arena.allocator.dupe(u8, symbol.name) };
-                const value = try self.newValue();
-                value.* = code.constants[symbol.index];
-                attributes.putAssumeCapacityNoClobber(name, value);
-            }
+            const name = try self.newValue();
+            name.* = .{ .string = try self.arena.allocator.dupe(u8, symbol.name) };
+            const value = try self.newValue();
+            value.* = code.constants[symbol.index];
+            attributes.putAssumeCapacityNoClobber(name, value);
         }
-        self.ip = last_ip;
-        //self.sp = last_sp + 1;
 
+        _ = self.call_stack.pop();
         const ret = try self.newValue();
         ret.* = .{ .map = attributes };
         return ret;
@@ -1005,15 +1001,4 @@ test "Tail recursion" {
     defer vm.deinit();
 
     testing.expectEqual(@as(i64, 10), vm.peek().integer);
-}
-
-test "Imports" {
-    const input = "const imp = import(\"test/test.luf\")";
-    var code = try compiler.compile(testing.allocator, input);
-    defer code.deinit();
-    var vm = try run(code, testing.allocator);
-    defer vm.deinit();
-
-    std.debug.print("X: {}\n", .{vm.peek()});
-    //testing.expectEqual(@as(i64, 10), vm.peek().integer);
 }
