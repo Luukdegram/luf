@@ -37,7 +37,7 @@ pub const Token = struct {
         not_equal,
         ampersand,
         caret,
-        vertical_line,
+        pipe,
         tilde,
         equal_add,
         equal_sub,
@@ -45,7 +45,7 @@ pub const Token = struct {
         equal_div,
         equal_ampersand,
         equal_caret,
-        equal_vertical_line,
+        equal_pipe,
         shift_left,
         shift_right,
         // delimiters
@@ -62,6 +62,7 @@ pub const Token = struct {
         mutable,
         constant,
         while_loop,
+        for_loop,
         nil,
         @"and",
         @"or",
@@ -80,6 +81,7 @@ pub const Token = struct {
         .{ "mut", .mutable },
         .{ "const", .constant },
         .{ "while", .while_loop },
+        .{ "for", .for_loop },
         .{ "nil", .nil },
         .{ "true", ._true },
         .{ "false", ._false },
@@ -116,14 +118,14 @@ pub const Token = struct {
             .greater_than_equal => ">=",
             .ampersand => "&",
             .caret => "^",
-            .vertical_line => "|",
+            .pipe => "|",
             .equal_add => "+=",
             .equal_sub => "-=",
             .equal_mul => "*=",
             .equal_div => "/=",
             .equal_ampersand => "&=",
             .equal_caret => "^=",
-            .equal_vertical_line => "|=",
+            .equal_pipe => "|=",
             .shift_left => "<<",
             .shift_right => ">>",
             // delimiters
@@ -144,6 +146,7 @@ pub const Token = struct {
             .@"and" => "and",
             .@"or" => "or",
             .import => "import",
+            .for_loop => "for",
             // underscores because reserved words in Zig
             ._true => "true",
             ._false => "false",
@@ -176,6 +179,7 @@ test "Keywords" {
         "or",
         "and",
         "return",
+        "for",
     };
 
     for (keywords) |keyword| {

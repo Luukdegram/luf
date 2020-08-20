@@ -40,6 +40,7 @@ pub const Node = union(NodeType) {
     map_pair: *MapPair,
     index: *IndexExpression,
     while_loop: *WhileLoop,
+    for_loop: *ForLoop,
     assignment: *Assignment,
     comment: *Comment,
     nil: *Nil,
@@ -65,6 +66,7 @@ pub const Node = union(NodeType) {
         map_pair,
         index,
         while_loop,
+        for_loop,
         assignment,
         comment,
         nil,
@@ -192,7 +194,7 @@ pub const Node = union(NodeType) {
                     .ampersand => .bitwise_and,
                     .caret => .bitwise_xor,
                     .tilde => .not,
-                    .vertical_line => .bitwise_or,
+                    .pipe => .bitwise_or,
                     .shift_left => .shift_left,
                     .shift_right => .shift_right,
                     .@"and" => .@"and",
@@ -261,6 +263,14 @@ pub const Node = union(NodeType) {
     pub const WhileLoop = struct {
         token: Token,
         condition: Node,
+        block: Node,
+    };
+
+    pub const ForLoop = struct {
+        token: Token,
+        iter: Node,
+        capture: Node,
+        index: ?Node,
         block: Node,
     };
 

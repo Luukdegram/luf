@@ -51,7 +51,7 @@ fn findPrecedence(token_type: Token.TokenType) Precedence {
         .equal, .not_equal => .equals,
         .less_than, .greater_than, .less_than_equal, .greater_than_equal => .less_greater,
         .ampersand => .bitwise_and,
-        .vertical_line => .bitwise_or,
+        .pipe => .bitwise_or,
         .caret => .bitwise_xor,
         .shift_left, .shift_right => .shift,
         .plus, .minus => .sum,
@@ -72,6 +72,7 @@ pub fn parse(allocator: *Allocator, source: []const u8) Parser.Error!*Tree {
 
     // TODO extend its lifetime by allocating it and possibly pass around other areas
     var errors = Errors.init(allocator);
+    errdefer errors.deinit();
 
     var parser = Parser{
         .current_token = lexer.next(),
@@ -83,6 +84,7 @@ pub fn parse(allocator: *Allocator, source: []const u8) Parser.Error!*Tree {
     };
 
     var nodes = ArrayList(Node).init(parser.allocator);
+    errdefer nodes.deinit();
 
     while (!parser.currentIsType(.eof)) : (parser.next()) {
         try nodes.append(try parser.parseStatement());
@@ -117,8 +119,8 @@ pub const Parser = struct {
     };
 
     /// Returns `Error.ParserError` and appends an error message to the `errors` list.
-    fn fail(self: *Parser, msg: []const u8) Error {
-        std.debug.print("Current token: {}\n source: {}\n", .{ self.current_token, self.source[self.current_token.start..self.current_token.end] });
+    fn fail(self: *Parser, comptime msg: []const u8) Error {
+        std.debug.print(msg ++ "\n", .{self.source[self.peek_token.start..self.peek_token.end]});
         try self.errors.add(msg, self.current_token.start, .err);
         return Error.ParserError;
     }
@@ -208,6 +210,7 @@ pub const Parser = struct {
             .left_bracket => try self.parseArray(),
             .left_brace => try self.parseMap(),
             .while_loop => try self.parseWhile(),
+            .for_loop => try self.parseFor(),
             .nil => try self.parseNil(),
             else => return self.fail("Unexpected token '{}'"),
         };
@@ -232,7 +235,7 @@ pub const Parser = struct {
                 .asterisk,
                 .percent,
                 .ampersand,
-                .vertical_line,
+                .pipe,
                 .caret,
                 .equal,
                 .not_equal,
@@ -352,7 +355,7 @@ pub const Parser = struct {
         }
 
         if (!self.expectPeek(.left_brace)) {
-            return self.fail("Expected '{' but found '{}'");
+            return self.fail("Expected '{{' but found '{}'");
         }
 
         exp.true_pong = try self.parseBlockStatement();
@@ -367,7 +370,7 @@ pub const Parser = struct {
             }
 
             if (!self.expectPeek(.left_brace)) {
-                return self.fail("Expected '{' but found '{}'");
+                return self.fail("Expected '{{' but found '{}'");
             }
 
             exp.false_pong = try self.parseBlockStatement();
@@ -418,7 +421,7 @@ pub const Parser = struct {
         func.params = try self.parseFunctionParameters();
 
         if (!self.expectPeek(.left_brace)) {
-            return self.fail("Expected '{' but found '{}'");
+            return self.fail("Expected '{{' but found '{}'");
         }
 
         func.body = try self.parseBlockStatement();
@@ -487,7 +490,7 @@ pub const Parser = struct {
         }
 
         if (!self.expectPeek(end_type)) {
-            return self.fail("Expected '{}' but found '{}'");
+            return self.fail("Expected ']' or ')' but found '{}'");
         }
 
         return list.toOwnedSlice();
@@ -518,7 +521,7 @@ pub const Parser = struct {
         }
 
         if (!self.expectPeek(.right_brace)) {
-            return self.fail("Expected '}' but found '{}'");
+            return self.fail("Expected '}}' but found '{}'");
         }
 
         map.value = pairs.toOwnedSlice();
@@ -556,7 +559,7 @@ pub const Parser = struct {
             try self.parseExpression(.lowest);
 
         if (token.token_type != .period and !self.expectPeek(.right_bracket)) {
-            return self.fail("Expected '}' but found '{}'");
+            return self.fail("Expected '}}' but found '{}'");
         }
 
         return Node{ .index = index };
@@ -580,7 +583,7 @@ pub const Parser = struct {
 
         if (!self.expectPeek(.right_parenthesis)) return self.fail("Expected token ')' but got'{}");
 
-        if (!self.expectPeek(.left_brace)) return self.fail("Expected token '{' but got '{}'");
+        if (!self.expectPeek(.left_brace)) return self.fail("Expected token '{{' but got '{}'");
 
         // parseBlockStatement already asserts for a closing bracket, so return after parsing
         node.block = try self.parseBlockStatement();
@@ -588,12 +591,44 @@ pub const Parser = struct {
         return Node{ .while_loop = node };
     }
 
+    /// Parses a for expression
+    fn parseFor(self: *Parser) Error!Node {
+        const node = try self.allocator.create(Node.ForLoop);
+        node.* = .{
+            .token = self.current_token,
+            .iter = undefined,
+            .capture = undefined,
+            .index = undefined,
+            .block = undefined,
+        };
+        if (!self.expectPeek(.left_parenthesis)) return self.fail("Expected token '(' but instead found '{}'");
+        self.next();
+        node.iter = try self.parseExpression(.lowest);
+
+        if (!self.expectPeek(.right_parenthesis)) return self.fail("Expected token ')' but instead found '{}'");
+        if (!self.expectPeek(.pipe)) return self.fail("Expected token '|' but instead found '{}'");
+        self.next();
+
+        node.capture = try self.parseIdentifier();
+
+        // incase there's a 2nd capture for the index identifier i.e. |id, index|
+        if (self.expectPeek(.comma)) {
+            self.next();
+            node.index = try self.parseIdentifier();
+        }
+
+        if (!self.expectPeek(.pipe)) return self.fail("Expected token '|' but instead found '{}'");
+        if (!self.expectPeek(.left_brace)) return self.fail("Expected token '{{' but instead found '{}'");
+
+        node.block = try self.parseBlockStatement();
+
+        return Node{ .for_loop = node };
+    }
+
     /// Parses the current expression as an assignment. Compiler does checking for mutating
     fn parseAssignment(self: *Parser, left: Node) Error!Node {
-        switch (left) {
-            .identifier, .index => {},
-            else => return self.fail("Expected identifier or index on lhs but got '{}'"),
-        }
+        if (left != .identifier and left != .index)
+            return self.fail("Expected identifier or index on left-hand side but got '{}'");
 
         const node = try self.allocator.create(Node.Assignment);
         node.* = .{
@@ -1089,4 +1124,23 @@ test "Comment expression" {
 
     const comment = tree.nodes[0].comment;
     testing.expectEqualStrings("This is a comment", comment.value);
+}
+
+test "For loop" {
+    const input = "for(x)|id,i|{ id }";
+    const allocator = testing.allocator;
+
+    const tree = try parse(allocator, input);
+    defer tree.deinit();
+
+    testing.expect(tree.nodes.len == 1);
+
+    const loop = tree.nodes[0].expression.value.for_loop;
+
+    testing.expect(loop.index != null);
+    testing.expectEqualStrings("x", loop.iter.identifier.value);
+    testing.expectEqualStrings("id", loop.capture.identifier.value);
+    testing.expectEqualStrings("i", loop.index.?.identifier.value);
+    testing.expect(loop.block.block_statement.nodes.len == 1);
+    testing.expectEqualStrings("id", loop.block.block_statement.nodes[0].expression.value.identifier.value);
 }

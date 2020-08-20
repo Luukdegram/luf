@@ -33,7 +33,7 @@ pub const Errors = struct {
     }
 
     /// Frees the memory of the errors
-    pub fn deinit(self: Errors) !void {
+    pub fn deinit(self: Errors) void {
         return self.list.deinit();
     }
 

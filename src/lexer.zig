@@ -84,8 +84,8 @@ pub const Lexer = struct {
                 const start = self.position;
                 self.readChar();
                 self.readChar();
-                return Token{ .token_type = .equal_vertical_line, .start = start, .end = self.position };
-            } else .vertical_line,
+                return Token{ .token_type = .equal_pipe, .start = start, .end = self.position };
+            } else .pipe,
             '<' => if (self.peekChar() == '=') {
                 const start = self.position;
                 self.readChar();
