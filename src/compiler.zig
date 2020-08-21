@@ -105,6 +105,7 @@ pub const Compiler = struct {
             root,
             function,
             builtin,
+            loop,
         };
 
         /// Creates a new `Scope` from the current Scope.
@@ -347,7 +348,7 @@ pub const Compiler = struct {
             .identifier => |id| if (self.resolveSymbol(self.scope, id.value)) |symbol| {
                 const opcode: bytecode.Opcode = switch (symbol.scope) {
                     .root => .load_global,
-                    .function => .load_local,
+                    .function, .loop => .load_local,
                     .builtin => .load_builtin,
                 };
                 _ = try self.emitOp(opcode, symbol.index);
@@ -442,6 +443,42 @@ pub const Compiler = struct {
                 const end = try self.emit(.load_nil);
                 // jump to end
                 self.instructions.items[false_jump].ptr = @intCast(u16, end);
+            },
+            .for_loop => |loop| {
+                try self.createScope(.loop);
+
+                try self.compile(loop.iter);
+                _ = try self.emitOp(.make_iter, @as(u16, if (loop.index != null) 1 else 0));
+                const start_jump = try self.emit(.iter_next);
+
+                // jump position if we reached the end of the iterator
+                const end_jump = try self.emit(.jump_false);
+
+                // parser already parses it as an identifier, no need to check here again
+                const capture = try self.scope.define(loop.capture.identifier.value, false);
+                _ = try self.emitOp(.bind_local, capture.index);
+
+                // as above, parser ensures it's an identifier
+                if (loop.index) |i| {
+                    const index = try self.scope.define(i.identifier.value, false);
+                    _ = try self.emitOp(.bind_local, index.index);
+                }
+
+                try self.compile(loop.block);
+
+                // pop last value from block
+                _ = try self.emit(.pop);
+
+                // jump to start of loop to evaluate range
+                _ = try self.emitOp(.jump, @intCast(u16, start_jump));
+
+                // TODO replace load_nil with void
+                const end = try self.emit(.load_nil);
+
+                self.escapeScope();
+
+                // point the end jump to last op
+                self.instructions.items[end_jump].ptr = @intCast(u16, end);
             },
             .assignment => |asg| {
                 if (asg.left == .identifier) {

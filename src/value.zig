@@ -17,6 +17,7 @@ pub const Type = enum {
     map,
     native,
     module,
+    iterable,
 };
 
 /// Value depending on its type
@@ -41,6 +42,36 @@ pub const Value = union(Type) {
         name: []const u8,
         attributes: *Value,
     },
+    iterable: struct {
+        expose_index: bool,
+        index: usize,
+        value: *Value,
+
+        /// Returns the next Value of the iterable.
+        /// Returns null if empty iterable or the end of the iterator has been reached.
+        /// NOTE: This returns the actual value, if you don't want the user to be able to modify
+        /// this value, create a shallow copy of the return value.
+        pub fn next(self: *@This()) ?*Value {
+            switch (self.value.*) {
+                .list => |list| {
+                    if (list.items.len == 0) return null;
+                    if (list.items.len == self.index) return null;
+
+                    defer self.index += 1;
+                    return list.items[self.index];
+                },
+                .string => |string| {
+                    if (string.len == 0) return null;
+                    if (string.len == self.index) return null;
+
+                    defer self.index += 1;
+                    //TODO
+                    return null;
+                },
+                else => return null,
+            }
+        }
+    },
 
     pub var True = Value{ .boolean = true };
     pub var False = Value{ .boolean = false };
@@ -59,6 +90,14 @@ pub const Value = union(Type) {
             },
             .list => |list| list.deinit(),
             .map => |map| map.deinit(),
+            .function => |func| {
+                alloc.free(func.instructions);
+                alloc.destroy(func);
+            },
+            .module => |mod| {
+                alloc.free(mod.name);
+                alloc.destroy(mod);
+            },
             else => alloc.destroy(self),
         }
     }

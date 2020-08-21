@@ -21,9 +21,11 @@ pub const Opcode = enum(u8) {
     _return,
     return_value,
     load_module,
+    iter_next,
 
     make_array,
     make_map,
+    make_iter,
 
     //bin ops
     add,

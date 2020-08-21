@@ -169,6 +169,8 @@ pub const Vm = struct {
                 },
                 .assign_local => self.stack[current_frame.sp + inst.ptr] = self.pop().?,
                 .load_module => try self.loadModule(),
+                .make_iter => try self.analIter(inst),
+                .iter_next => try self.analNextIter(),
                 else => {},
             }
         }
@@ -444,6 +446,54 @@ pub const Vm = struct {
 
         res.* = .{ .map = map };
         return self.push(res);
+    }
+
+    /// Creates a new iterable
+    fn analIter(self: *Vm, inst: byte_code.Instruction) Error!void {
+        const iterable = self.pop().?;
+
+        if (!iterable.isType(.list)) return Error.InvalidOperator;
+        const list = iterable.list;
+        const value = try self.newValue();
+        value.* = .{
+            .iterable = .{
+                .expose_index = inst.ptr != 0,
+                .index = 0,
+                .value = iterable,
+            },
+        };
+
+        return self.push(value);
+    }
+
+    /// Pops the iterator from the stack and retrieves the next value
+    /// Pushes the iterator back, then the value and then the index if exposed
+    /// Finally, a true or false is pushed to determine if we should end the for loop
+    fn analNextIter(self: *Vm) Error!void {
+        const value = self.pop().?;
+        if (!value.isType(.iterable)) return Error.InvalidOperator;
+
+        var iterator = value.iterable;
+        if (iterator.next()) |val| {
+            // push the iterator back on the stack
+            value.iterable = iterator;
+            try self.push(value);
+
+            // push the index if it is exposed
+            if (iterator.expose_index) {
+                const index = try self.newValue();
+                index.* = .{ .integer = @intCast(i64, iterator.index - 1) };
+                try self.push(index);
+            }
+
+            // push the capture on the stack
+            try self.push(val);
+
+            // push true to continue
+            return self.push(&Value.True);
+        } else {
+            return self.push(&Value.False);
+        }
     }
 
     /// Analyzes an index/reference pushes the value on the stack
@@ -1001,4 +1051,21 @@ test "Tail recursion" {
     defer vm.deinit();
 
     testing.expectEqual(@as(i64, 10), vm.peek().integer);
+}
+
+test "For loop" {
+    const input =
+        \\const list = [1, 3, 5]
+        \\mut sum = 0
+        \\for(list) |item, i| {
+        \\  sum += item + i
+        \\}
+        \\sum
+    ;
+    var code = try compiler.compile(testing.allocator, input);
+    defer code.deinit();
+    var vm = try run(code, testing.allocator);
+    defer vm.deinit();
+
+    testing.expectEqual(@as(i64, 12), vm.peek().integer);
 }
