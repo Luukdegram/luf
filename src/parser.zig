@@ -21,6 +21,7 @@ const Errors = @import("error.zig").Errors;
 /// Note that the order of these is important to determine the precedence in binary operations
 const Precedence = enum(u4) {
     lowest,
+    range,
     @"or",
     @"and",
     assign,
@@ -45,6 +46,7 @@ const Precedence = enum(u4) {
 /// Determines the Precendence based on the given Token Type
 fn findPrecedence(token_type: Token.TokenType) Precedence {
     return switch (token_type) {
+        .double_period => .range,
         .@"or" => .@"or",
         .@"and" => .@"and",
         .assign, .equal_add, .equal_sub, .equal_mul, .equal_div => .assign,
@@ -230,6 +232,10 @@ pub const Parser = struct {
                 .assign => blk: {
                     self.next();
                     break :blk try self.parseAssignment(left);
+                },
+                .double_period => blk: {
+                    self.next();
+                    break :blk try self.parseRange(left);
                 },
                 .plus,
                 .minus,
@@ -644,6 +650,22 @@ pub const Parser = struct {
         node.right = try self.parseExpression(.lowest);
 
         return Node{ .assignment = node };
+    }
+
+    /// Parses an expression into a `Node.Range` i.e. 0..5
+    fn parseRange(self: *Parser, left: Node) Error!Node {
+        const range = try self.allocator.create(Node.Range);
+        range.* = .{
+            .token = self.current_token,
+            .left = left,
+            .right = undefined,
+        };
+
+        self.next();
+
+        range.right = try self.parseExpression(.lowest);
+
+        return Node{ .range = range };
     }
 
     /// Parses a comment token into a `Comment` node

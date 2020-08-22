@@ -168,6 +168,7 @@ pub const Vm = struct {
                 .load_module => try self.loadModule(),
                 .make_iter => try self.analIter(inst),
                 .iter_next => try self.analNextIter(),
+                .make_range => try self.analRange(),
                 else => {},
             }
         }
@@ -399,7 +400,6 @@ pub const Vm = struct {
 
             try list.insert(i, val);
         }
-
         res.* = .{ .list = list };
         return self.push(res);
     }
@@ -447,10 +447,12 @@ pub const Vm = struct {
 
     /// Creates a new iterable
     fn analIter(self: *Vm, inst: byte_code.Instruction) Error!void {
-        const iterable = self.pop().?;
+        const iterable = self.pop() orelse return Error.MissingValue;
 
-        if (!iterable.isType(.list)) return Error.InvalidOperator;
-        const list = iterable.list;
+        switch (iterable.lufType()) {
+            .list, .range, .string => {},
+            else => return Error.InvalidOperator,
+        }
         const value = try self.newValue();
         value.* = .{
             .iterable = .{
@@ -467,11 +469,13 @@ pub const Vm = struct {
     /// Pushes the iterator back, then the value and then the index if exposed
     /// Finally, a true or false is pushed to determine if we should end the for loop
     fn analNextIter(self: *Vm) Error!void {
-        const value = self.pop().?;
+        const value = self.stack[self.sp - 1];
         if (!value.isType(.iterable)) return Error.InvalidOperator;
 
         var iterator = value.iterable;
-        if (iterator.next()) |val| {
+        const next = try self.newValue();
+        try iterator.next(&self.arena.allocator, next);
+        if (!next.isType(.nil)) {
             // push the iterator back on the stack
             value.iterable = iterator;
             try self.push(value);
@@ -484,13 +488,30 @@ pub const Vm = struct {
             }
 
             // push the capture on the stack
-            try self.push(val);
+            try self.push(next);
 
             // push true to continue
             return self.push(&Value.True);
         } else {
             return self.push(&Value.False);
         }
+    }
+
+    /// Creates a range from 2 values
+    /// Returns an error if lhs or rhs is not an integer
+    fn analRange(self: *Vm) Error!void {
+        const left = self.stack[self.sp - 2];
+        const right = self.stack[self.sp - 1];
+        if (!left.isType(.integer) or !right.isType(.integer)) return Error.InvalidOperator;
+
+        const ret = try self.newValue();
+        ret.* = .{
+            .range = .{
+                .start = left.integer,
+                .end = right.integer,
+            },
+        };
+        return self.push(ret);
     }
 
     /// Analyzes an index/reference pushes the value on the stack
@@ -1071,4 +1092,33 @@ test "For loop" {
     defer vm.deinit();
 
     testing.expectEqual(@as(i64, 8), vm.peek().integer);
+}
+
+test "Range" {
+    const input =
+        \\mut sum = 0
+        \\for(1..100) |e, i| {
+        \\  if (e % 2 == 0) {
+        \\      continue
+        \\  }
+        \\  sum += e + i
+        \\}
+        \\sum
+    ;
+    var code = try compiler.compile(testing.allocator, input);
+    defer code.deinit();
+    var vm = try run(code, testing.allocator);
+    defer vm.deinit();
+
+    testing.expectEqual(@as(i64, 4950), vm.peek().integer);
+}
+
+test "For loop - String" {
+    const input = "mut result = \"hello\" const string = \"world\" for(string)|c|{result+=c}result";
+    var code = try compiler.compile(testing.allocator, input);
+    defer code.deinit();
+    var vm = try run(code, testing.allocator);
+    defer vm.deinit();
+
+    testing.expectEqualStrings("helloworld", vm.peek().string);
 }

@@ -47,6 +47,7 @@ pub const Node = union(NodeType) {
     import: *Import,
     @"continue": *Continue,
     @"break": *Break,
+    range: *Range,
 
     /// Possible Nodes which are supported
     pub const NodeType = enum {
@@ -75,6 +76,7 @@ pub const Node = union(NodeType) {
         import,
         @"continue",
         @"break",
+        range,
     };
 
     /// Represents a String
@@ -304,4 +306,11 @@ pub const Node = union(NodeType) {
     pub const Break = struct { token: Token };
     /// "continue" statement
     pub const Continue = struct { token: Token };
+
+    /// Represents a range i.e. 0..128
+    pub const Range = struct {
+        token: Token,
+        left: Node,
+        right: Node,
+    };
 };

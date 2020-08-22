@@ -25,6 +25,7 @@ pub const Opcode = enum(u8) {
     make_array,
     make_map,
     make_iter,
+    make_range,
 
     //bin ops
     add,

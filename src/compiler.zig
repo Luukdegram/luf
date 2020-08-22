@@ -30,17 +30,6 @@ pub fn compile(
     };
     defer root_scope.symbols.deinit();
 
-    // load builtins
-    // try root_scope.symbols.ensureCapacity(Value.builtin_keys.len);
-    // for (Value.builtin_keys) |key, i| {
-    //     root_scope.symbols.putAssumeCapacity(key, .{
-    //         .scope = .builtin,
-    //         .name = key,
-    //         .mutable = false,
-    //         .index = @intCast(u16, i),
-    //     });
-    // }
-
     var compiler = Compiler{
         .instructions = bytecode.Instructions.init(allocator),
         .constants = Values.init(allocator),
@@ -462,7 +451,7 @@ pub const Compiler = struct {
 
                 _ = try self.emitOp(.jump, @intCast(u16, self.scope.id.loop.start));
 
-                const end = try self.emit(.load_nil);
+                const end = try self.emit(.pop);
                 // jump to end
                 self.instructions.items[false_jump].ptr = @intCast(u16, end);
 
@@ -475,6 +464,7 @@ pub const Compiler = struct {
                 try self.createScope(.loop);
 
                 try self.compile(loop.iter);
+
                 _ = try self.emitOp(.make_iter, @as(u16, if (loop.index != null) 1 else 0));
                 const start_jump = try self.emit(.iter_next);
                 self.scope.id.loop.start = @intCast(u16, start_jump);
@@ -484,12 +474,14 @@ pub const Compiler = struct {
 
                 // parser already parses it as an identifier, no need to check here again
                 const capture = try self.scope.define(loop.capture.identifier.value, false);
-                _ = try self.emitOp(.bind_local, capture.index);
+                if (capture.scope != .loop) return Error.CompilerError;
+                _ = try self.emitOp(.assign_local, capture.index);
 
                 // as above, parser ensures it's an identifier
                 if (loop.index) |i| {
-                    const index = try self.scope.define(i.identifier.value, false);
-                    _ = try self.emitOp(.bind_local, index.index);
+                    const symbol = try self.scope.define(i.identifier.value, false);
+                    if (symbol.scope != .loop) return Error.CompilerError;
+                    _ = try self.emitOp(.assign_local, symbol.index);
                 }
 
                 try self.compile(loop.block);
@@ -500,17 +492,16 @@ pub const Compiler = struct {
                 // jump to start of loop to evaluate range
                 _ = try self.emitOp(.jump, self.scope.id.loop.start);
 
-                // TODO replace load_nil with void
-                const end = try self.emit(.load_nil);
+                const end = try self.emit(.pop);
 
                 for (self.scope.id.loop.breaks.items) |inst| {
                     inst.ptr = @intCast(u16, end);
                 }
 
-                self.exitScope();
-
                 // point the end jump to last op
                 self.instructions.items[end_jump].ptr = @intCast(u16, end);
+                
+                self.exitScope();
             },
             .assignment => |asg| {
                 if (asg.left == .identifier) {
@@ -550,6 +541,14 @@ pub const Compiler = struct {
                 if (self.scope.id != .loop) return Error.CompilerError;
 
                 _ = try self.emitOp(.jump, self.scope.id.loop.start);
+            },
+            .range => |range| {
+                if (range.left != .identifier and range.left != .int_lit) return Error.CompilerError;
+                if (range.right != .identifier and range.right != .int_lit) return Error.CompilerError;
+
+                try self.compile(range.left);
+                try self.compile(range.right);
+                _ = try self.emit(.make_range);
             },
             else => {},
         }
@@ -693,97 +692,97 @@ test "Compile AST to bytecode" {
                 .pop,
             },
         },
-        // .{
-        //     .input = "fn(){ 1 + 2 }",
-        //     .consts = &[_]Value{ Value{ .integer = 1 }, Value{ .integer = 2 }, Value{ .function = .{ .offset = 1, .arg_len = 0 } } },
-        //     .opcodes = &[_]bytecode.Opcode{
-        //         .jump,
-        //         .load_const,
-        //         .load_const,
-        //         .add,
-        //         .@"return",
-        //         .load_const,
-        //         .pop,
-        //     },
-        // },
-        // .{
-        //     .input = "fn(){ }",
-        //     .consts = &[_]Value{Value{ .function = .{ .offset = 1, .arg_len = 0 } }},
-        //     .opcodes = &[_]bytecode.Opcode{
-        //         .jump,
-        //         .load_nil,
-        //         .@"return",
-        //         .load_const,
-        //         .pop,
-        //     },
-        // },
-        // .{
-        //     .input = "fn(){ 1 }()",
-        //     .consts = &[_]Value{ Value{ .integer = 1 }, Value{ .function = .{ .offset = 1, .arg_len = 0 } } },
-        //     .opcodes = &[_]bytecode.Opcode{
-        //         .jump,
-        //         .load_const,
-        //         .@"return",
-        //         .load_const,
-        //         .call,
-        //         .pop,
-        //     },
-        // },
-        // .{
-        //     .input = "const x = fn(){ 1 } x()",
-        //     .consts = &[_]Value{ Value{ .integer = 1 }, Value{ .function = .{ .offset = 1, .arg_len = 0 } } },
-        //     .opcodes = &[_]bytecode.Opcode{
-        //         .jump,
-        //         .load_const,
-        //         .@"return",
-        //         .load_const,
-        //         .bind_global,
-        //         .load_global,
-        //         .call,
-        //         .pop,
-        //     },
-        // },
-        // .{
-        //     .input = "const x = 5 fn(){ return x }",
-        //     .consts = &[_]Value{ Value{ .integer = 5 }, Value{ .function = .{ .offset = 3, .arg_len = 0 } } },
-        //     .opcodes = &[_]bytecode.Opcode{
-        //         .load_const,
-        //         .bind_global,
-        //         .jump,
-        //         .load_global,
-        //         .return_value,
-        //         .load_const,
-        //         .pop,
-        //     },
-        // },
-        // .{
-        //     .input = "fn(){ const x = 5 return x }",
-        //     .consts = &[_]Value{ Value{ .integer = 5 }, Value{ .function = .{ .offset = 1, .arg_len = 0 } } },
-        //     .opcodes = &[_]bytecode.Opcode{
-        //         .jump,
-        //         .load_const,
-        //         .bind_local,
-        //         .load_local,
-        //         .return_value,
-        //         .load_const,
-        //         .pop,
-        //     },
-        // },
-        // .{
-        //     .input = "const func = fn(x){ return x } func(5)",
-        //     .consts = &[_]Value{ Value{ .function = .{ .offset = 1, .arg_len = 1 } }, Value{ .integer = 5 } },
-        //     .opcodes = &[_]bytecode.Opcode{
-        //         .jump,
-        //         .load_local,
-        //         .return_value,
-        //         .load_const,
-        //         .bind_global,
-        //         .load_global,
-        //         .load_const,
-        //         .call,
-        //         .pop,
-        //     },
-        // },
+        .{
+            .input = "fn(){ 1 + 2 }",
+            .consts = &[_]Value{ Value{ .integer = 1 }, Value{ .integer = 2 }, Value{ .function = .{ .arg_len = 0, .locals = 0, .instructions = undefined } } },
+            .opcodes = &[_]bytecode.Opcode{
+                .jump,
+                .load_const,
+                .load_const,
+                .add,
+                .@"return",
+                .load_const,
+                .pop,
+            },
+        },
+        .{
+            .input = "fn(){ }",
+            .consts = &[_]Value{Value{ .function = .{ .arg_len = 0, .locals = 0, .instructions = undefined } }},
+            .opcodes = &[_]bytecode.Opcode{
+                .jump,
+                .load_nil,
+                .@"return",
+                .load_const,
+                .pop,
+            },
+        },
+        .{
+            .input = "fn(){ 1 }()",
+            .consts = &[_]Value{ Value{ .integer = 1 }, Value{ .function = .{ .arg_len = 0, .locals = 0, .instructions = undefined } } },
+            .opcodes = &[_]bytecode.Opcode{
+                .jump,
+                .load_const,
+                .@"return",
+                .load_const,
+                .call,
+                .pop,
+            },
+        },
+        .{
+            .input = "const x = fn(){ 1 } x()",
+            .consts = &[_]Value{ Value{ .integer = 1 }, Value{ .function = .{ .arg_len = 0, .locals = 0, .instructions = undefined } } },
+            .opcodes = &[_]bytecode.Opcode{
+                .jump,
+                .load_const,
+                .@"return",
+                .load_const,
+                .bind_global,
+                .load_global,
+                .call,
+                .pop,
+            },
+        },
+        .{
+            .input = "const x = 5 fn(){ return x }",
+            .consts = &[_]Value{ Value{ .integer = 5 }, Value{ .function = .{ .arg_len = 0, .locals = 0, .instructions = undefined } } },
+            .opcodes = &[_]bytecode.Opcode{
+                .load_const,
+                .bind_global,
+                .jump,
+                .load_global,
+                .return_value,
+                .load_const,
+                .pop,
+            },
+        },
+        .{
+            .input = "fn(){ const x = 5 return x }",
+            .consts = &[_]Value{ Value{ .integer = 5 }, Value{ .function = .{ .arg_len = 0, .locals = 1, .instructions = undefined } } },
+            .opcodes = &[_]bytecode.Opcode{
+                .jump,
+                .load_const,
+                .bind_local,
+                .load_local,
+                .return_value,
+                .load_const,
+                .pop,
+            },
+        },
+        .{
+            .input = "const func = fn(x){ return x } func(5)",
+            .consts = &[_]Value{ Value{ .function = .{ .arg_len = 1, .locals = 1, .instructions = undefined } }, Value{ .integer = 5 } },
+            .opcodes = &[_]bytecode.Opcode{
+                .jump,
+                .load_local,
+                .return_value,
+                .load_const,
+                .bind_global,
+                .load_global,
+                .load_const,
+                .call,
+                .pop,
+            },
+        },
         .{
             .input = "const x = \"string\".len",
             .consts = &[_][]const u8{ "string", "len" },
@@ -803,7 +802,7 @@ test "Compile AST to bytecode" {
                 .load_const,
                 .pop,
                 .jump,
-                .load_nil,
+                .pop,
                 .pop,
             },
         },
@@ -835,7 +834,10 @@ test "Compile AST to bytecode" {
                 //expect a `Value`
                 switch (constant) {
                     .integer => testing.expectEqual(constant.integer, code.constants[i].integer),
-                    .function => testing.expectEqual(constant.function.offset, code.constants[i].function.offset),
+                    .function => {
+                        testing.expectEqual(constant.function.arg_len, code.constants[i].function.arg_len);
+                        testing.expectEqual(constant.function.locals, code.constants[i].function.locals);
+                    },
                     else => {},
                 }
             }

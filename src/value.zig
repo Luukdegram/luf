@@ -2,8 +2,7 @@ const std = @import("std");
 const ast = @import("ast.zig");
 const Allocator = std.mem.Allocator;
 
-//! Value represents a Zig to Luf type
-//!
+//! Supported Values by Luf
 
 /// Build in types supported by Luf
 pub const Type = enum {
@@ -18,6 +17,7 @@ pub const Type = enum {
     native,
     module,
     iterable,
+    range,
 };
 
 /// Value depending on its type
@@ -42,33 +42,42 @@ pub const Value = union(Type) {
         name: []const u8,
         attributes: *Value,
     },
+    range: struct {
+        start: i64,
+        end: i64,
+    },
     iterable: struct {
         expose_index: bool,
         index: usize,
         value: *Value,
 
-        /// Returns the next Value of the iterable.
-        /// Returns null if empty iterable or the end of the iterator has been reached.
-        /// NOTE: This returns the actual value, if you don't want the user to be able to modify
-        /// this value, create a shallow copy of the return value.
-        pub fn next(self: *@This()) ?*Value {
+        /// Sets `value` to the next `Value` of the iterator.
+        /// This creates a copy of the actual value
+        pub fn next(self: *@This(), allocator: *Allocator, value: *Value) !void {
+            value.* = Value.Nil;
             switch (self.value.*) {
                 .list => |list| {
-                    if (list.items.len == 0) return null;
-                    if (list.items.len == self.index) return null;
+                    if (list.items.len == 0) return;
+                    if (list.items.len == self.index) return;
 
                     defer self.index += 1;
-                    return list.items[self.index];
+                    value.* = list.items[self.index].*;
                 },
                 .string => |string| {
-                    if (string.len == 0) return null;
-                    if (string.len == self.index) return null;
+                    if (string.len == 0) return;
+                    if (string.len == self.index) return;
 
                     defer self.index += 1;
-                    //TODO
-                    return null;
+                    value.* = .{ .string = try allocator.dupe(u8, string[self.index .. self.index + 1]) };
                 },
-                else => return null,
+                .range => |range| {
+                    if (range.start == range.end) return;
+                    if (self.index == range.end - range.start) return;
+
+                    defer self.index += 1;
+                    value.* = .{ .integer = range.start + @intCast(i64, self.index) };
+                },
+                else => {},
             }
         }
     },

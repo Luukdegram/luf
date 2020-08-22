@@ -110,7 +110,12 @@ pub const Lexer = struct {
             } else .greater_than,
             '{' => .left_brace,
             '}' => .right_brace,
-            '.' => .period,
+            '.' => if (self.peekChar() == '.') {
+                const start = self.position;
+                self.readChar();
+                self.readChar();
+                return Token{ .token_type = .double_period, .start = start, .end = self.position };
+            } else .period,
             '[' => .left_bracket,
             ']' => .right_bracket,
             ':' => .colon,

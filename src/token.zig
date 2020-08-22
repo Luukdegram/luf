@@ -48,6 +48,7 @@ pub const Token = struct {
         equal_pipe,
         shift_left,
         shift_right,
+        double_period,
         // delimiters
         comma,
         left_parenthesis,
