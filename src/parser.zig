@@ -137,7 +137,7 @@ pub const Parser = struct {
         return switch (self.current_token.token_type) {
             .comment => self.parseComment(),
             .constant, .mutable => self.parseDeclaration(),
-            ._return => self.parseReturn(),
+            .@"return" => self.parseReturn(),
             else => self.parseExpressionStatement(),
         };
     }
@@ -175,7 +175,7 @@ pub const Parser = struct {
         ret.* = .{ .token = self.current_token, .value = undefined };
         self.next();
         ret.value = try self.parseExpression(.lowest);
-        return Node{ ._return = ret };
+        return Node{ .@"return" = ret };
     }
 
     /// Parses the current token as an Identifier
@@ -203,8 +203,8 @@ pub const Parser = struct {
             .minus => try self.parsePrefixExpression(),
             .tilde => try self.parsePrefixExpression(),
             .import => try self.parseImportExpression(),
-            ._true, ._false => try self.parseBoolean(),
-            ._if => try self.parseIfExpression(),
+            .@"true", .@"false" => try self.parseBoolean(),
+            .@"if" => try self.parseIfExpression(),
             .left_parenthesis => try self.parseGroupedExpression(),
             .function => try self.parseFunctionLiteral(),
             .left_bracket => try self.parseArray(),
@@ -318,7 +318,7 @@ pub const Parser = struct {
         const boolean = try self.allocator.create(Node.Bool);
         boolean.* = .{
             .token = self.current_token,
-            .value = self.currentIsType(._true),
+            .value = self.currentIsType(.@"true"),
         };
         return Node{ .boolean = boolean };
     }
@@ -360,10 +360,10 @@ pub const Parser = struct {
 
         exp.true_pong = try self.parseBlockStatement();
 
-        if (self.peekIsType(._else)) {
+        if (self.peekIsType(.@"else")) {
             self.next();
 
-            if (self.peekIsType(._if)) {
+            if (self.peekIsType(.@"if")) {
                 self.next();
                 exp.false_pong = try self.parseStatement();
                 return Node{ .if_expression = exp };
@@ -733,7 +733,7 @@ test "Parse Return statment" {
 
         testing.expect(tree.nodes.len == 1);
 
-        const node = tree.nodes[0]._return.value;
+        const node = tree.nodes[0].@"return".value;
 
         switch (@typeInfo(@TypeOf(case.expected))) {
             .ComptimeInt => testing.expectEqual(@intCast(usize, case.expected), node.int_lit.value),

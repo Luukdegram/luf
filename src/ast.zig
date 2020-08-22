@@ -24,7 +24,7 @@ pub const Tree = struct {
 pub const Node = union(NodeType) {
     declaration: *Declaration,
     identifier: *Identifier,
-    _return: *Return,
+    @"return": *Return,
     prefix: *Prefix,
     infix: *Infix,
     int_lit: *IntegerLiteral,
@@ -50,7 +50,7 @@ pub const Node = union(NodeType) {
     pub const NodeType = enum {
         declaration,
         identifier,
-        _return,
+        @"return",
         prefix,
         infix,
         int_lit,

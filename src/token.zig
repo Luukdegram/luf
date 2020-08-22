@@ -12,7 +12,7 @@ pub const Token = struct {
     end: usize,
 
     /// Identifiers that are considered a token
-    pub const TokenType = union(enum) {
+    pub const TokenType = enum {
         illegal,
         eof,
         period,
@@ -64,15 +64,17 @@ pub const Token = struct {
         while_loop,
         for_loop,
         nil,
+        import,
+        // Reserved words in Zig, so we create literals
         @"and",
         @"or",
-        import,
-        // underscores because reserved words in Zig
-        _true,
-        _false,
-        _if,
-        _else,
-        _return,
+        @"true",
+        @"false",
+        @"if",
+        @"else",
+        @"return",
+        @"continue",
+        @"break",
     };
 
     /// Lookup 'table' to check if an identifier is a keyword
@@ -83,14 +85,16 @@ pub const Token = struct {
         .{ "while", .while_loop },
         .{ "for", .for_loop },
         .{ "nil", .nil },
-        .{ "true", ._true },
-        .{ "false", ._false },
-        .{ "if", ._if },
-        .{ "else", ._else },
-        .{ "return", ._return },
+        .{ "import", .import },
+        .{ "true", .@"true" },
+        .{ "false", .@"false" },
+        .{ "if", .@"if" },
+        .{ "else", .@"else" },
+        .{ "return", .@"return" },
         .{ "and", .@"and" },
         .{ "or", .@"or" },
-        .{ "import", .import },
+        .{ "break", .@"break" },
+        .{ "continue", .@"continue" },
     });
 
     /// Returns the string value of the token
@@ -143,16 +147,18 @@ pub const Token = struct {
             .constant => "const",
             .while_loop => "while",
             .nil => "nil",
-            .@"and" => "and",
-            .@"or" => "or",
             .import => "import",
             .for_loop => "for",
-            // underscores because reserved words in Zig
-            ._true => "true",
-            ._false => "false",
-            ._if => "if",
-            ._else => "else",
-            ._return => "return",
+            // literals because they are Zig keywords
+            .@"and" => "and",
+            .@"or" => "or",
+            .@"true" => "true",
+            .@"false" => "false",
+            .@"if" => "if",
+            .@"else" => "else",
+            .@"return" => "return",
+            .@"break" => "break",
+            .@"continue" => "continue",
         };
     }
 };
@@ -180,6 +186,8 @@ test "Keywords" {
         "and",
         "return",
         "for",
+        "continue",
+        "break",
     };
 
     for (keywords) |keyword| {

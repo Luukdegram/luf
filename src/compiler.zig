@@ -397,7 +397,7 @@ pub const Compiler = struct {
                 }
 
                 // if no return_value found, emit a regular return instruction
-                if (!self.lastInstIs(.return_value)) _ = try self.emit(._return);
+                if (!self.lastInstIs(.return_value)) _ = try self.emit(.@"return");
 
                 const locals = self.scope.symbols.items().len;
                 self.escapeScope();
@@ -422,7 +422,7 @@ pub const Compiler = struct {
                 }
                 _ = try self.emitOp(.call, @intCast(u16, call.arguments.len));
             },
-            ._return => |ret| {
+            .@"return" => |ret| {
                 try self.compile(ret.value);
                 _ = try self.emit(.return_value);
             },
@@ -657,7 +657,7 @@ test "Compile AST to bytecode" {
         //         .load_const,
         //         .load_const,
         //         .add,
-        //         ._return,
+        //         .@"return",
         //         .load_const,
         //         .pop,
         //     },
@@ -668,7 +668,7 @@ test "Compile AST to bytecode" {
         //     .opcodes = &[_]bytecode.Opcode{
         //         .jump,
         //         .load_nil,
-        //         ._return,
+        //         .@"return",
         //         .load_const,
         //         .pop,
         //     },
@@ -679,7 +679,7 @@ test "Compile AST to bytecode" {
         //     .opcodes = &[_]bytecode.Opcode{
         //         .jump,
         //         .load_const,
-        //         ._return,
+        //         .@"return",
         //         .load_const,
         //         .call,
         //         .pop,
@@ -691,7 +691,7 @@ test "Compile AST to bytecode" {
         //     .opcodes = &[_]bytecode.Opcode{
         //         .jump,
         //         .load_const,
-        //         ._return,
+        //         .@"return",
         //         .load_const,
         //         .bind_global,
         //         .load_global,

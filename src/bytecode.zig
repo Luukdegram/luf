@@ -18,7 +18,7 @@ pub const Opcode = enum(u8) {
     jump_false,
     jump,
     call,
-    _return,
+    @"return",
     return_value,
     load_module,
     iter_next,

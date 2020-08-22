@@ -137,7 +137,7 @@ pub const Vm = struct {
                 .make_map => try self.analMap(inst),
                 .get_by_index => try self.analGetValue(),
                 .set_by_index => try self.analSetValue(),
-                ._return => {
+                .@"return" => {
                     const f = self.call_stack.pop();
                     self.sp = f.sp - 1;
 
@@ -1055,9 +1055,8 @@ test "Tail recursion" {
 
 test "For loop" {
     const input =
-        \\const list = [1, 3, 5]
         \\mut sum = 0
-        \\for(list) |item, i| {
+        \\for([1, 3, 5]) |item, i| {
         \\  sum += item + i
         \\}
         \\sum
