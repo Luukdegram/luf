@@ -212,6 +212,8 @@ pub const Parser = struct {
             .while_loop => try self.parseWhile(),
             .for_loop => try self.parseFor(),
             .nil => try self.parseNil(),
+            .@"break" => try self.parseBreak(),
+            .@"continue" => try self.parseContinue(),
             else => return self.fail("Unexpected token '{}'"),
         };
 
@@ -663,6 +665,24 @@ pub const Parser = struct {
             .token = self.current_token,
         };
         return Node{ .nil = nil };
+    }
+
+    /// Constructs a `Break` node
+    fn parseBreak(self: *Parser) Error!Node {
+        const node = try self.allocator.create(Node.Break);
+        node.* = .{
+            .token = self.current_token,
+        };
+        return Node{ .@"break" = node };
+    }
+
+    /// Constructs a `Continue` node
+    fn parseContinue(self: *Parser) Error!Node {
+        const node = try self.allocator.create(Node.Continue);
+        node.* = .{
+            .token = self.current_token,
+        };
+        return Node{ .@"continue" = node };
     }
 
     /// Parses the import expression i.e. const std = import("std")

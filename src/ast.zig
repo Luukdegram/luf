@@ -45,6 +45,8 @@ pub const Node = union(NodeType) {
     comment: *Comment,
     nil: *Nil,
     import: *Import,
+    @"continue": *Continue,
+    @"break": *Break,
 
     /// Possible Nodes which are supported
     pub const NodeType = enum {
@@ -71,6 +73,8 @@ pub const Node = union(NodeType) {
         comment,
         nil,
         import,
+        @"continue",
+        @"break",
     };
 
     /// Represents a String
@@ -288,13 +292,16 @@ pub const Node = union(NodeType) {
     };
 
     /// Represents "Nil"
-    pub const Nil = struct {
-        token: Token,
-    };
+    pub const Nil = struct { token: Token };
 
     /// Represents the Node which imports other Luf files
     pub const Import = struct {
         token: Token,
         value: Node,
     };
+
+    /// "break" statement
+    pub const Break = struct { token: Token };
+    /// "continue" statement
+    pub const Continue = struct { token: Token };
 };

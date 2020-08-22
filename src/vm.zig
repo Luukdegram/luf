@@ -69,7 +69,8 @@ pub const Vm = struct {
         instructions: []const byte_code.Instruction,
     };
 
-    /// Frees the Virtual Machine's memory
+    /// Frees all memory allocated by the `Vm`.
+    /// The vm is no longer valid for use after calling deinit
     pub fn deinit(self: *Vm) void {
         self.globals.deinit();
         self.arena.deinit();
@@ -156,10 +157,6 @@ pub const Vm = struct {
                 .call => try self.analFunctionCall(inst, current_frame.instructions[current_frame.ip + 1]),
                 .bind_local => self.stack[current_frame.sp + inst.ptr] = self.pop().?,
                 .load_local => try self.push(self.stack[current_frame.sp + inst.ptr]),
-                .load_builtin => {
-                    const key = Value.builtin_keys[inst.ptr];
-                    try self.push(&(Value.builtins.get(key).?));
-                },
                 .assign_global => {
                     const value = self.pop().?;
                     if (self.globals.items.len > inst.ptr)
@@ -1023,6 +1020,7 @@ test "While loop" {
     const test_cases = .{
         .{ .input = "mut i = 0 while (i > 10) {mut i = 10} i", .expected = 0 },
         .{ .input = "mut i = 0 while (i < 10) {i = 10} i", .expected = 10 },
+        .{ .input = "mut i = 0 while (i < 10) { if(i==5) { break } i = 5} i", .expected = 5 },
     };
 
     inline for (test_cases) |case| {
@@ -1056,7 +1054,13 @@ test "Tail recursion" {
 test "For loop" {
     const input =
         \\mut sum = 0
-        \\for([1, 3, 5]) |item, i| {
+        \\for([1, 3, 5, 7, 9]) |item, i| {
+        \\  if (item == 3) {
+        \\      continue
+        \\  }
+        \\  if (item == 7) {
+        \\      break
+        \\  }
         \\  sum += item + i
         \\}
         \\sum
@@ -1066,5 +1070,5 @@ test "For loop" {
     var vm = try run(code, testing.allocator);
     defer vm.deinit();
 
-    testing.expectEqual(@as(i64, 12), vm.peek().integer);
+    testing.expectEqual(@as(i64, 8), vm.peek().integer);
 }

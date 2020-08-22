@@ -96,16 +96,29 @@ pub const Compiler = struct {
 
     /// Scope of the current state (function, root, etc)
     const Scope = struct {
+        /// Symbols that exist within the current scope
         symbols: SymbolTable,
-        id: Id,
+        /// Type of the Scope. i.e. Root, function, etc
+        id: Tag,
+        /// If not a root scope, the scope will own a parent
         parent: ?*Scope = null,
         allocator: *Allocator,
 
+        /// The type of the scope
         const Id = enum {
             root,
             function,
-            builtin,
             loop,
+        };
+
+        /// Some `Scope` types can have a payload
+        const Tag = union(Id) {
+            root,
+            function: void,
+            loop: struct {
+                start: u16,
+                breaks: std.ArrayList(*bytecode.Instruction),
+            },
         };
 
         /// Creates a new `Scope` from the current Scope.
@@ -114,7 +127,11 @@ pub const Compiler = struct {
             const new_scope = try self.allocator.create(Scope);
             new_scope.* = .{
                 .symbols = SymbolTable.init(self.allocator),
-                .id = id,
+                .id = switch (id) {
+                    .root => .{ .root = {} },
+                    .function => .{ .function = {} },
+                    .loop => .{ .loop = .{ .start = 0, .breaks = std.ArrayList(*bytecode.Instruction).init(self.allocator) } },
+                },
                 .parent = self,
                 .allocator = self.allocator,
             };
@@ -143,7 +160,9 @@ pub const Compiler = struct {
 
         /// Cleans up the memory of the `Scope`
         fn deinit(self: *Scope) void {
+            if (self.id == .loop) self.id.loop.breaks.deinit();
             self.symbols.deinit();
+            self.* = undefined;
         }
     };
 
@@ -177,6 +196,7 @@ pub const Compiler = struct {
             self.allocator.free(self.constants);
             self.symbols.deinit();
             self.state.promote(self.allocator).deinit();
+            self.* = undefined;
         }
     };
 
@@ -220,7 +240,7 @@ pub const Compiler = struct {
     }
 
     /// Sets the current `Scope` to its parent's scope and cleans up the closing scope's memory
-    fn escapeScope(self: *Compiler) void {
+    fn exitScope(self: *Compiler) void {
         if (self.scope.id == .root) return; // can't escape the root scope
         if (self.scope.parent) |parent| {
             const old = self.scope;
@@ -349,7 +369,6 @@ pub const Compiler = struct {
                 const opcode: bytecode.Opcode = switch (symbol.scope) {
                     .root => .load_global,
                     .function, .loop => .load_local,
-                    .builtin => .load_builtin,
                 };
                 _ = try self.emitOp(opcode, symbol.index);
             } else return Error.CompilerError,
@@ -400,7 +419,7 @@ pub const Compiler = struct {
                 if (!self.lastInstIs(.return_value)) _ = try self.emit(.@"return");
 
                 const locals = self.scope.symbols.items().len;
-                self.escapeScope();
+                self.exitScope();
 
                 const last_pos = try self.emitOp(.load_const, try self.addConstant(.{
                     .function = .{
@@ -427,8 +446,11 @@ pub const Compiler = struct {
                 _ = try self.emit(.return_value);
             },
             .while_loop => |loop| {
+                try self.createScope(.loop);
+
                 // beginning of while
-                const start_jump = self.instructions.items.len;
+                self.scope.id.loop.start = @intCast(u16, self.instructions.items.len);
+
                 try self.compile(loop.condition);
 
                 // jump position if condition equals false
@@ -438,11 +460,16 @@ pub const Compiler = struct {
 
                 _ = try self.emit(.pop);
 
-                _ = try self.emitOp(.jump, @intCast(u16, start_jump));
+                _ = try self.emitOp(.jump, @intCast(u16, self.scope.id.loop.start));
 
                 const end = try self.emit(.load_nil);
                 // jump to end
                 self.instructions.items[false_jump].ptr = @intCast(u16, end);
+
+                for (self.scope.id.loop.breaks.items) |inst| {
+                    inst.ptr = @intCast(u16, end);
+                }
+                self.exitScope();
             },
             .for_loop => |loop| {
                 try self.createScope(.loop);
@@ -450,6 +477,7 @@ pub const Compiler = struct {
                 try self.compile(loop.iter);
                 _ = try self.emitOp(.make_iter, @as(u16, if (loop.index != null) 1 else 0));
                 const start_jump = try self.emit(.iter_next);
+                self.scope.id.loop.start = @intCast(u16, start_jump);
 
                 // jump position if we reached the end of the iterator
                 const end_jump = try self.emit(.jump_false);
@@ -470,12 +498,16 @@ pub const Compiler = struct {
                 _ = try self.emit(.pop);
 
                 // jump to start of loop to evaluate range
-                _ = try self.emitOp(.jump, @intCast(u16, start_jump));
+                _ = try self.emitOp(.jump, self.scope.id.loop.start);
 
                 // TODO replace load_nil with void
                 const end = try self.emit(.load_nil);
 
-                self.escapeScope();
+                for (self.scope.id.loop.breaks.items) |inst| {
+                    inst.ptr = @intCast(u16, end);
+                }
+
+                self.exitScope();
 
                 // point the end jump to last op
                 self.instructions.items[end_jump].ptr = @intCast(u16, end);
@@ -506,6 +538,18 @@ pub const Compiler = struct {
             .import => |imp| {
                 try self.compile(imp.value);
                 _ = try self.emit(.load_module);
+            },
+            .@"break" => |br| {
+                if (self.scope.id != .loop) return Error.CompilerError;
+
+                const pos = try self.emit(.jump);
+                const jump = &self.instructions.items[pos];
+                try self.scope.id.loop.breaks.append(jump);
+            },
+            .@"continue" => |cont| {
+                if (self.scope.id != .loop) return Error.CompilerError;
+
+                _ = try self.emitOp(.jump, self.scope.id.loop.start);
             },
             else => {},
         }
