@@ -12,7 +12,7 @@ const Allocator = std.mem.Allocator;
 //! The Virtual Machine of Luf is stack-based.
 //! Currently the stack has a size of 2048 (pre-allocated)
 
-/// Creates a new Virtual Machine on the stack, runs the given `ByteCode`
+/// Creates a new Virtual Machine on the heap, runs the given `ByteCode`
 /// and finally returns the `Vm`. Use deinit() to free its memory.
 pub fn run(code: ByteCode, allocator: *Allocator) Vm.Error!*Vm {
     //TODO cleanup this mess once we have implemented a garbage collector
@@ -24,10 +24,11 @@ pub fn run(code: ByteCode, allocator: *Allocator) Vm.Error!*Vm {
         .allocator = allocator,
         .arena = arena,
         .call_stack = Vm.CallStack.init(allocator),
+        .imports = std.StringHashMap(*Value).init(allocator),
     };
 
     try vm.call_stack.append(.{
-        .fp = undefined,
+        .fp = null,
         .sp = 0,
         .ip = 0,
         .instructions = code.instructions,
@@ -51,16 +52,20 @@ pub const Vm = struct {
     /// Globals that live inside the VM
     /// Currently allows 65536 Values
     globals: Value.List,
+    /// Call stack that contains the instruction and stack pointer, as well as the instructions
+    /// to run the stack
+    call_stack: CallStack,
+    /// Modules that were imported
+    imports: std.StringHashMap(*Value),
     allocator: *Allocator,
     arena: std.heap.ArenaAllocator,
-    call_stack: CallStack,
 
     pub const Error = error{ OutOfMemory, OutOfBounds, MissingValue, InvalidOperator } || BuiltinError;
     const CallStack = std.ArrayList(Frame);
     /// Function `Frame` on the callstack
     const Frame = struct {
         /// Frame pointer which contains the actual function `Value`
-        fp: *const Value,
+        fp: ?*const Value,
         /// `Instruction` pointer to the position of the function in the bytecode's instruction set
         ip: usize,
         /// Stack pointer. Mostly used to reset the stack pointer between scope changes
@@ -75,6 +80,7 @@ pub const Vm = struct {
         self.globals.deinit();
         self.arena.deinit();
         self.call_stack.deinit();
+        self.imports.deinit();
         self.allocator.destroy(self);
     }
 
@@ -682,15 +688,16 @@ pub const Vm = struct {
         defer self.allocator.free(source);
 
         // we should probably save this bytecode so we can free it at a later point
-        var code = compiler.compile(&self.arena.allocator, source) catch {
+        var code = compiler.compile(self.allocator, source) catch {
             return Error.InvalidOperator;
         };
+        defer code.deinit();
 
         const last_ip = self.ip;
         const last_sp = self.sp;
 
         try self.call_stack.append(.{
-            .fp = undefined, //TODO make this optional for safety
+            .fp = null,
             .sp = 0,
             .ip = 0,
             .instructions = code.instructions,
@@ -703,12 +710,18 @@ pub const Vm = struct {
         try attributes.ensureCapacity(code.symbols.items().len);
         for (code.symbols.items()) |entry, i| {
             const symbol: compiler.Compiler.Symbol = entry.value;
-            std.debug.assert(symbol.scope == .root);
+            std.debug.assert(symbol.scope == .global);
 
             const name = try self.newValue();
             name.* = .{ .string = try self.arena.allocator.dupe(u8, symbol.name) };
             const value = try self.newValue();
             value.* = code.constants[symbol.index];
+
+            // Create a copy of the function instructions as we're free'ing all compiler memory on scope exit
+            if (value.isType(.function)) {
+                value.function.instructions = try self.arena.allocator.dupe(byte_code.Instruction, value.function.instructions);
+            }
+
             attributes.putAssumeCapacityNoClobber(name, value);
         }
 
@@ -723,7 +736,11 @@ pub const Vm = struct {
         const name = self.pop().?;
         if (!name.isType(.string)) return Error.InvalidOperator;
 
-        const mod = try self.importModule(name.string);
+        const mod = self.imports.get(name.string) orelse blk: {
+            const imp = try self.importModule(name.string);
+            try self.imports.put(name.string, imp);
+            break :blk imp;
+        };
 
         const ret = try self.newValue();
         ret.* = .{

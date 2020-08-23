@@ -25,7 +25,7 @@ pub fn compile(
 
     var root_scope = Compiler.Scope{
         .symbols = Compiler.SymbolTable.init(allocator),
-        .id = .root,
+        .id = .global,
         .allocator = &arena.allocator,
     };
     defer root_scope.symbols.deinit();
@@ -83,26 +83,26 @@ pub const Compiler = struct {
     /// Hashmap of `Symbol` where the key is the Symbol's name
     const SymbolTable = std.StringHashMap(Symbol);
 
-    /// Scope of the current state (function, root, etc)
+    /// Scope of the current state (function, global, etc)
     const Scope = struct {
         /// Symbols that exist within the current scope
         symbols: SymbolTable,
         /// Type of the Scope. i.e. Root, function, etc
         id: Tag,
-        /// If not a root scope, the scope will own a parent
+        /// If not a global scope, the scope will own a parent
         parent: ?*Scope = null,
         allocator: *Allocator,
 
         /// The type of the scope
         const Id = enum {
-            root,
+            global,
             function,
             loop,
         };
 
         /// Some `Scope` types can have a payload
         const Tag = union(Id) {
-            root,
+            global,
             function: void,
             loop: struct {
                 start: u16,
@@ -117,7 +117,7 @@ pub const Compiler = struct {
             new_scope.* = .{
                 .symbols = SymbolTable.init(self.allocator),
                 .id = switch (id) {
-                    .root => .{ .root = {} },
+                    .global => .{ .global = {} },
                     .function => .{ .function = {} },
                     .loop => .{ .loop = .{ .start = 0, .breaks = std.ArrayList(*bytecode.Instruction).init(self.allocator) } },
                 },
@@ -128,8 +128,9 @@ pub const Compiler = struct {
         }
 
         /// Defines a new symbol and saves it in the symbol table
+        /// Returns an error if Symbol already exists
         fn define(self: *Scope, name: []const u8, mutable: bool) Error!Symbol {
-            if (self.resolve(name)) |s| return s;
+            if (self.resolve(name)) |_| return Error.CompilerError;
             const index = self.symbols.items().len;
 
             const symbol = Symbol{
@@ -230,7 +231,7 @@ pub const Compiler = struct {
 
     /// Sets the current `Scope` to its parent's scope and cleans up the closing scope's memory
     fn exitScope(self: *Compiler) void {
-        if (self.scope.id == .root) return; // can't escape the root scope
+        if (self.scope.id == .global) return; // can't escape the global scope
         if (self.scope.parent) |parent| {
             const old = self.scope;
             self.scope = parent;
@@ -248,7 +249,7 @@ pub const Compiler = struct {
     fn resolveSymbol(self: *Compiler, scope: *const Scope, name: []const u8) ?Symbol {
         return if (scope.resolve(name)) |symbol|
             symbol
-        else if (scope.id != .root and scope.parent != null)
+        else if (scope.id != .global and scope.parent != null)
             self.resolveSymbol(scope.parent.?, name)
         else
             null;
@@ -347,7 +348,7 @@ pub const Compiler = struct {
 
                 try self.compile(decl.value);
 
-                const opcode: bytecode.Opcode = if (symbol.scope == .root)
+                const opcode: bytecode.Opcode = if (symbol.scope == .global)
                     .bind_global
                 else
                     .bind_local;
@@ -356,7 +357,7 @@ pub const Compiler = struct {
             },
             .identifier => |id| if (self.resolveSymbol(self.scope, id.value)) |symbol| {
                 const opcode: bytecode.Opcode = switch (symbol.scope) {
-                    .root => .load_global,
+                    .global => .load_global,
                     .function, .loop => .load_local,
                 };
                 _ = try self.emitOp(opcode, symbol.index);
@@ -500,7 +501,7 @@ pub const Compiler = struct {
 
                 // point the end jump to last op
                 self.instructions.items[end_jump].ptr = @intCast(u16, end);
-                
+
                 self.exitScope();
             },
             .assignment => |asg| {
@@ -511,7 +512,7 @@ pub const Compiler = struct {
 
                     try self.compile(asg.right);
 
-                    if (symbol.scope == .root)
+                    if (symbol.scope == .global)
                         _ = try self.emitOp(.assign_global, symbol.index)
                     else
                         _ = try self.emitOp(.assign_local, symbol.index);
