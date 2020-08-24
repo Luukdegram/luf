@@ -3,9 +3,10 @@ const compiler = @import("compiler.zig");
 const ByteCode = compiler.Compiler.ByteCode;
 const byte_code = @import("bytecode.zig");
 const _value = @import("value.zig");
+const _builtin = @import("builtins.zig");
 const Value = _value.Value;
 const Type = _value.Type;
-const BuiltinError = _value.BuiltinError;
+const BuiltinError = _builtin.BuiltinError;
 const testing = std.testing;
 const Allocator = std.mem.Allocator;
 
@@ -20,7 +21,7 @@ pub fn run(code: ByteCode, allocator: *Allocator) Vm.Error!*Vm {
     const vm = try allocator.create(Vm);
     var arena = std.heap.ArenaAllocator.init(allocator);
     vm.* = .{
-        .globals = Value.List.init(allocator),
+        .globals = std.ArrayList(*Value).init(allocator),
         .allocator = allocator,
         .arena = arena,
         .call_stack = Vm.CallStack.init(allocator),
@@ -51,7 +52,7 @@ pub const Vm = struct {
     stack: [2048]*Value = undefined,
     /// Globals that live inside the VM
     /// Currently allows 65536 Values
-    globals: Value.List,
+    globals: std.ArrayList(*Value),
     /// Call stack that contains the instruction and stack pointer, as well as the instructions
     /// to run the stack
     call_stack: CallStack,
@@ -383,7 +384,7 @@ pub const Vm = struct {
     fn analArray(self: *Vm, inst: byte_code.Instruction) Error!void {
         const len = inst.ptr;
         var list = try Value.List.initCapacity(&self.arena.allocator, len);
-        errdefer list.deinit();
+        errdefer list.deinit(&self.arena.allocator);
 
         const res = try self.newValue();
         if (len == 0) {
@@ -404,7 +405,7 @@ pub const Vm = struct {
                 list_type = val.lufType()
             else if (!val.isType(list_type)) return Error.MissingValue;
 
-            try list.insert(i, val);
+            try list.insert(&self.arena.allocator, i, val);
         }
         res.* = .{ .list = list };
         return self.push(res);
@@ -413,8 +414,8 @@ pub const Vm = struct {
     /// Analyzes and creates a new map
     fn analMap(self: *Vm, inst: byte_code.Instruction) Error!void {
         const len = inst.ptr / 2;
-        var map = Value.Map.init(&self.arena.allocator);
-        errdefer map.deinit();
+        var map = Value.Map{};
+        errdefer map.deinit(&self.arena.allocator);
 
         const res = try self.newValue();
         if (len == 0) {
@@ -422,7 +423,7 @@ pub const Vm = struct {
             return self.push(res);
         }
 
-        try map.ensureCapacity(len);
+        try map.ensureCapacity(&self.arena.allocator, len);
 
         var index = self.sp - (len * 2);
         var key_type: Type = undefined;
@@ -533,18 +534,17 @@ pub const Vm = struct {
                         return self.push(list.items[@intCast(u64, int)]);
                     },
                     .string => |name| {
-                        if (Value.builtins.get(name)) |val| {
+                        if (_builtin.builtins.get(name)) |val| {
                             const builtin = val.native;
                             const args = try self.allocator.alloc(*Value, builtin.arg_len + 1);
                             defer self.allocator.free(args);
                             args[0] = left;
                             var i: usize = 1;
                             while (i <= builtin.arg_len) : (i += 1) args[i] = self.stack[self.sp - (builtin.arg_len - 1 + i)];
-                            const result = (try builtin.func(args)).*;
 
                             //create a shallow copy
                             const res = try self.newValue();
-                            res.* = result;
+                            res.* = (builtin.func(self, args) catch return Error.InvalidOperator).*;
 
                             return self.push(res);
                         }
@@ -570,13 +570,12 @@ pub const Vm = struct {
                         return self.push(val);
                     },
                     .string => |name| {
-                        if (Value.builtins.get(name)) |val| {
+                        if (_builtin.builtins.get(name)) |val| {
                             const builtin = val.native;
-                            const result = (try builtin.func(&[_]*Value{left})).*;
 
                             //create a shallow copy
                             const res = try self.newValue();
-                            res.* = result;
+                            res.* = (builtin.func(self, &[_]*Value{left}) catch |_| return Error.InvalidOperator).*;
 
                             return self.push(res);
                         }
@@ -694,8 +693,8 @@ pub const Vm = struct {
         try self.run(code);
 
         // Get all constants exposed by the source file
-        var attributes = Value.Map.init(&self.arena.allocator);
-        try attributes.ensureCapacity(code.symbols.items().len);
+        var attributes = Value.Map{};
+        try attributes.ensureCapacity(&self.arena.allocator, code.symbols.items().len);
         for (code.symbols.items()) |entry, i| {
             const symbol: compiler.Compiler.Symbol = entry.value;
             std.debug.assert(symbol.scope == .global);

@@ -35,7 +35,7 @@ pub const Value = union(Type) {
     list: List,
     map: Map,
     native: struct {
-        func: BuiltinFn,
+        func: NativeFn,
         arg_len: usize,
     },
     module: struct {
@@ -179,18 +179,9 @@ pub const Value = union(Type) {
         return std.meta.TagPayloadType(Value, self.lufType());
     }
 
-    pub const List = std.ArrayList(*Value);
-    pub const Map = std.HashMap(*const Value, *Value, hash, eql, true);
-
-    pub const builtins = std.ComptimeStringMap(Value, .{
-        .{ "len", len_func },
-        .{ "add", add_func },
-        .{ "pop", pop_func },
-    });
-
-    pub const builtin_keys = &[_][]const u8{
-        "len", "add", "pop",
-    };
+    pub const List = std.ArrayListUnmanaged(*Value);
+    pub const Map = std.HashMapUnmanaged(*const Value, *Value, hash, eql, true);
+    pub const NativeFn = fn (vm: *@import("vm.zig").Vm, args: []*Value) anyerror!*Value;
 };
 
 /// Scope maps identifiers to their names and can be used
@@ -248,67 +239,3 @@ pub const Scope = struct {
         self.* = undefined;
     }
 };
-
-pub const BuiltinError = error{ OutOfMemory, UnsupportedType, MismatchingTypes };
-const BuiltinFn = fn (args: []*Value) BuiltinError!*Value;
-const len_func = Value{ .native = .{ .func = len, .arg_len = 0 } };
-const add_func = Value{ .native = .{ .func = add, .arg_len = 1 } };
-const pop_func = Value{ .native = .{ .func = pop, .arg_len = 0 } };
-
-/// Returns the length of the `Value`.
-/// Supports strings, arrays and maps.
-fn len(args: []*Value) BuiltinError!*Value {
-    std.debug.assert(args.len == 1);
-    const length: i64 = switch (args[0].*) {
-        .string => |val| @intCast(i64, val.len),
-        .list => |list| @intCast(i64, list.items.len),
-        .map => |map| @intCast(i64, map.items().len),
-        else => return BuiltinError.UnsupportedType,
-    };
-    return &Value{ .integer = length };
-}
-
-/// Appends a new value to the list
-fn add(args: []*Value) BuiltinError!*Value {
-    std.debug.assert(args.len >= 2);
-    return switch (args[0].*) {
-        .list => |*list| {
-            const val = args[args.len - 1];
-            if (list.items.len > 0) {
-                if (list.items[0].* != std.meta.activeTag(val.*)) {
-                    return BuiltinError.MismatchingTypes;
-                }
-            }
-            try list.append(val);
-            return args[0];
-        },
-        .map => |*map| {
-            const key = args[args.len - 2];
-            const val = args[args.len - 1];
-            if (map.items().len > 0) {
-                const entry = map.items()[0];
-                if (entry.key.* != std.meta.activeTag(key.*)) {
-                    return BuiltinError.MismatchingTypes;
-                }
-                if (entry.value.* != std.meta.activeTag(val.*)) {
-                    return BuiltinError.MismatchingTypes;
-                }
-            }
-            try map.put(key, val);
-            return args[0];
-        },
-        else => BuiltinError.UnsupportedType,
-    };
-}
-
-/// Pops the last argument of a list
-fn pop(args: []*Value) BuiltinError!*Value {
-    std.debug.assert(args.len == 1);
-    return switch (args[0].*) {
-        .list => |*list| {
-            const val = list.pop();
-            return val;
-        },
-        else => BuiltinError.UnsupportedType,
-    };
-}
