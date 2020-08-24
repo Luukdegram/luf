@@ -630,7 +630,7 @@ pub const Vm = struct {
     /// Expects the current instruction pointer.
     /// This will also return the new instruction pointer
     ///
-    /// `instructions` is required to detect if we can optimize tail recursion
+    /// `next` is required to detect if we can optimize tail recursion
     fn analFunctionCall(self: *Vm, inst: byte_code.Instruction, next: byte_code.Instruction) Error!void {
         const arg_len = inst.ptr;
         const val = self.stack[self.sp - (1 + arg_len)];
@@ -657,18 +657,6 @@ pub const Vm = struct {
         });
 
         self.sp = self.frame().sp + val.function.locals + 1;
-    }
-
-    /// Analyzes for argument length and then calls the builtin function
-    /// Returns the result on the stack
-    fn analBuiltinFunctionCall(self: *Vm, val: *const Value) Error!void {
-        std.debug.assert(val.* == .native);
-
-        // insert the arguments lower on the stack
-        // so they can be called correctly by analIndex
-        var i: usize = 0;
-        while (i < val.native.arg_len) : (i += 1)
-            self.stack[self.sp - val.native.arg_len - i] = self.pop().?;
     }
 
     /// Reads the file name, open it, and compile its source code.
