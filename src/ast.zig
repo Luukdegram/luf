@@ -48,6 +48,7 @@ pub const Node = union(NodeType) {
     @"continue": *Continue,
     @"break": *Break,
     range: *Range,
+    @"enum": *Enum,
 
     /// Possible Nodes which are supported
     pub const NodeType = enum {
@@ -77,6 +78,7 @@ pub const Node = union(NodeType) {
         @"continue",
         @"break",
         range,
+        @"enum",
     };
 
     /// Represents a String
@@ -312,5 +314,11 @@ pub const Node = union(NodeType) {
         token: Token,
         left: Node,
         right: Node,
+    };
+
+    /// Represents an Enum declaration i.e. const my_enum = enum{}
+    pub const Enum = struct {
+        token: Token,
+        nodes: []Node,
     };
 };

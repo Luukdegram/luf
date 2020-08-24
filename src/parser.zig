@@ -123,7 +123,7 @@ pub const Parser = struct {
     /// Returns `Error.ParserError` and appends an error message to the `errors` list.
     fn fail(self: *Parser, comptime msg: []const u8) Error {
         std.debug.print(msg ++ "\n", .{self.source[self.peek_token.start..self.peek_token.end]});
-        try self.errors.add(msg, self.current_token.start, .err);
+        try self.errors.add(msg, self.peek_token.start, .err);
         return Error.ParserError;
     }
 
@@ -216,6 +216,7 @@ pub const Parser = struct {
             .nil => try self.parseNil(),
             .@"break" => try self.parseBreak(),
             .@"continue" => try self.parseContinue(),
+            .@"enum" => try self.parseEnum(),
             else => return self.fail("Unexpected token '{}'"),
         };
 
@@ -428,9 +429,8 @@ pub const Parser = struct {
 
         func.params = try self.parseFunctionParameters();
 
-        if (!self.expectPeek(.left_brace)) {
+        if (!self.expectPeek(.left_brace))
             return self.fail("Expected '{{' but found '{}'");
-        }
 
         func.body = try self.parseBlockStatement();
 
@@ -458,9 +458,8 @@ pub const Parser = struct {
             try list.append(try self.parseIdentifier());
         }
 
-        if (!self.expectPeek(.right_parenthesis)) {
+        if (!self.expectPeek(.right_parenthesis))
             return self.fail("Expected ')' but found '{}'");
-        }
 
         return list.toOwnedSlice();
     }
@@ -497,9 +496,8 @@ pub const Parser = struct {
             try list.append(try self.parseExpression(.lowest));
         }
 
-        if (!self.expectPeek(end_type)) {
+        if (!self.expectPeek(end_type))
             return self.fail("Expected ']' or ')' but found '{}'");
-        }
 
         return list.toOwnedSlice();
     }
@@ -517,15 +515,13 @@ pub const Parser = struct {
         map.* = .{ .token = self.current_token, .value = undefined };
 
         var pairs = std.ArrayList(Node).init(self.allocator);
-        errdefer pairs.deinit();
 
         while (!self.peekIsType(.right_brace)) {
             self.next();
             const pair = try self.parsePair();
             try pairs.append(pair);
-            if (!self.peekIsType(.right_brace) and !self.expectPeek(.comma)) {
+            if (!self.peekIsType(.right_brace) and !self.expectPeek(.comma))
                 return self.fail("Expected token ',' but found {}");
-            }
         }
 
         if (!self.expectPeek(.right_brace)) {
@@ -705,6 +701,33 @@ pub const Parser = struct {
             .token = self.current_token,
         };
         return Node{ .@"continue" = node };
+    }
+
+    /// Parses an enum statement
+    fn parseEnum(self: *Parser) Error!Node {
+        const node = try self.allocator.create(Node.Enum);
+        var enums = std.ArrayList(Node).init(self.allocator);
+        node.* = .{
+            .token = self.current_token,
+            .nodes = undefined,
+        };
+
+        if (!self.expectPeek(.left_brace)) return self.fail("Expected token '{{' but instead found '{}'");
+        self.next();
+        try enums.append(try self.parseIdentifier());
+
+        while (self.peekIsType(.comma)) {
+            self.next();
+            self.next();
+            try enums.append(try self.parseIdentifier());
+        }
+
+        if (!self.peekIsType(.right_brace)) return self.fail("Expected token '}}' but instead found '{}'");
+        self.next();
+
+        node.nodes = enums.toOwnedSlice();
+
+        return Node{ .@"enum" = node };
     }
 
     /// Parses the import expression i.e. const std = import("std")
@@ -1185,4 +1208,20 @@ test "For loop" {
     testing.expectEqualStrings("i", loop.index.?.identifier.value);
     testing.expect(loop.block.block_statement.nodes.len == 1);
     testing.expectEqualStrings("id", loop.block.block_statement.nodes[0].expression.value.identifier.value);
+}
+
+test "Enum" {
+    const input = "enum{value, another_value, third_value}";
+    const allocator = testing.allocator;
+
+    const tree = try parse(allocator, input);
+    defer tree.deinit();
+
+    testing.expect(tree.nodes.len == 1);
+
+    const enum_val = tree.nodes[0].expression.value.@"enum";
+    testing.expect(enum_val.nodes.len == 3);
+    testing.expectEqualStrings("value", enum_val.nodes[0].identifier.value);
+    testing.expectEqualStrings("another_value", enum_val.nodes[1].identifier.value);
+    testing.expectEqualStrings("third_value", enum_val.nodes[2].identifier.value);
 }
