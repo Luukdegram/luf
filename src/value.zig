@@ -86,6 +86,13 @@ pub const Value = union(Type) {
         }
     },
 
+    /// Unwraps the `Value` union into the type of the active tag.
+    /// Returns null if the wanted tag is not active.
+    pub fn unwrapAs(self: *const Value, comptime tag: Type) ?std.meta.TagPayloadType(Value, tag) {
+        if (self.* != tag) return null;
+        return @field(self, @tagName(tag));
+    }
+
     pub var True = Value{ .boolean = true };
     pub var False = Value{ .boolean = false };
     pub var Nil: Value = .nil;

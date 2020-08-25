@@ -311,13 +311,14 @@ pub const Vm = struct {
             return self.analStringCmp(op, left.string, right.string);
         }
 
-        if (!left.isType(.boolean) or !right.isType(.boolean)) return Error.InvalidOperator;
+        const left_bool = left.unwrapAs(.boolean) orelse return Error.InvalidOperator;
+        const right_bool = right.unwrapAs(.boolean) orelse return Error.InvalidOperator;
 
         return switch (op) {
-            .equal => self.push(if (left.boolean == right.boolean) &Value.True else &Value.False),
-            .not_equal => self.push(if (left.boolean != right.boolean) &Value.True else &Value.False),
-            .@"and" => self.push(if (left.boolean and right.boolean) &Value.True else &Value.False),
-            .@"or" => self.push(if (left.boolean or right.boolean) &Value.True else &Value.False),
+            .equal => self.push(if (left_bool == right_bool) &Value.True else &Value.False),
+            .not_equal => self.push(if (left_bool != right_bool) &Value.True else &Value.False),
+            .@"and" => self.push(if (left_bool and right_bool) &Value.True else &Value.False),
+            .@"or" => self.push(if (left_bool or right_bool) &Value.True else &Value.False),
             else => Error.InvalidOperator,
         };
     }
@@ -352,12 +353,13 @@ pub const Vm = struct {
     /// Analyzes and executes a negation
     fn analNegation(self: *Vm) Error!void {
         const right = self.pop() orelse return Error.MissingValue;
-        if (right.* != .integer) return Error.InvalidOperator;
+        const integer = right.unwrapAs(.integer) orelse return Error.InvalidOperator;
 
         const res = try self.newValue();
-        res.* = .{ .integer = -right.integer };
+        res.* = .{ .integer = -integer };
         return self.push(res);
     }
+
     /// Analyzes and executes the '!' operator
     fn analNot(self: *Vm) Error!void {
         const right = self.pop() orelse return Error.MissingValue;
@@ -374,10 +376,10 @@ pub const Vm = struct {
     fn analBitwiseNot(self: *Vm) Error!void {
         const value = self.pop() orelse return Error.MissingValue;
 
-        if (!value.isType(.integer)) return Error.InvalidOperator;
+        const integer = value.unwrapAs(.integer) orelse return Error.InvalidOperator;
 
         const ret = try self.newValue();
-        ret.* = .{ .integer = ~value.integer };
+        ret.* = .{ .integer = ~integer };
         return self.push(ret);
     }
 
@@ -478,9 +480,8 @@ pub const Vm = struct {
     /// Finally, a true or false is pushed to determine if we should end the for loop
     fn analNextIter(self: *Vm) Error!void {
         const value = self.stack[self.sp - 1];
-        if (!value.isType(.iterable)) return Error.InvalidOperator;
 
-        var iterator = value.iterable;
+        var iterator = value.unwrapAs(.iterable) orelse return Error.InvalidOperator;
         const next = try self.newValue();
         try iterator.next(&self.arena.allocator, next);
         if (!next.isType(.nil)) {
@@ -510,13 +511,12 @@ pub const Vm = struct {
     fn analRange(self: *Vm) Error!void {
         const left = self.stack[self.sp - 2];
         const right = self.stack[self.sp - 1];
-        if (!left.isType(.integer) or !right.isType(.integer)) return Error.InvalidOperator;
 
         const ret = try self.newValue();
         ret.* = .{
             .range = .{
-                .start = left.integer,
-                .end = right.integer,
+                .start = left.unwrapAs(.integer) orelse return Error.InvalidOperator,
+                .end = right.unwrapAs(.integer) orelse return Error.InvalidOperator,
             },
         };
         return self.push(ret);
@@ -596,10 +596,10 @@ pub const Vm = struct {
                 }
             },
             ._enum => |enm| {
-                if (!index.isType(.string)) return error.InvalidOperator;
+                const enum_value = index.unwrapAs(.string) orelse return Error.InvalidOperator;
 
                 for (enm) |field, i| {
-                    if (std.mem.eql(u8, field, index.string)) {
+                    if (std.mem.eql(u8, field, enum_value)) {
                         const ret = try self.newValue();
                         ret.* = .{ .integer = @intCast(i64, i) };
                         return self.push(ret);
@@ -738,19 +738,19 @@ pub const Vm = struct {
 
     /// Loads a module, if not existing, compiles the source code of the given file name
     fn loadModule(self: *Vm) Error!void {
-        const name = self.pop().?;
-        if (!name.isType(.string)) return Error.InvalidOperator;
+        const val = self.pop().?;
+        const name = val.unwrapAs(.string) orelse return Error.InvalidOperator;
 
-        const mod = self.imports.get(name.string) orelse blk: {
-            const imp = try self.importModule(name.string);
-            try self.imports.put(name.string, imp);
+        const mod = self.imports.get(name) orelse blk: {
+            const imp = try self.importModule(name);
+            try self.imports.put(name, imp);
             break :blk imp;
         };
 
         const ret = try self.newValue();
         ret.* = .{
             .module = .{
-                .name = name.string,
+                .name = name,
                 .attributes = mod,
             },
         };
