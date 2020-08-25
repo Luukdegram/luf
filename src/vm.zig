@@ -128,6 +128,7 @@ pub const Vm = struct {
                 .not => try self.analNot(),
                 .bitwise_not => try self.analBitwiseNot(),
                 .load_nil => try self.push(&Value.Nil),
+                .load_void => try self.push(&Value.Void),
                 .jump => current_frame.ip = inst.ptr - 1,
                 .jump_false => {
                     const condition = self.pop().?;
@@ -594,6 +595,19 @@ pub const Vm = struct {
                     return error.MissingValue;
                 }
             },
+            ._enum => |enm| {
+                if (!index.isType(.string)) return error.InvalidOperator;
+
+                for (enm) |field, i| {
+                    if (std.mem.eql(u8, field, index.string)) {
+                        const ret = try self.newValue();
+                        ret.* = .{ .integer = @intCast(i64, i) };
+                        return self.push(ret);
+                    }
+                }
+
+                return error.InvalidOperator;
+            },
             else => return error.InvalidOperator,
         }
     }
@@ -707,6 +721,10 @@ pub const Vm = struct {
             // Create a copy of the function instructions as we're free'ing all compiler memory on scope exit
             if (value.isType(.function)) {
                 value.function.instructions = try self.arena.allocator.dupe(byte_code.Instruction, value.function.instructions);
+            }
+
+            if (value.isType(._enum)) {
+                value._enum = try self.arena.allocator.dupe([]const u8, value._enum);
             }
 
             attributes.putAssumeCapacityNoClobber(name, value);
@@ -846,7 +864,7 @@ test "Conditional" {
         if (@TypeOf(case.expected) == comptime_int) {
             testing.expect(case.expected == vm.peek().integer);
         } else {
-            testing.expect(vm.peek().* == .nil);
+            testing.expect(vm.peek().* == ._void);
         }
     }
 }
@@ -1125,4 +1143,21 @@ test "For loop - String" {
     defer vm.deinit();
 
     testing.expectEqualStrings("helloworld", vm.peek().string);
+}
+
+test "Enum expression and comparison" {
+    const input =
+        \\
+        \\const x = enum{value, another_value} 
+        \\const enum_value = x.another_value 
+        \\if (enum_value == x.another_value) {
+        \\  5        
+        \\}
+    ;
+    var code = try compiler.compile(testing.allocator, input);
+    defer code.deinit();
+    var vm = try run(code, testing.allocator);
+    defer vm.deinit();
+
+    testing.expectEqual(@as(i64, 5), vm.peek().integer);
 }

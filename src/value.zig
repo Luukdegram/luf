@@ -18,6 +18,8 @@ pub const Type = enum {
     module,
     iterable,
     range,
+    _enum,
+    _void,
 };
 
 /// Value depending on its type
@@ -46,6 +48,8 @@ pub const Value = union(Type) {
         start: i64,
         end: i64,
     },
+    _enum: [][]const u8,
+    _void,
     iterable: struct {
         expose_index: bool,
         index: usize,
@@ -84,7 +88,8 @@ pub const Value = union(Type) {
 
     pub var True = Value{ .boolean = true };
     pub var False = Value{ .boolean = false };
-    pub var Nil = Value{ .nil = {} };
+    pub var Nil: Value = .nil;
+    pub var Void: Value = ._void;
 
     /// Frees Value's memory
     pub fn deinit(self: Value, alloc: *Allocator) void {

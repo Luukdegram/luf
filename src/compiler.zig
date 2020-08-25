@@ -182,6 +182,9 @@ pub const Compiler = struct {
                 if (val.isType(.function)) {
                     self.allocator.free(val.function.instructions);
                 }
+                if (val.isType(._enum)) {
+                    self.allocator.free(val._enum);
+                }
             }
             self.allocator.free(self.constants);
             self.symbols.deinit();
@@ -268,7 +271,7 @@ pub const Compiler = struct {
                 if (self.lastInstIs(.pop))
                     self.removeLastInst()
                 else if (!self.lastInstIs(.return_value))
-                    _ = try self.emit(.load_nil);
+                    _ = try self.emit(.load_void);
             },
             .infix => |inf| {
                 try self.compile(inf.left);
@@ -336,7 +339,7 @@ pub const Compiler = struct {
 
                     if (self.lastInstIs(.pop)) self.removeLastInst();
                 } else {
-                    _ = try self.emit(.load_nil);
+                    _ = try self.emit(.load_void);
                 }
 
                 // set the true jump to the current stack position
@@ -551,6 +554,19 @@ pub const Compiler = struct {
                 try self.compile(range.right);
                 _ = try self.emit(.make_range);
             },
+            .@"enum" => |enm| {
+                var enums = try std.ArrayList([]const u8).initCapacity(self.allocator, enm.nodes.len);
+                errdefer enums.deinit();
+
+                for (enm.nodes) |n| {
+                    if (n != .identifier) return Error.CompilerError;
+
+                    enums.appendAssumeCapacity(n.identifier.value);
+                }
+
+                const pos = try self.addConstant(.{ ._enum = enums.toOwnedSlice() });
+                _ = try self.emitOp(.load_const, pos);
+            },
             else => {},
         }
     }
@@ -626,7 +642,7 @@ test "Compile AST to bytecode" {
                 .jump_false,
                 .load_const,
                 .jump,
-                .load_nil,
+                .load_void,
                 .pop,
                 .load_const,
                 .pop,
@@ -711,7 +727,7 @@ test "Compile AST to bytecode" {
             .consts = &[_]Value{Value{ .function = .{ .arg_len = 0, .locals = 0, .instructions = undefined } }},
             .opcodes = &[_]bytecode.Opcode{
                 .jump,
-                .load_nil,
+                .load_void,
                 .@"return",
                 .load_const,
                 .pop,

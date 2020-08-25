@@ -705,7 +705,7 @@ pub const Parser = struct {
 
     /// Parses an enum statement
     fn parseEnum(self: *Parser) Error!Node {
-        const node = try self.allocator.create(Node.Enum);
+        const node = try self.allocator.create(Node.EnumLiteral);
         var enums = std.ArrayList(Node).init(self.allocator);
         node.* = .{
             .token = self.current_token,
@@ -1211,7 +1211,7 @@ test "For loop" {
 }
 
 test "Enum" {
-    const input = "enum{value, another_value, third_value}";
+    const input = "enum{value, another_value, third_value }";
     const allocator = testing.allocator;
 
     const tree = try parse(allocator, input);

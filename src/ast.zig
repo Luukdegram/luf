@@ -48,7 +48,7 @@ pub const Node = union(NodeType) {
     @"continue": *Continue,
     @"break": *Break,
     range: *Range,
-    @"enum": *Enum,
+    @"enum": *EnumLiteral,
 
     /// Possible Nodes which are supported
     pub const NodeType = enum {
@@ -317,7 +317,7 @@ pub const Node = union(NodeType) {
     };
 
     /// Represents an Enum declaration i.e. const my_enum = enum{}
-    pub const Enum = struct {
+    pub const EnumLiteral = struct {
         token: Token,
         nodes: []Node,
     };
