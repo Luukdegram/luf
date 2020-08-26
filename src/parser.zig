@@ -140,6 +140,7 @@ pub const Parser = struct {
             .comment => self.parseComment(),
             .constant, .mutable => self.parseDeclaration(),
             .@"return" => self.parseReturn(),
+            .@"switch" => self.parseSwitchStatement(),
             else => self.parseExpressionStatement(),
         };
     }
@@ -745,6 +746,52 @@ pub const Parser = struct {
         return Node{ .import = import };
     }
 
+    /// Parses a switch statement into the `Switch` `Node`.
+    fn parseSwitchStatement(self: *Parser) Error!Node {
+        const node = try self.allocator.create(Node.SwitchLiteral);
+        node.* = .{ .token = self.current_token, .capture = undefined, .prongs = undefined };
+
+        if (!self.expectPeek(.left_parenthesis)) return self.fail("Expected token '(' but found '{}'");
+
+        self.next();
+        node.capture = try self.parseExpression(.lowest);
+
+        if (!self.expectPeek(.right_parenthesis)) return self.fail("Expected token ')' but found '{}'");
+        if (!self.expectPeek(.left_brace)) return self.fail("Expected token '{{', but found '{}'");
+
+        self.next();
+        var prongs = std.ArrayList(Node).init(self.allocator);
+
+        try prongs.append(try self.parseSwitchProng());
+
+        while (self.peekIsType(.comma)) {
+            self.next();
+            self.next();
+            try prongs.append(try self.parseSwitchProng());
+        }
+        node.prongs = prongs.toOwnedSlice();
+
+        if (!self.expectPeek(.right_brace)) return self.fail("Expected token '}}' but found '{}'");
+
+        return Node{ .switch_statement = node };
+    }
+
+    fn parseSwitchProng(self: *Parser) Error!Node {
+        const node = try self.allocator.create(Node.SwitchProng);
+        node.* = .{ .token = undefined, .left = try self.parseExpression(.lowest), .right = undefined };
+
+        if (!self.expectPeek(.colon)) return self.fail("Expected token ':' but found '{}'");
+        node.token = self.current_token;
+        self.next();
+
+        node.right = if (self.currentIsType(.left_brace))
+            try self.parseBlockStatement()
+        else
+            try self.parseExpressionStatement();
+
+        return Node{ .switch_prong = node };
+    }
+
     /// Determines if the next token is the expected token or not.
     /// Incase the next token is the wanted token, retun true and retrieve next token.
     fn expectPeek(self: *Parser, token_type: Token.TokenType) bool {
@@ -1224,4 +1271,32 @@ test "Enum" {
     testing.expectEqualStrings("value", enum_val.nodes[0].identifier.value);
     testing.expectEqualStrings("another_value", enum_val.nodes[1].identifier.value);
     testing.expectEqualStrings("third_value", enum_val.nodes[2].identifier.value);
+}
+
+test "Enum" {
+    const input =
+        \\switch(5){
+        \\  1: 1 + 1,
+        \\  2: {
+        \\          if (true) {
+        \\              1 + 2
+        \\          } 
+        \\      },
+        \\  3: 2 + 2
+        \\}
+    ;
+    const allocator = testing.allocator;
+
+    const tree = try parse(allocator, input);
+    defer tree.deinit();
+
+    testing.expect(tree.nodes.len == 1);
+
+    const switch_stmt = tree.nodes[0].switch_statement;
+    testing.expect(switch_stmt.capture == .int_lit);
+    testing.expect(switch_stmt.prongs.len == 3);
+    for (switch_stmt.prongs) |p, i| {
+        testing.expectEqual(@as(u64, i + 1), p.switch_prong.left.int_lit.value);
+    }
+    testing.expect(switch_stmt.prongs[1].switch_prong.right == .block_statement);
 }

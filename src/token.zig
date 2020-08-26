@@ -77,6 +77,7 @@ pub const Token = struct {
         @"continue",
         @"break",
         @"enum",
+        @"switch",
     };
 
     /// Lookup 'table' to check if an identifier is a keyword
@@ -98,6 +99,7 @@ pub const Token = struct {
         .{ "break", .@"break" },
         .{ "continue", .@"continue" },
         .{ "enum", .@"enum" },
+        .{ "switch", .@"switch" },
     });
 
     /// Returns the string value of the token
@@ -163,6 +165,7 @@ pub const Token = struct {
             .@"break" => "break",
             .@"continue" => "continue",
             .@"enum" => "enum",
+            .@"switch" => "switch",
         };
     }
 };
@@ -193,6 +196,7 @@ test "Keywords" {
         "continue",
         "break",
         "enum",
+        "switch",
     };
 
     for (keywords) |keyword| {

@@ -49,6 +49,8 @@ pub const Node = union(NodeType) {
     @"break": *Break,
     range: *Range,
     @"enum": *EnumLiteral,
+    switch_statement: *SwitchLiteral,
+    switch_prong: *SwitchProng,
 
     /// Possible Nodes which are supported
     pub const NodeType = enum {
@@ -79,6 +81,8 @@ pub const Node = union(NodeType) {
         @"break",
         range,
         @"enum",
+        switch_statement,
+        switch_prong,
     };
 
     /// Represents a String
@@ -90,13 +94,13 @@ pub const Node = union(NodeType) {
     /// Node representing an array
     pub const ArrayLiteral = struct {
         token: Token,
-        value: []Node,
+        value: []const Node,
     };
 
     /// Node representing a map
     pub const MapLiteral = struct {
         token: Token,
-        value: []Node,
+        value: []const Node,
     };
 
     /// Node presents a key/value pair for inside a `MapLiteral`
@@ -234,7 +238,7 @@ pub const Node = union(NodeType) {
     /// Nodes contains a slice of Nodes
     pub const BlockStatement = struct {
         token: Token,
-        nodes: []Node,
+        nodes: []const Node,
     };
 
     /// Node representing a boolean
@@ -255,7 +259,7 @@ pub const Node = union(NodeType) {
     /// parameters and the body of the function as a `BlockStatement`
     pub const FunctionLiteral = struct {
         token: Token,
-        params: []Node,
+        params: []const Node,
         body: Node,
     };
 
@@ -264,7 +268,7 @@ pub const Node = union(NodeType) {
     pub const CallExpression = struct {
         token: Token,
         function: Node,
-        arguments: []Node,
+        arguments: []const Node,
     };
 
     /// Represents a while loop, contains the condition and the block
@@ -319,6 +323,20 @@ pub const Node = union(NodeType) {
     /// Represents an Enum declaration i.e. const my_enum = enum{}
     pub const EnumLiteral = struct {
         token: Token,
-        nodes: []Node,
+        nodes: []const Node,
+    };
+
+    /// Represents a Switch statement i.e. switch(x) {}
+    pub const SwitchLiteral = struct {
+        token: Token,
+        capture: Node,
+        prongs: []const Node,
+    };
+
+    /// Represents the pong inside a switch statement, i.e.
+    pub const SwitchProng = struct {
+        token: Token,
+        left: Node,
+        right: Node,
     };
 };
