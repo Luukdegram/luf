@@ -54,6 +54,8 @@ pub const Opcode = enum(u8) {
     assign_sub,
     assign_mul,
     assign_div,
+    // same as equal but does not pop the lhs value for switch prongs
+    match,
 
     // referencing
     get_by_index,

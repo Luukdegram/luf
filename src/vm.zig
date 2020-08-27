@@ -177,6 +177,7 @@ pub const Vm = struct {
                 .make_iter => try self.analIter(inst),
                 .iter_next => try self.analNextIter(),
                 .make_range => try self.analRange(),
+                .match => try self.execSwitchProng(),
                 else => {},
             }
         }
@@ -576,7 +577,7 @@ pub const Vm = struct {
 
                             //create a shallow copy
                             const res = try self.newValue();
-                            res.* = (builtin.func(self, &[_]*Value{left}) catch |_| return Error.InvalidOperator).*;
+                            res.* = (builtin.func(self, &[_]*Value{left}) catch return Error.InvalidOperator).*;
 
                             return self.push(res);
                         }
@@ -756,6 +757,31 @@ pub const Vm = struct {
         };
 
         return self.push(ret);
+    }
+
+    /// Compares switch' capture and the current prong.
+    /// Unlike execCmp, this does not pop the lhs value from the stack, to maintain it's position
+    /// as it's used for the other prongs. it will be popped at the end of the switch statement.
+    fn execSwitchProng(self: *Vm) Error!void {
+        const prong_value = self.pop().?;
+
+        switch (prong_value.*) {
+            .integer => |integer| {
+                const capture = self.stack[self.sp - 1].unwrapAs(.integer) orelse return Error.InvalidOperator;
+                return self.analIntCmp(.equal, capture, integer);
+            },
+            .string => |string| {
+                const capture = self.stack[self.sp - 1].unwrapAs(.string) orelse return Error.InvalidOperator;
+                return self.analStringCmp(.equal, capture, string);
+            },
+            .range => |range| {
+                // - 3 because stack contains start and end of the range
+                const capture = self.stack[self.sp - 3].unwrapAs(.integer) orelse return Error.InvalidOperator;
+
+                return self.push(if (capture >= range.start and capture <= range.end) &Value.True else &Value.False);
+            },
+            else => return Error.InvalidOperator,
+        }
     }
 
     /// Creates a new Value on the heap which will be freed on scope exits (call_stack pops)
@@ -1160,4 +1186,22 @@ test "Enum expression and comparison" {
     defer vm.deinit();
 
     testing.expectEqual(@as(i64, 5), vm.peek().integer);
+}
+
+test "Enum expression and comparison" {
+    const input =
+        \\const range = 0..9
+        \\mut x = 0 
+        \\switch(5) {
+        \\  4: x += 10,
+        \\  range: x += 30,
+        \\  5: x += 20     
+        \\}
+        \\x
+    ;
+    var code = try compiler.compile(testing.allocator, input);
+    defer code.deinit();
+    var vm = try run(code, testing.allocator);
+    defer vm.deinit();
+    testing.expectEqual(@as(i64, 50), vm.peek().integer);
 }

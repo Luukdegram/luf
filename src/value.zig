@@ -27,6 +27,7 @@ pub const Value = union(Type) {
     integer: i64,
     boolean: bool,
     string: []const u8,
+    _void,
     nil,
     _return: *Value,
     function: struct {
@@ -49,7 +50,6 @@ pub const Value = union(Type) {
         end: i64,
     },
     _enum: [][]const u8,
-    _void,
     iterable: struct {
         expose_index: bool,
         index: usize,

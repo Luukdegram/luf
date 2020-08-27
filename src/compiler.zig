@@ -567,6 +567,23 @@ pub const Compiler = struct {
                 const pos = try self.addConstant(.{ ._enum = enums.toOwnedSlice() });
                 _ = try self.emitOp(.load_const, pos);
             },
+            // currently, switches operate on runtime until static types are implemented
+            .switch_statement => |sw| {
+                try self.compile(sw.capture);
+
+                for (sw.prongs) |p, i| {
+                    const prong = p.switch_prong;
+                    // compile lhs of prong
+                    try self.compile(prong.left);
+
+                    // match with capture, capture is not popped from stack until the end
+                    _ = try self.emit(.match);
+                    const last_jump_false = try self.emit(.jump_false);
+                    try self.compile(prong.right);
+
+                    self.instructions.items[last_jump_false].ptr = @intCast(u16, self.instructions.items.len);
+                }
+            },
             else => {},
         }
     }
