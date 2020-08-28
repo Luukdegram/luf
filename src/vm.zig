@@ -104,7 +104,7 @@ pub const Vm = struct {
                 .greater_than,
                 .@"and",
                 .@"or",
-                => try self.analCmp(inst.op),
+                => try self.execCmp(inst.op),
                 .add,
                 .sub,
                 .mul,
@@ -115,18 +115,18 @@ pub const Vm = struct {
                 .bitwise_xor,
                 .shift_left,
                 .shift_right,
-                => try self.analBinOp(inst.op),
+                => try self.execBinOp(inst.op),
                 .assign_add,
                 .assign_div,
                 .assign_mul,
                 .assign_sub,
-                => try self.analAssignAndBinOp(inst.op),
+                => try self.execAssignAndBinOp(inst.op),
                 .pop => _ = self.pop(),
                 .load_true => try self.push(&Value.True),
                 .load_false => try self.push(&Value.False),
-                .minus => try self.analNegation(),
-                .not => try self.analNot(),
-                .bitwise_not => try self.analBitwiseNot(),
+                .minus => try self.execNegation(),
+                .not => try self.execNot(),
+                .bitwise_not => try self.execBitwiseNot(),
                 .load_nil => try self.push(&Value.Nil),
                 .load_void => try self.push(&Value.Void),
                 .jump => current_frame.ip = inst.ptr - 1,
@@ -142,10 +142,10 @@ pub const Vm = struct {
                         try self.globals.append(val);
                 },
                 .load_global => try self.push(self.globals.items[inst.ptr]),
-                .make_array => try self.analArray(inst),
-                .make_map => try self.analMap(inst),
-                .get_by_index => try self.analGetValue(),
-                .set_by_index => try self.analSetValue(),
+                .make_array => try self.makeArray(inst),
+                .make_map => try self.makeMap(inst),
+                .get_by_index => try self.getIndexValue(),
+                .set_by_index => try self.setIndexValue(),
                 .@"return" => {
                     const f = self.call_stack.pop();
                     self.sp = f.sp - 1;
@@ -162,7 +162,7 @@ pub const Vm = struct {
                     // push the return value back to the stack
                     try self.push(rv);
                 },
-                .call => try self.analFunctionCall(inst, current_frame.instructions[current_frame.ip + 1]),
+                .call => try self.execFunctionCall(inst, current_frame.instructions[current_frame.ip + 1]),
                 .bind_local => self.stack[current_frame.sp + inst.ptr] = self.pop().?,
                 .load_local => try self.push(self.stack[current_frame.sp + inst.ptr]),
                 .assign_global => {
@@ -174,9 +174,9 @@ pub const Vm = struct {
                 },
                 .assign_local => self.stack[current_frame.sp + inst.ptr] = self.pop().?,
                 .load_module => try self.loadModule(),
-                .make_iter => try self.analIter(inst),
-                .iter_next => try self.analNextIter(),
-                .make_range => try self.analRange(),
+                .make_iter => try self.makeIterable(inst),
+                .iter_next => try self.execNextIter(),
+                .make_range => try self.makeRange(),
                 .match => try self.execSwitchProng(),
                 else => {},
             }
@@ -213,7 +213,7 @@ pub const Vm = struct {
     }
 
     /// Analyzes and executes a binary operation.
-    fn analBinOp(self: *Vm, op: byte_code.Opcode) Error!void {
+    fn execBinOp(self: *Vm, op: byte_code.Opcode) Error!void {
         // right is on the top of left, therefore we pop it first
         const right = self.pop() orelse return Error.MissingValue;
         const left = self.pop() orelse return Error.MissingValue;
@@ -268,7 +268,7 @@ pub const Vm = struct {
 
     /// Analyzes the instruction, ensures the lhs is an identifier and the rhs is an integer or string.
     /// Strings are only valid for the `assign_add` bytecode instruction
-    fn analAssignAndBinOp(self: *Vm, op: byte_code.Opcode) Error!void {
+    fn execAssignAndBinOp(self: *Vm, op: byte_code.Opcode) Error!void {
         const right = self.pop() orelse return Error.MissingValue;
         const left = self.pop() orelse return Error.MissingValue;
 
@@ -299,7 +299,7 @@ pub const Vm = struct {
     }
 
     /// Analyzes a then executes a comparison and pushes the return value on the stack
-    fn analCmp(self: *Vm, op: byte_code.Opcode) Error!void {
+    fn execCmp(self: *Vm, op: byte_code.Opcode) Error!void {
         // right is on the top of left, therefore we pop it first
         const right = self.pop() orelse return Error.MissingValue;
         const left = self.pop() orelse return Error.MissingValue;
@@ -352,7 +352,7 @@ pub const Vm = struct {
     }
 
     /// Analyzes and executes a negation
-    fn analNegation(self: *Vm) Error!void {
+    fn execNegation(self: *Vm) Error!void {
         const right = self.pop() orelse return Error.MissingValue;
         const integer = right.unwrapAs(.integer) orelse return Error.InvalidOperator;
 
@@ -362,7 +362,7 @@ pub const Vm = struct {
     }
 
     /// Analyzes and executes the '!' operator
-    fn analNot(self: *Vm) Error!void {
+    fn execNot(self: *Vm) Error!void {
         const right = self.pop() orelse return Error.MissingValue;
 
         const val = switch (right.*) {
@@ -374,7 +374,7 @@ pub const Vm = struct {
     }
 
     /// Executes the ~ operator
-    fn analBitwiseNot(self: *Vm) Error!void {
+    fn execBitwiseNot(self: *Vm) Error!void {
         const value = self.pop() orelse return Error.MissingValue;
 
         const integer = value.unwrapAs(.integer) orelse return Error.InvalidOperator;
@@ -385,9 +385,10 @@ pub const Vm = struct {
     }
 
     /// Analyzes the instruction and builds an array
-    fn analArray(self: *Vm, inst: byte_code.Instruction) Error!void {
+    fn makeArray(self: *Vm, inst: byte_code.Instruction) Error!void {
         const len = inst.ptr;
-        var list = try Value.List.initCapacity(&self.arena.allocator, len);
+        var list = Value.List{};
+        try list.resize(&self.arena.allocator, len);
         errdefer list.deinit(&self.arena.allocator);
 
         const res = try self.newValue();
@@ -396,27 +397,26 @@ pub const Vm = struct {
             return self.push(res);
         }
 
-        var index = self.sp - len;
         var list_type: Type = undefined;
-        var i: usize = 0;
+        var i: usize = 1;
 
-        while (i < len) : ({
+        while (i <= len) : ({
             i += 1;
-            index += 1;
         }) {
-            const val = self.stack[index];
-            if (i == 0)
+            const val = self.pop().?;
+
+            if (i == 1)
                 list_type = val.lufType()
             else if (!val.isType(list_type)) return Error.MissingValue;
-
-            try list.insert(&self.arena.allocator, i, val);
+            list.items[len - i] = val;
         }
+
         res.* = .{ .list = list };
         return self.push(res);
     }
 
     /// Analyzes and creates a new map
-    fn analMap(self: *Vm, inst: byte_code.Instruction) Error!void {
+    fn makeMap(self: *Vm, inst: byte_code.Instruction) Error!void {
         const len = inst.ptr / 2;
         var map = Value.Map{};
         errdefer map.deinit(&self.arena.allocator);
@@ -429,17 +429,15 @@ pub const Vm = struct {
 
         try map.ensureCapacity(&self.arena.allocator, len);
 
-        var index = self.sp - (len * 2);
         var key_type: Type = undefined;
         var value_type: Type = undefined;
         var i: usize = 0;
 
         while (i < len) : ({
             i += 1;
-            index += 2;
         }) {
-            const key = self.stack[index];
-            const value = self.stack[index + 1];
+            const value = self.pop().?;
+            const key = self.pop().?;
 
             if (i == 0) {
                 key_type = key.lufType();
@@ -451,19 +449,19 @@ pub const Vm = struct {
 
             map.putAssumeCapacity(key, value);
         }
-
         res.* = .{ .map = map };
         return self.push(res);
     }
 
     /// Creates a new iterable
-    fn analIter(self: *Vm, inst: byte_code.Instruction) Error!void {
+    fn makeIterable(self: *Vm, inst: byte_code.Instruction) Error!void {
         const iterable = self.pop() orelse return Error.MissingValue;
 
         switch (iterable.lufType()) {
             .list, .range, .string => {},
             else => return Error.InvalidOperator,
         }
+
         const value = try self.newValue();
         value.* = .{
             .iterable = .{
@@ -473,14 +471,16 @@ pub const Vm = struct {
             },
         };
 
+        self.sp += 2;
+
         return self.push(value);
     }
 
     /// Pops the iterator from the stack and retrieves the next value
     /// Pushes the iterator back, then the value and then the index if exposed
     /// Finally, a true or false is pushed to determine if we should end the for loop
-    fn analNextIter(self: *Vm) Error!void {
-        const value = self.stack[self.sp - 1];
+    fn execNextIter(self: *Vm) Error!void {
+        const value = self.pop().?;
 
         var iterator = value.unwrapAs(.iterable) orelse return Error.InvalidOperator;
         const next = try self.newValue();
@@ -496,7 +496,6 @@ pub const Vm = struct {
                 index.* = .{ .integer = @intCast(i64, iterator.index - 1) };
                 try self.push(index);
             }
-
             // push the capture on the stack
             try self.push(next);
 
@@ -509,9 +508,9 @@ pub const Vm = struct {
 
     /// Creates a range from 2 values
     /// Returns an error if lhs or rhs is not an integer
-    fn analRange(self: *Vm) Error!void {
-        const left = self.stack[self.sp - 2];
-        const right = self.stack[self.sp - 1];
+    fn makeRange(self: *Vm) Error!void {
+        const right = self.pop().?;
+        const left = self.pop().?;
 
         const ret = try self.newValue();
         ret.* = .{
@@ -524,7 +523,7 @@ pub const Vm = struct {
     }
 
     /// Analyzes an index/reference pushes the value on the stack
-    fn analGetValue(self: *Vm) Error!void {
+    fn getIndexValue(self: *Vm) Error!void {
         const index = self.pop() orelse return Error.MissingValue;
         const left = self.pop() orelse return Error.MissingValue;
 
@@ -542,7 +541,8 @@ pub const Vm = struct {
                             defer self.allocator.free(args);
                             args[0] = left;
                             var i: usize = 1;
-                            while (i <= builtin.arg_len) : (i += 1) args[i] = self.stack[self.sp - (builtin.arg_len - 1 + i)];
+
+                            while (i <= builtin.arg_len) : (i += 1) args[i] = self.pop().?;
 
                             //create a shallow copy
                             const res = try self.newValue();
@@ -615,7 +615,7 @@ pub const Vm = struct {
 
     /// Sets the lhs by the value on top of the current stack
     /// This also does type checking to ensure the lhs and rhs are equal types
-    fn analSetValue(self: *Vm) Error!void {
+    fn setIndexValue(self: *Vm) Error!void {
         const value = self.pop() orelse return Error.MissingValue;
         const right = self.pop() orelse return Error.MissingValue;
         const left = self.pop() orelse return Error.MissingValue;
@@ -645,7 +645,7 @@ pub const Vm = struct {
     /// This will also return the new instruction pointer
     ///
     /// `next` is required to detect if we can optimize tail recursion
-    fn analFunctionCall(self: *Vm, inst: byte_code.Instruction, next: byte_code.Instruction) Error!void {
+    fn execFunctionCall(self: *Vm, inst: byte_code.Instruction, next: byte_code.Instruction) Error!void {
         const arg_len = inst.ptr;
         const val = self.stack[self.sp - (1 + arg_len)];
 
@@ -764,20 +764,19 @@ pub const Vm = struct {
     /// as it's used for the other prongs. it will be popped at the end of the switch statement.
     fn execSwitchProng(self: *Vm) Error!void {
         const prong_value = self.pop().?;
+        const capture_value = self.stack[self.sp - 1];
 
         switch (prong_value.*) {
             .integer => |integer| {
-                const capture = self.stack[self.sp - 1].unwrapAs(.integer) orelse return Error.InvalidOperator;
+                const capture = capture_value.unwrapAs(.integer) orelse return Error.InvalidOperator;
                 return self.analIntCmp(.equal, capture, integer);
             },
             .string => |string| {
-                const capture = self.stack[self.sp - 1].unwrapAs(.string) orelse return Error.InvalidOperator;
+                const capture = capture_value.unwrapAs(.string) orelse return Error.InvalidOperator;
                 return self.analStringCmp(.equal, capture, string);
             },
             .range => |range| {
-                // - 3 because stack contains start and end of the range
-                const capture = self.stack[self.sp - 3].unwrapAs(.integer) orelse return Error.InvalidOperator;
-
+                const capture = capture_value.unwrapAs(.integer) orelse return Error.InvalidOperator;
                 return self.push(if (capture >= range.start and capture <= range.end) &Value.True else &Value.False);
             },
             else => return Error.InvalidOperator,
@@ -841,6 +840,7 @@ test "Integer arithmetic" {
         var vm = try run(code, testing.allocator);
         defer vm.deinit();
         testing.expect(case.expected == vm.peek().integer);
+        testing.expectEqual(@as(usize, 0), vm.sp);
     }
 }
 
@@ -868,6 +868,7 @@ test "Boolean" {
         var vm = try run(code, testing.allocator);
         defer vm.deinit();
         testing.expect(case.expected == vm.peek().boolean);
+        testing.expectEqual(@as(usize, 0), vm.sp);
     }
 }
 
@@ -892,6 +893,7 @@ test "Conditional" {
         } else {
             testing.expect(vm.peek().* == ._void);
         }
+        testing.expectEqual(@as(usize, 0), vm.sp);
     }
 }
 
@@ -908,6 +910,7 @@ test "Declaration" {
         var vm = try run(code, testing.allocator);
         defer vm.deinit();
         testing.expect(case.expected == vm.peek().integer);
+        testing.expectEqual(@as(usize, 0), vm.sp);
     }
 }
 
@@ -924,6 +927,7 @@ test "Strings" {
         var vm = try run(code, testing.allocator);
         defer vm.deinit();
         testing.expectEqualStrings(case.expected, vm.peek().string);
+        testing.expectEqual(@as(usize, 0), vm.sp);
     }
 }
 
@@ -946,12 +950,13 @@ test "Arrays" {
             const items = list.items;
             testing.expectEqual(int, items[i].integer);
         }
+        testing.expectEqual(@as(usize, 0), vm.sp);
     }
 }
 
 test "Maps" {
     const test_cases = .{
-        .{ .input = "{1:2, 2:1, 5:6}", .expected = &[_]i64{ 2, 1, 6 }, .keys = &[_]i64{ 1, 2, 5 } },
+        .{ .input = "{1:2, 2:1, 5:6}", .expected = &[_]i64{ 6, 1, 2 }, .keys = &[_]i64{ 5, 2, 1 } },
         .{ .input = "{}", .expected = &[_]i64{}, .keys = &[_]i64{} },
         .{ .input = "{\"foo\":1}", .expected = &[_]i64{1}, .keys = &[_][]const u8{"foo"} },
     };
@@ -977,6 +982,7 @@ test "Maps" {
                 testing.expectEqualStrings(key, item.key.string);
             }
         }
+        testing.expectEqual(@as(usize, 0), vm.sp);
     }
 }
 
@@ -1004,6 +1010,7 @@ test "Index" {
             testing.expectEqualStrings(case.expected, vm.peek().string)
         else
             testing.expectEqual(case.expected, vm.peek());
+        testing.expectEqual(@as(usize, 0), vm.sp);
     }
 }
 
@@ -1025,6 +1032,7 @@ test "Basic function calls with no arguments" {
             testing.expectEqual(@as(i64, case.expected), vm.peek().integer)
         else
             testing.expectEqual(case.expected, vm.peek());
+        testing.expectEqual(@as(usize, 0), vm.sp);
     }
 }
 
@@ -1044,6 +1052,7 @@ test "Globals vs Locals" {
             testing.expectEqual(@as(i64, case.expected), vm.peek().integer)
         else
             testing.expectEqual(case.expected, vm.peek().*);
+        testing.expectEqual(@as(usize, 0), vm.sp);
     }
 }
 
@@ -1064,6 +1073,7 @@ test "Functions with arguments" {
             testing.expectEqual(@as(i64, case.expected), vm.peek().integer)
         else
             testing.expectEqual(case.expected, vm.peek());
+        testing.expectEqual(@as(usize, 0), vm.sp);
     }
 }
 
@@ -1082,6 +1092,7 @@ test "Builtins" {
         defer vm.deinit();
 
         testing.expectEqual(@as(i64, case.expected), vm.peek().integer);
+        testing.expectEqual(@as(usize, 0), vm.sp);
     }
 }
 
@@ -1099,6 +1110,7 @@ test "While loop" {
         defer vm.deinit();
 
         testing.expectEqual(@as(i64, case.expected), vm.peek().integer);
+        testing.expectEqual(@as(usize, 0), vm.sp);
     }
 }
 
@@ -1118,6 +1130,7 @@ test "Tail recursion" {
     defer vm.deinit();
 
     testing.expectEqual(@as(i64, 10), vm.peek().integer);
+    testing.expectEqual(@as(usize, 0), vm.sp);
 }
 
 test "For loop" {
@@ -1140,6 +1153,7 @@ test "For loop" {
     defer vm.deinit();
 
     testing.expectEqual(@as(i64, 8), vm.peek().integer);
+    testing.expectEqual(@as(usize, 0), vm.sp);
 }
 
 test "Range" {
@@ -1159,6 +1173,7 @@ test "Range" {
     defer vm.deinit();
 
     testing.expectEqual(@as(i64, 4950), vm.peek().integer);
+    testing.expectEqual(@as(usize, 0), vm.sp);
 }
 
 test "For loop - String" {
@@ -1169,6 +1184,7 @@ test "For loop - String" {
     defer vm.deinit();
 
     testing.expectEqualStrings("helloworld", vm.peek().string);
+    testing.expectEqual(@as(usize, 0), vm.sp);
 }
 
 test "Enum expression and comparison" {
@@ -1186,6 +1202,7 @@ test "Enum expression and comparison" {
     defer vm.deinit();
 
     testing.expectEqual(@as(i64, 5), vm.peek().integer);
+    testing.expectEqual(@as(usize, 0), vm.sp);
 }
 
 test "Enum expression and comparison" {
@@ -1204,4 +1221,5 @@ test "Enum expression and comparison" {
     var vm = try run(code, testing.allocator);
     defer vm.deinit();
     testing.expectEqual(@as(i64, 50), vm.peek().integer);
+    testing.expectEqual(@as(usize, 0), vm.sp);
 }

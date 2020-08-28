@@ -428,11 +428,19 @@ pub const Compiler = struct {
                 self.instructions.items[jump_pos].ptr = @intCast(u16, last_pos);
             },
             .call_expression => |call| {
-                try self.compile(call.function);
-                for (call.arguments) |arg| {
-                    try self.compile(arg);
+                // function is either builtin or defined on a type
+                if (call.function == .index) {
+                    for (call.arguments) |arg| {
+                        try self.compile(arg);
+                    }
+                    try self.compile(call.function);
+                } else {
+                    try self.compile(call.function);
+                    for (call.arguments) |arg| {
+                        try self.compile(arg);
+                    }
+                    _ = try self.emitOp(.call, @intCast(u16, call.arguments.len));
                 }
-                _ = try self.emitOp(.call, @intCast(u16, call.arguments.len));
             },
             .@"return" => |ret| {
                 try self.compile(ret.value);
@@ -496,7 +504,11 @@ pub const Compiler = struct {
                 // jump to start of loop to evaluate range
                 _ = try self.emitOp(.jump, self.scope.id.loop.start);
 
+                // pop capture and index from stack
                 const end = try self.emit(.pop);
+                if (loop.index) |_| {
+                    _ = try self.emit(.pop);
+                }
 
                 for (self.scope.id.loop.breaks.items) |inst| {
                     inst.ptr = @intCast(u16, end);
@@ -580,9 +592,9 @@ pub const Compiler = struct {
                     _ = try self.emit(.match);
                     const last_jump_false = try self.emit(.jump_false);
                     try self.compile(prong.right);
-
                     self.instructions.items[last_jump_false].ptr = @intCast(u16, self.instructions.items.len);
                 }
+                _ = try self.emit(.pop);
             },
             else => {},
         }

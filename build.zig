@@ -5,6 +5,7 @@ pub fn build(b: *Builder) void {
     const lib = b.addStaticLibrary("luf", "src/luf.zig");
     lib.setBuildMode(mode);
     lib.install();
+    
 
     var main_tests = b.addTest("src/luf.zig");
     main_tests.setBuildMode(mode);
