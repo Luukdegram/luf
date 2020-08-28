@@ -1177,7 +1177,7 @@ test "Range" {
 }
 
 test "For loop - String" {
-    const input = "mut result = \"hello\" const string = \"world\" for(string)|c|{result+=c}result";
+    const input = "mut result = \"hello\" const string = \"world\" for(string)|c, i|{result+=c}result";
     var code = try compiler.compile(testing.allocator, input);
     defer code.deinit();
     var vm = try run(code, testing.allocator);
@@ -1189,11 +1189,10 @@ test "For loop - String" {
 
 test "Enum expression and comparison" {
     const input =
-        \\
-        \\const x = enum{value, another_value} 
-        \\const enum_value = x.another_value 
+        \\const x = enum{value, another_value}
+        \\const enum_value = x.another_value
         \\if (enum_value == x.another_value) {
-        \\  5        
+        \\  5
         \\}
     ;
     var code = try compiler.compile(testing.allocator, input);
@@ -1208,11 +1207,11 @@ test "Enum expression and comparison" {
 test "Enum expression and comparison" {
     const input =
         \\const range = 0..9
-        \\mut x = 0 
+        \\mut x = 0
         \\switch(5) {
         \\  4: x += 10,
         \\  range: x += 30,
-        \\  5: x += 20     
+        \\  5: x += 20
         \\}
         \\x
     ;

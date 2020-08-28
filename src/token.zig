@@ -166,6 +166,7 @@ pub const Token = struct {
             .@"continue" => "continue",
             .@"enum" => "enum",
             .@"switch" => "switch",
+            else => "",
         };
     }
 };

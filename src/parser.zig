@@ -121,9 +121,8 @@ pub const Parser = struct {
     };
 
     /// Returns `Error.ParserError` and appends an error message to the `errors` list.
-    fn fail(self: *Parser, comptime msg: []const u8) Error {
-        std.debug.print(msg ++ "\n", .{self.source[self.peek_token.start..self.peek_token.end]});
-        try self.errors.add(msg, self.peek_token.start, .err);
+    fn fail(self: *Parser, msg: []const u8, index: usize) Error {
+        try self.errors.add(msg, index, .err);
         return Error.ParserError;
     }
 
@@ -149,15 +148,11 @@ pub const Parser = struct {
     fn parseDeclaration(self: *Parser) Error!Node {
         const tmp_token = self.current_token;
 
-        if (!self.expectPeek(.identifier)) {
-            return self.fail("Expected identifier but found '{}'");
-        }
+        try self.expectPeek(.identifier);
 
         const name = try self.parseIdentifier();
 
-        if (!self.expectPeek(.assign)) {
-            return self.fail("Expected token '=' but found '{}'");
-        }
+        try self.expectPeek(.assign);
 
         self.next();
 
@@ -218,7 +213,7 @@ pub const Parser = struct {
             .@"break" => try self.parseBreak(),
             .@"continue" => try self.parseContinue(),
             .@"enum" => try self.parseEnum(),
-            else => return self.fail("Unexpected token '{}'"),
+            else => return self.fail("Unexpected token", self.current_token.start),
         };
 
         while (prec.val() < findPrecedence(self.peek_token.token_type).val()) {
@@ -337,9 +332,7 @@ pub const Parser = struct {
     fn parseGroupedExpression(self: *Parser) Error!Node {
         self.next();
         const exp = try self.parseExpression(.lowest);
-        if (!self.expectPeek(.right_parenthesis)) {
-            return self.fail("Expected ')' but found '{}'");
-        }
+        try self.expectPeek(.right_parenthesis);
         return exp;
     }
 
@@ -353,20 +346,14 @@ pub const Parser = struct {
             .true_pong = undefined,
             .false_pong = undefined,
         };
-        if (!self.expectPeek(.left_parenthesis)) {
-            return self.fail("Expected '(' but found '{}'");
-        }
+        try self.expectPeek(.left_parenthesis);
 
         self.next();
         exp.condition = try self.parseExpression(.lowest);
 
-        if (!self.expectPeek(.right_parenthesis)) {
-            return self.fail("Expected ')' but found '{}'");
-        }
+        try self.expectPeek(.right_parenthesis);
 
-        if (!self.expectPeek(.left_brace)) {
-            return self.fail("Expected '{{' but found '{}'");
-        }
+        try self.expectPeek(.left_brace);
 
         exp.true_pong = try self.parseBlockStatement();
 
@@ -379,9 +366,7 @@ pub const Parser = struct {
                 return Node{ .if_expression = exp };
             }
 
-            if (!self.expectPeek(.left_brace)) {
-                return self.fail("Expected '{{' but found '{}'");
-            }
+            try self.expectPeek(.left_brace);
 
             exp.false_pong = try self.parseBlockStatement();
         }
@@ -424,15 +409,11 @@ pub const Parser = struct {
             .body = undefined,
         };
 
-        if (!self.expectPeek(.left_parenthesis)) {
-            return self.fail("Expected '(' but found '{}'");
-        }
+        try self.expectPeek(.left_parenthesis);
 
         func.params = try self.parseFunctionParameters();
 
-        if (!self.expectPeek(.left_brace))
-            return self.fail("Expected '{{' but found '{}'");
-
+        try self.expectPeek(.left_brace);
         func.body = try self.parseBlockStatement();
 
         return Node{ .func_lit = func };
@@ -459,8 +440,7 @@ pub const Parser = struct {
             try list.append(try self.parseIdentifier());
         }
 
-        if (!self.expectPeek(.right_parenthesis))
-            return self.fail("Expected ')' but found '{}'");
+        try self.expectPeek(.right_parenthesis);
 
         return list.toOwnedSlice();
     }
@@ -478,7 +458,7 @@ pub const Parser = struct {
     }
 
     /// Parses the next set of tokens into argument nodes
-    fn parseArguments(self: *Parser, end_type: Token.TokenType) Error![]Node {
+    fn parseArguments(self: *Parser, comptime end_type: Token.TokenType) Error![]Node {
         var list = ArrayList(Node).init(self.allocator);
         errdefer list.deinit();
 
@@ -497,8 +477,7 @@ pub const Parser = struct {
             try list.append(try self.parseExpression(.lowest));
         }
 
-        if (!self.expectPeek(end_type))
-            return self.fail("Expected ']' or ')' but found '{}'");
+        try self.expectPeek(end_type);
 
         return list.toOwnedSlice();
     }
@@ -521,13 +500,11 @@ pub const Parser = struct {
             self.next();
             const pair = try self.parsePair();
             try pairs.append(pair);
-            if (!self.peekIsType(.right_brace) and !self.expectPeek(.comma))
-                return self.fail("Expected token ',' but found {}");
+            if (!self.peekIsType(.right_brace))
+                try self.expectPeek(.comma);
         }
 
-        if (!self.expectPeek(.right_brace)) {
-            return self.fail("Expected '}}' but found '{}'");
-        }
+        try self.expectPeek(.right_brace);
 
         map.value = pairs.toOwnedSlice();
 
@@ -539,9 +516,7 @@ pub const Parser = struct {
         const pair = try self.allocator.create(Node.MapPair);
         pair.* = .{ .token = self.current_token, .key = try self.parseExpression(.lowest), .value = undefined };
 
-        if (!self.expectPeek(.colon)) {
-            return self.fail("Expected ':' but found '{}'");
-        }
+        try self.expectPeek(.colon);
 
         // skip over colon
         self.next();
@@ -558,13 +533,13 @@ pub const Parser = struct {
         self.next();
 
         index.index = if (token.token_type == .period) blk: {
-            if (!self.currentIsType(.identifier)) return self.fail("Expected identifier, but found '{}'");
+            if (!self.currentIsType(.identifier)) return self.fail("Expected identifier", self.current_token.start);
             break :blk try self.parseStringLiteral();
         } else
             try self.parseExpression(.lowest);
 
-        if (token.token_type != .period and !self.expectPeek(.right_bracket)) {
-            return self.fail("Expected '}}' but found '{}'");
+        if (token.token_type != .period) {
+            try self.expectPeek(.right_bracket);
         }
 
         return Node{ .index = index };
@@ -579,16 +554,16 @@ pub const Parser = struct {
             .block = undefined,
         };
 
-        if (!self.expectPeek(.left_parenthesis)) return self.fail("Expected token '(' but got '{}'");
+        try self.expectPeek(.left_parenthesis);
 
         // skip ( token
         self.next();
 
         node.condition = try self.parseExpression(.lowest);
 
-        if (!self.expectPeek(.right_parenthesis)) return self.fail("Expected token ')' but got'{}");
+        try self.expectPeek(.right_parenthesis);
 
-        if (!self.expectPeek(.left_brace)) return self.fail("Expected token '{{' but got '{}'");
+        try self.expectPeek(.left_brace);
 
         // parseBlockStatement already asserts for a closing bracket, so return after parsing
         node.block = try self.parseBlockStatement();
@@ -606,24 +581,25 @@ pub const Parser = struct {
             .index = undefined,
             .block = undefined,
         };
-        if (!self.expectPeek(.left_parenthesis)) return self.fail("Expected token '(' but instead found '{}'");
+        try self.expectPeek(.left_parenthesis);
         self.next();
         node.iter = try self.parseExpression(.lowest);
 
-        if (!self.expectPeek(.right_parenthesis)) return self.fail("Expected token ')' but instead found '{}'");
-        if (!self.expectPeek(.pipe)) return self.fail("Expected token '|' but instead found '{}'");
+        try self.expectPeek(.right_parenthesis);
+        try self.expectPeek(.pipe);
         self.next();
 
         node.capture = try self.parseIdentifier();
 
         // incase there's a 2nd capture for the index identifier i.e. |id, index|
-        if (self.expectPeek(.comma)) {
+        if (self.peekIsType(.comma)) {
+            self.next();
             self.next();
             node.index = try self.parseIdentifier();
         }
 
-        if (!self.expectPeek(.pipe)) return self.fail("Expected token '|' but instead found '{}'");
-        if (!self.expectPeek(.left_brace)) return self.fail("Expected token '{{' but instead found '{}'");
+        try self.expectPeek(.pipe);
+        try self.expectPeek(.left_brace);
 
         node.block = try self.parseBlockStatement();
 
@@ -633,7 +609,7 @@ pub const Parser = struct {
     /// Parses the current expression as an assignment. Compiler does checking for mutating
     fn parseAssignment(self: *Parser, left: Node) Error!Node {
         if (left != .identifier and left != .index)
-            return self.fail("Expected identifier or index on left-hand side but got '{}'");
+            return self.fail("Expected identifier or index", self.current_token.start);
 
         const node = try self.allocator.create(Node.Assignment);
         node.* = .{
@@ -713,7 +689,7 @@ pub const Parser = struct {
             .nodes = undefined,
         };
 
-        if (!self.expectPeek(.left_brace)) return self.fail("Expected token '{{' but instead found '{}'");
+        try self.expectPeek(.left_brace);
         self.next();
         try enums.append(try self.parseIdentifier());
 
@@ -723,8 +699,7 @@ pub const Parser = struct {
             try enums.append(try self.parseIdentifier());
         }
 
-        if (!self.peekIsType(.right_brace)) return self.fail("Expected token '}}' but instead found '{}'");
-        self.next();
+        try self.expectPeek(.right_brace);
 
         node.nodes = enums.toOwnedSlice();
 
@@ -736,12 +711,12 @@ pub const Parser = struct {
         const import = try self.allocator.create(Node.Import);
         import.* = .{ .token = self.current_token, .value = undefined };
 
-        if (!self.expectPeek(.left_parenthesis)) return self.fail("Expected token '(' but instead found '{}'");
+        try self.expectPeek(.left_parenthesis);
 
         self.next();
         import.value = try self.parseExpression(.lowest);
 
-        if (!self.expectPeek(.right_parenthesis)) return self.fail("Expected token ')' but instead found '{}'");
+        try self.expectPeek(.right_parenthesis);
 
         return Node{ .import = import };
     }
@@ -751,13 +726,13 @@ pub const Parser = struct {
         const node = try self.allocator.create(Node.SwitchLiteral);
         node.* = .{ .token = self.current_token, .capture = undefined, .prongs = undefined };
 
-        if (!self.expectPeek(.left_parenthesis)) return self.fail("Expected token '(' but found '{}'");
+        try self.expectPeek(.left_parenthesis);
 
         self.next();
         node.capture = try self.parseExpression(.lowest);
 
-        if (!self.expectPeek(.right_parenthesis)) return self.fail("Expected token ')' but found '{}'");
-        if (!self.expectPeek(.left_brace)) return self.fail("Expected token '{{', but found '{}'");
+        try self.expectPeek(.right_parenthesis);
+        try self.expectPeek(.left_brace);
 
         self.next();
         var prongs = std.ArrayList(Node).init(self.allocator);
@@ -771,7 +746,7 @@ pub const Parser = struct {
         }
         node.prongs = prongs.toOwnedSlice();
 
-        if (!self.expectPeek(.right_brace)) return self.fail("Expected token '}}' but found '{}'");
+        try self.expectPeek(.right_brace);
 
         return Node{ .switch_statement = node };
     }
@@ -780,7 +755,7 @@ pub const Parser = struct {
         const node = try self.allocator.create(Node.SwitchProng);
         node.* = .{ .token = undefined, .left = try self.parseExpression(.lowest), .right = undefined };
 
-        if (!self.expectPeek(.colon)) return self.fail("Expected token ':' but found '{}'");
+        try self.expectPeek(.colon);
         node.token = self.current_token;
         self.next();
 
@@ -794,12 +769,12 @@ pub const Parser = struct {
 
     /// Determines if the next token is the expected token or not.
     /// Incase the next token is the wanted token, retun true and retrieve next token.
-    fn expectPeek(self: *Parser, token_type: Token.TokenType) bool {
+    fn expectPeek(self: *Parser, comptime token_type: Token.TokenType) !void {
         if (self.peekIsType(token_type)) {
             self.next();
-            return true;
+            return;
         }
-        return false;
+        return self.fail("Expected token '" ++ Token.string(token_type) ++ "'", self.peek_token.start);
     }
 
     /// Helper function to check if the peek token is of given type
