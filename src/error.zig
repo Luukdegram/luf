@@ -10,8 +10,8 @@ pub const Error = struct {
 
     const ErrorType = enum {
         err,
-        note,
-        trace,
+        info,
+        warn,
     };
 };
 

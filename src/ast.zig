@@ -10,7 +10,6 @@ pub const Tree = struct {
     nodes: []const Node,
     arena: std.heap.ArenaAllocator.State,
     allocator: *std.mem.Allocator,
-    errors: Errors,
 
     /// Frees all memory
     pub fn deinit(self: *Tree) void {

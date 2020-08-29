@@ -35,7 +35,7 @@ fn add(vm: *Vm, args: []*Value) BuiltinError!*Value {
         .list => |*list| {
             const val = args[args.len - 1];
             if (list.items.len > 0) {
-                if (list.items[0].* != std.meta.activeTag(val.*)) {
+                if (list.items[0].lufType() != val.lufType()) {
                     return BuiltinError.MismatchingTypes;
                 }
             }
@@ -47,10 +47,10 @@ fn add(vm: *Vm, args: []*Value) BuiltinError!*Value {
             const val = args[args.len - 1];
             if (map.items().len > 0) {
                 const entry = map.items()[0];
-                if (entry.key.* != std.meta.activeTag(key.*)) {
+                if (entry.key.lufType() != key.lufType()) {
                     return BuiltinError.MismatchingTypes;
                 }
-                if (entry.value.* != std.meta.activeTag(val.*)) {
+                if (entry.value.lufType() != val.lufType()) {
                     return BuiltinError.MismatchingTypes;
                 }
             }

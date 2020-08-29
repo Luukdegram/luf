@@ -112,6 +112,7 @@ pub const Token = struct {
             .integer => "[integer]",
             .string => "[string]",
             .comment => "[comment]",
+            .double_period => "..",
             // operators
             .assign => "=",
             .plus => "+",
@@ -128,6 +129,9 @@ pub const Token = struct {
             .ampersand => "&",
             .caret => "^",
             .pipe => "|",
+            .tilde => "~",
+            .percent => "%",
+            .period => ".",
             .equal_add => "+=",
             .equal_sub => "-=",
             .equal_mul => "*=",
@@ -166,7 +170,6 @@ pub const Token = struct {
             .@"continue" => "continue",
             .@"enum" => "enum",
             .@"switch" => "switch",
-            else => "",
         };
     }
 };

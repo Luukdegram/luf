@@ -66,15 +66,11 @@ fn findPrecedence(token_type: Token.TokenType) Precedence {
 }
 
 /// Parses source code into an AST tree
-pub fn parse(allocator: *Allocator, source: []const u8) Parser.Error!*Tree {
+pub fn parse(allocator: *Allocator, source: []const u8, _errors: *Errors) Parser.Error!*Tree {
     var lexer = Lexer.init(source);
 
     var arena = std.heap.ArenaAllocator.init(allocator);
     errdefer arena.deinit();
-
-    // TODO extend its lifetime by allocating it and possibly pass around other areas
-    var errors = Errors.init(allocator);
-    errdefer errors.deinit();
 
     var parser = Parser{
         .current_token = lexer.next(),
@@ -82,7 +78,7 @@ pub fn parse(allocator: *Allocator, source: []const u8) Parser.Error!*Tree {
         .allocator = &arena.allocator,
         .lexer = &lexer,
         .source = source,
-        .errors = errors,
+        .err = _errors,
     };
 
     var nodes = ArrayList(Node).init(parser.allocator);
@@ -97,7 +93,6 @@ pub fn parse(allocator: *Allocator, source: []const u8) Parser.Error!*Tree {
         .nodes = nodes.toOwnedSlice(),
         .arena = arena.state,
         .allocator = allocator,
-        .errors = errors,
     };
 
     return tree;
@@ -111,7 +106,7 @@ pub const Parser = struct {
     allocator: *Allocator,
     lexer: *Lexer,
     source: []const u8,
-    errors: Errors,
+    err: *Errors,
 
     pub const Error = error{
         ParserError,
@@ -122,7 +117,7 @@ pub const Parser = struct {
 
     /// Returns `Error.ParserError` and appends an error message to the `errors` list.
     fn fail(self: *Parser, msg: []const u8, index: usize) Error {
-        try self.errors.add(msg, index, .err);
+        try self.err.add(msg, index, .err);
         return Error.ParserError;
     }
 
@@ -533,7 +528,8 @@ pub const Parser = struct {
         self.next();
 
         index.index = if (token.token_type == .period) blk: {
-            if (!self.currentIsType(.identifier)) return self.fail("Expected identifier", self.current_token.start);
+            if (!self.currentIsType(.identifier))
+                return self.fail("Expected identifier", self.current_token.start);
             break :blk try self.parseStringLiteral();
         } else
             try self.parseExpression(.lowest);
@@ -774,7 +770,10 @@ pub const Parser = struct {
             self.next();
             return;
         }
-        return self.fail("Expected token '" ++ Token.string(token_type) ++ "'", self.peek_token.start);
+        return self.fail(
+            "Expected token '" ++ Token.string(token_type) ++ "'",
+            self.peek_token.start,
+        );
     }
 
     /// Helper function to check if the peek token is of given type
@@ -797,7 +796,9 @@ test "Parse Delcaration" {
     };
 
     inline for (test_cases) |case| {
-        const tree = try parse(allocator, case.input);
+        var errors = Errors.init(allocator);
+        defer errors.deinit();
+        const tree = try parse(allocator, case.input, &errors);
         defer tree.deinit();
         const node = tree.nodes[tree.nodes.len - 1].declaration;
         testing.expectEqualSlices(u8, case.id, node.name.identifier.value);
@@ -815,7 +816,9 @@ test "Parse Return statment" {
 
     var allocator = testing.allocator;
     inline for (test_cases) |case| {
-        const tree = try parse(allocator, case.input);
+        var errors = Errors.init(allocator);
+        defer errors.deinit();
+        const tree = try parse(allocator, case.input, &errors);
         defer tree.deinit();
 
         testing.expect(tree.nodes.len == 1);
@@ -835,7 +838,9 @@ test "Parse identifier expression" {
     const input = "foobar";
 
     var allocator = testing.allocator;
-    const tree = try parse(allocator, input);
+    var errors = Errors.init(allocator);
+    defer errors.deinit();
+    const tree = try parse(allocator, input, &errors);
     defer tree.deinit();
 
     testing.expect(tree.nodes.len == 1);
@@ -848,7 +853,9 @@ test "Parse identifier expression" {
 test "Parse integer literal" {
     const input = "124";
     var allocator = testing.allocator;
-    const tree = try parse(allocator, input);
+    var errors = Errors.init(allocator);
+    defer errors.deinit();
+    const tree = try parse(allocator, input, &errors);
     defer tree.deinit();
 
     testing.expect(tree.nodes.len == 1);
@@ -879,7 +886,9 @@ test "Parse prefix expressions" {
 
     const allocator = testing.allocator;
     for (test_cases) |case| {
-        const tree = try parse(allocator, case.input);
+        var errors = Errors.init(allocator);
+        defer errors.deinit();
+        const tree = try parse(allocator, case.input, &errors);
         defer tree.deinit();
 
         testing.expect(tree.nodes.len == 1);
@@ -917,7 +926,9 @@ test "Parse infix expressions - integer" {
 
     const allocator = testing.allocator;
     for (test_cases) |case| {
-        const tree = try parse(allocator, case.input);
+        var errors = Errors.init(allocator);
+        defer errors.deinit();
+        const tree = try parse(allocator, case.input, &errors);
         defer tree.deinit();
 
         testing.expect(tree.nodes.len == 1);
@@ -932,7 +943,9 @@ test "Parse infix expressions - integer" {
 test "Parse infix expressions - identifier" {
     const allocator = testing.allocator;
     const input = "foobar + foobarz";
-    const tree = try parse(allocator, input);
+    var errors = Errors.init(allocator);
+    defer errors.deinit();
+    const tree = try parse(allocator, input, &errors);
     defer tree.deinit();
 
     testing.expect(tree.nodes.len == 1);
@@ -946,7 +959,9 @@ test "Parse infix expressions - identifier" {
 test "Parse infix expressions - boolean" {
     const allocator = testing.allocator;
     const input = "true == true";
-    const tree = try parse(allocator, input);
+    var errors = Errors.init(allocator);
+    defer errors.deinit();
+    const tree = try parse(allocator, input, &errors);
     defer tree.deinit();
 
     testing.expect(tree.nodes.len == 1);
@@ -960,7 +975,9 @@ test "Parse infix expressions - boolean" {
 test "Boolean expression" {
     const allocator = testing.allocator;
     const input = "true";
-    const tree = try parse(allocator, input);
+    var errors = Errors.init(allocator);
+    defer errors.deinit();
+    const tree = try parse(allocator, input, &errors);
     defer tree.deinit();
 
     testing.expect(tree.nodes.len == 1);
@@ -970,7 +987,9 @@ test "Boolean expression" {
 test "If expression" {
     const allocator = testing.allocator;
     const input = "if (x < y) { x }";
-    const tree = try parse(allocator, input);
+    var errors = Errors.init(allocator);
+    defer errors.deinit();
+    const tree = try parse(allocator, input, &errors);
     defer tree.deinit();
 
     testing.expect(tree.nodes.len == 1);
@@ -986,7 +1005,9 @@ test "If expression" {
 test "If else expression" {
     const allocator = testing.allocator;
     const input = "if (x < y) { x } else { y }";
-    const tree = try parse(allocator, input);
+    var errors = Errors.init(allocator);
+    defer errors.deinit();
+    const tree = try parse(allocator, input, &errors);
     defer tree.deinit();
 
     testing.expect(tree.nodes.len == 1);
@@ -1009,7 +1030,9 @@ test "If else expression" {
 test "If else-if expression" {
     const allocator = testing.allocator;
     const input = "if (x < y) { x } else if(x == 0) { y } else { z }";
-    const tree = try parse(allocator, input);
+    var errors = Errors.init(allocator);
+    defer errors.deinit();
+    const tree = try parse(allocator, input, &errors);
     defer tree.deinit();
 
     testing.expect(tree.nodes.len == 1);
@@ -1028,7 +1051,9 @@ test "If else-if expression" {
 test "Function literal" {
     const input = "fn(x, y) { x + y }";
     const allocator = testing.allocator;
-    const tree = try parse(allocator, input);
+    var errors = Errors.init(allocator);
+    defer errors.deinit();
+    const tree = try parse(allocator, input, &errors);
     defer tree.deinit();
 
     testing.expect(tree.nodes.len == 1);
@@ -1054,7 +1079,9 @@ test "Function parameters" {
     };
     const allocator = testing.allocator;
     inline for (test_cases) |case| {
-        const tree = try parse(allocator, case.input);
+        var errors = Errors.init(allocator);
+        defer errors.deinit();
+        const tree = try parse(allocator, case.input, &errors);
         defer tree.deinit();
 
         testing.expect(tree.nodes.len == 1);
@@ -1072,7 +1099,9 @@ test "Call expression" {
     const input = "add(1, 2 * 3, 4 + 5)";
     const allocator = testing.allocator;
 
-    const tree = try parse(allocator, input);
+    var errors = Errors.init(allocator);
+    defer errors.deinit();
+    const tree = try parse(allocator, input, &errors);
     defer tree.deinit();
 
     testing.expect(tree.nodes.len == 1);
@@ -1090,7 +1119,9 @@ test "String expression" {
     const input = "\"Hello, world\"";
     const allocator = testing.allocator;
 
-    const tree = try parse(allocator, input);
+    var errors = Errors.init(allocator);
+    defer errors.deinit();
+    const tree = try parse(allocator, input, &errors);
     defer tree.deinit();
 
     testing.expect(tree.nodes.len == 1);
@@ -1103,7 +1134,9 @@ test "Member expression" {
     const input = "foo.bar";
     const allocator = testing.allocator;
 
-    const tree = try parse(allocator, input);
+    var errors = Errors.init(allocator);
+    defer errors.deinit();
+    const tree = try parse(allocator, input, &errors);
     defer tree.deinit();
 
     testing.expect(tree.nodes.len == 1);
@@ -1118,7 +1151,9 @@ test "Array literal" {
     const input = "[1, 2 * 2, 3 + 3]";
     const allocator = testing.allocator;
 
-    const tree = try parse(allocator, input);
+    var errors = Errors.init(allocator);
+    defer errors.deinit();
+    const tree = try parse(allocator, input, &errors);
     defer tree.deinit();
 
     testing.expect(tree.nodes.len == 1);
@@ -1133,7 +1168,9 @@ test "Array index" {
     const input = "array[1]";
     const allocator = testing.allocator;
 
-    const tree = try parse(allocator, input);
+    var errors = Errors.init(allocator);
+    defer errors.deinit();
+    const tree = try parse(allocator, input, &errors);
     defer tree.deinit();
 
     testing.expect(tree.nodes.len == 1);
@@ -1147,7 +1184,9 @@ test "Map Literal" {
     const input = "{\"foo\": 1, \"bar\": 5}";
     const allocator = testing.allocator;
 
-    const tree = try parse(allocator, input);
+    var errors = Errors.init(allocator);
+    defer errors.deinit();
+    const tree = try parse(allocator, input, &errors);
     defer tree.deinit();
 
     testing.expect(tree.nodes.len == 1);
@@ -1171,7 +1210,9 @@ test "While loop" {
     const input = "while(x < y) { x }";
     const allocator = testing.allocator;
 
-    const tree = try parse(allocator, input);
+    var errors = Errors.init(allocator);
+    defer errors.deinit();
+    const tree = try parse(allocator, input, &errors);
     defer tree.deinit();
 
     testing.expect(tree.nodes.len == 1);
@@ -1192,7 +1233,9 @@ test "Assignment" {
     };
 
     inline for (test_cases) |case, i| {
-        const tree = try parse(allocator, case.input);
+        var errors = Errors.init(allocator);
+        defer errors.deinit();
+        const tree = try parse(allocator, case.input, &errors);
         defer tree.deinit();
         const node = tree.nodes[tree.nodes.len - 1].expression.value.assignment;
         testing.expectEqualSlices(u8, case.id, node.left.identifier.value);
@@ -1204,7 +1247,9 @@ test "Comment expression" {
     const input = "//This is a comment";
     const allocator = testing.allocator;
 
-    const tree = try parse(allocator, input);
+    var errors = Errors.init(allocator);
+    defer errors.deinit();
+    const tree = try parse(allocator, input, &errors);
     defer tree.deinit();
 
     testing.expect(tree.nodes.len == 1);
@@ -1217,7 +1262,9 @@ test "For loop" {
     const input = "for(x)|id,i|{ id }";
     const allocator = testing.allocator;
 
-    const tree = try parse(allocator, input);
+    var errors = Errors.init(allocator);
+    defer errors.deinit();
+    const tree = try parse(allocator, input, &errors);
     defer tree.deinit();
 
     testing.expect(tree.nodes.len == 1);
@@ -1236,7 +1283,9 @@ test "Enum" {
     const input = "enum{value, another_value, third_value }";
     const allocator = testing.allocator;
 
-    const tree = try parse(allocator, input);
+    var errors = Errors.init(allocator);
+    defer errors.deinit();
+    const tree = try parse(allocator, input, &errors);
     defer tree.deinit();
 
     testing.expect(tree.nodes.len == 1);
@@ -1261,8 +1310,9 @@ test "Enum" {
         \\}
     ;
     const allocator = testing.allocator;
-
-    const tree = try parse(allocator, input);
+    var errors = Errors.init(allocator);
+    defer errors.deinit();
+    const tree = try parse(allocator, input, &errors);
     defer tree.deinit();
 
     testing.expect(tree.nodes.len == 1);

@@ -9,35 +9,10 @@ const Type = _value.Type;
 const BuiltinError = _builtin.BuiltinError;
 const testing = std.testing;
 const Allocator = std.mem.Allocator;
+const Errors = @import("error.zig").Errors;
 
 //! The Virtual Machine of Luf is stack-based.
 //! Currently the stack has a size of 2048 (pre-allocated)
-
-/// Creates a new Virtual Machine on the heap, runs the given `ByteCode`
-/// and finally returns the `Vm`. Use deinit() to free its memory.
-pub fn run(code: ByteCode, allocator: *Allocator) Vm.Error!*Vm {
-    //TODO cleanup this mess once we have implemented a garbage collector
-    // to handle the memory
-    const vm = try allocator.create(Vm);
-    var arena = std.heap.ArenaAllocator.init(allocator);
-    vm.* = .{
-        .globals = std.ArrayList(*Value).init(allocator),
-        .allocator = allocator,
-        .arena = arena,
-        .call_stack = Vm.CallStack.init(allocator),
-        .imports = std.StringHashMap(*Value).init(allocator),
-    };
-
-    try vm.call_stack.append(.{
-        .fp = null,
-        .sp = 0,
-        .ip = 0,
-        .instructions = code.instructions,
-    });
-    errdefer vm.deinit();
-    try vm.run(code);
-    return vm;
-}
 
 /// VM is a stack-based Virtual Machine
 /// Although a register-based VM is more performant,
@@ -60,8 +35,9 @@ pub const Vm = struct {
     imports: std.StringHashMap(*Value),
     allocator: *Allocator,
     arena: std.heap.ArenaAllocator,
+    errors: Errors,
 
-    pub const Error = error{ OutOfMemory, OutOfBounds, MissingValue, InvalidOperator } || BuiltinError;
+    pub const Error = error{ OutOfMemory, RuntimeError } || BuiltinError;
     const CallStack = std.ArrayList(Frame);
     /// Function `Frame` on the callstack
     const Frame = struct {
@@ -75,6 +51,17 @@ pub const Vm = struct {
         instructions: []const byte_code.Instruction,
     };
 
+    pub fn init(allocator: *Allocator) Vm {
+        return .{
+            .globals = std.ArrayList(*Value).init(allocator),
+            .call_stack = CallStack.init(allocator),
+            .imports = std.StringHashMap(*Value).init(allocator),
+            .allocator = allocator,
+            .arena = std.heap.ArenaAllocator.init(allocator),
+            .errors = Errors.init(allocator),
+        };
+    }
+
     /// Frees all memory allocated by the `Vm`.
     /// The vm is no longer valid for use after calling deinit
     pub fn deinit(self: *Vm) void {
@@ -82,11 +69,26 @@ pub const Vm = struct {
         self.arena.deinit();
         self.call_stack.deinit();
         self.imports.deinit();
-        self.allocator.destroy(self);
+        self.* = undefined;
+    }
+
+    /// Compiles the given source code and then runs it on the `Vm`
+    pub fn compileAndRun(self: *Vm, source: []const u8) !void {
+        var code = try compiler.compile(self.allocator, source, &self.errors);
+        defer code.deinit();
+
+        try self.run(code);
     }
 
     /// Runs the given `ByteCode` on the Virtual Machine
     pub fn run(self: *Vm, code: ByteCode) Error!void {
+        try self.call_stack.append(.{
+            .fp = null,
+            .sp = 0,
+            .ip = 0,
+            .instructions = code.instructions,
+        });
+
         while (self.frame().ip < self.frame().instructions.len) {
             var current_frame = self.frame();
             defer current_frame.ip += 1;
@@ -95,13 +97,19 @@ pub const Vm = struct {
             switch (inst.op) {
                 .load_const => {
                     const val = try self.newValue();
-                    val.* = code.constants[inst.ptr];
+                    const tmp = code.constants[inst.ptr];
+                    val.* = if (tmp.isType(.string))
+                        .{ .string = try self.arena.allocator.dupe(u8, tmp.string) }
+                    else
+                        tmp;
                     try self.push(val);
                 },
                 .equal,
                 .not_equal,
                 .less_than,
                 .greater_than,
+                .less_than_equal,
+                .greater_than_equal,
                 .@"and",
                 .@"or",
                 => try self.execCmp(inst.op),
@@ -178,15 +186,16 @@ pub const Vm = struct {
                 .iter_next => try self.execNextIter(),
                 .make_range => try self.makeRange(),
                 .match => try self.execSwitchProng(),
-                else => {},
             }
         }
+
+        _ = self.call_stack.popOrNull();
     }
 
     /// Pushes a new `Value` on top of the `stack` and increases
     /// the stack pointer by 1.
     fn push(self: *Vm, value: *Value) Error!void {
-        if (self.sp >= self.stack.len - 1) return Error.OutOfMemory;
+        if (self.sp >= self.stack.len - 1) return self.fail("Stack overflow");
 
         self.stack[self.sp] = value;
         self.sp += 1;
@@ -215,41 +224,41 @@ pub const Vm = struct {
     /// Analyzes and executes a binary operation.
     fn execBinOp(self: *Vm, op: byte_code.Opcode) Error!void {
         // right is on the top of left, therefore we pop it first
-        const right = self.pop() orelse return Error.MissingValue;
-        const left = self.pop() orelse return Error.MissingValue;
+        const right = self.pop() orelse return self.fail("Missing value");
+        const left = self.pop() orelse return self.fail("Missing value");
 
-        const luf_type = try resolveType(&[_]*Value{ left, right });
+        const luf_type = try self.resolveType(&[_]*Value{ left, right });
 
         return switch (luf_type) {
-            .integer => self.analIntOp(op, left.integer, right.integer),
-            .string => self.analStringOp(op, left.string, right.string),
-            else => Error.InvalidOperator,
+            .integer => self.execIntOp(op, left.integer, right.integer),
+            .string => self.execStringOp(op, left.string, right.string),
+            else => self.fail("Unexpected type, expected integer or string"),
         };
     }
 
     /// Analyzes and executes a binary operation on an integer
-    fn analIntOp(self: *Vm, op: byte_code.Opcode, left: i64, right: i64) Error!void {
+    fn execIntOp(self: *Vm, op: byte_code.Opcode, left: i64, right: i64) Error!void {
         const result = switch (op) {
             .add => left + right,
             .sub => left - right,
             .mul => left * right,
-            .mod => if (right > 0) @mod(left, right) else return Error.InvalidOperator,
+            .mod => if (right > 0) @mod(left, right) else return self.fail("Rhs can not be a negative integer"),
             .div => blk: {
-                if (right == 0) return Error.InvalidOperator;
+                if (right == 0) return self.fail("Cannot divide by zero");
                 break :blk @divTrunc(left, right);
             },
             .bitwise_and => left & right,
             .bitwise_xor => left ^ right,
             .bitwise_or => left | right,
             .shift_left => blk: {
-                if (right < 0) return Error.InvalidOperator;
+                if (right < 0) return self.fail("Bit shifting not allowed for negative integers");
                 break :blk if (right > std.math.maxInt(u6)) 0 else left << @intCast(u6, right);
             },
             .shift_right => blk: {
-                if (right < 0) return Error.InvalidOperator;
+                if (right < 0) return self.fail("Bit shifting not allowed for negative integers");
                 break :blk if (right > std.math.maxInt(u6)) 0 else left >> @intCast(u6, right);
             },
-            else => return Error.InvalidOperator,
+            else => return self.fail("Unexpected operator"),
         };
 
         const res = try self.newValue();
@@ -258,8 +267,8 @@ pub const Vm = struct {
     }
 
     /// Concats two strings together
-    fn analStringOp(self: *Vm, op: byte_code.Opcode, left: []const u8, right: []const u8) Error!void {
-        if (op != .add) return Error.InvalidOperator;
+    fn execStringOp(self: *Vm, op: byte_code.Opcode, left: []const u8, right: []const u8) Error!void {
+        if (op != .add) return self.fail("Unexpected operator, expected '+'");
 
         const res = try self.newValue();
         res.* = .{ .string = try std.mem.concat(&self.arena.allocator, u8, &[_][]const u8{ left, right }) };
@@ -269,63 +278,63 @@ pub const Vm = struct {
     /// Analyzes the instruction, ensures the lhs is an identifier and the rhs is an integer or string.
     /// Strings are only valid for the `assign_add` bytecode instruction
     fn execAssignAndBinOp(self: *Vm, op: byte_code.Opcode) Error!void {
-        const right = self.pop() orelse return Error.MissingValue;
-        const left = self.pop() orelse return Error.MissingValue;
+        const right = self.pop() orelse return self.fail("Missing value");
+        const left = self.pop() orelse return self.fail("Missing value");
 
-        if (left.lufType() != right.lufType()) return Error.InvalidOperator;
+        if (left.lufType() != right.lufType()) return self.fail("Mismatching types");
 
         if (left.isType(.integer)) {
-            try self.analIntOp(switch (op) {
+            try self.execIntOp(switch (op) {
                 .assign_add => .add,
                 .assign_div => .div,
                 .assign_mul => .mul,
                 .assign_sub => .sub,
-                else => unreachable,
+                else => return self.fail("Unexpected operator"),
             }, left.integer, right.integer);
             const val = self.pop().?;
             left.* = val.*;
             return self.push(&Value.Nil);
         }
         if (left.isType(.string)) {
-            if (op != .assign_add) return Error.InvalidOperator;
+            if (op != .assign_add) return self.fail("Unexpected operator on string, expected '+='");
 
-            try self.analStringOp(.add, left.string, right.string);
+            try self.execStringOp(.add, left.string, right.string);
             const val = self.pop().?;
             left.* = val.*;
             return self.push(&Value.Nil);
         }
 
-        return Error.InvalidOperator;
+        return self.fail("Unexpected type, expected integer or string");
     }
 
     /// Analyzes a then executes a comparison and pushes the return value on the stack
     fn execCmp(self: *Vm, op: byte_code.Opcode) Error!void {
         // right is on the top of left, therefore we pop it first
-        const right = self.pop() orelse return Error.MissingValue;
-        const left = self.pop() orelse return Error.MissingValue;
+        const right = self.pop() orelse return self.fail("Missing value");
+        const left = self.pop() orelse return self.fail("Missing value");
 
         if (left.lufType() == right.lufType() and left.isType(.integer)) {
-            return self.analIntCmp(op, left.integer, right.integer);
+            return self.execIntCmp(op, left.integer, right.integer);
         }
 
         if (left.lufType() == right.lufType() and left.isType(.string)) {
-            return self.analStringCmp(op, left.string, right.string);
+            return self.execStringCmp(op, left.string, right.string);
         }
 
-        const left_bool = left.unwrapAs(.boolean) orelse return Error.InvalidOperator;
-        const right_bool = right.unwrapAs(.boolean) orelse return Error.InvalidOperator;
+        const left_bool = left.unwrapAs(.boolean) orelse return self.fail("Expected boolean");
+        const right_bool = right.unwrapAs(.boolean) orelse return self.fail("Expected boolean");
 
         return switch (op) {
             .equal => self.push(if (left_bool == right_bool) &Value.True else &Value.False),
             .not_equal => self.push(if (left_bool != right_bool) &Value.True else &Value.False),
             .@"and" => self.push(if (left_bool and right_bool) &Value.True else &Value.False),
             .@"or" => self.push(if (left_bool or right_bool) &Value.True else &Value.False),
-            else => Error.InvalidOperator,
+            else => return self.fail("Unexpected operator on boolean"),
         };
     }
 
     /// Analyzes and compares 2 integers depending on the given operator
-    fn analIntCmp(self: *Vm, op: byte_code.Opcode, left: i64, right: i64) Error!void {
+    fn execIntCmp(self: *Vm, op: byte_code.Opcode, left: i64, right: i64) Error!void {
         const boolean = switch (op) {
             .equal => left == right,
             .not_equal => left != right,
@@ -333,19 +342,19 @@ pub const Vm = struct {
             .greater_than_equal => left >= right,
             .less_than => left < right,
             .less_than_equal => left <= right,
-            else => return Error.InvalidOperator,
+            else => return self.fail("Unexpected operator"),
         };
 
         return self.push(if (boolean) &Value.True else &Value.False);
     }
 
     /// Analyzes and compares 2 strings
-    fn analStringCmp(self: *Vm, op: byte_code.Opcode, left: []const u8, right: []const u8) Error!void {
+    fn execStringCmp(self: *Vm, op: byte_code.Opcode, left: []const u8, right: []const u8) Error!void {
         var eql = std.mem.eql(u8, left, right);
         switch (op) {
             .equal => {},
             .not_equal => eql = !eql,
-            else => return Error.InvalidOperator,
+            else => return self.fail("Unexpected operator, expected '==' or '!='"),
         }
 
         return self.push(if (eql) &Value.True else &Value.False);
@@ -353,8 +362,8 @@ pub const Vm = struct {
 
     /// Analyzes and executes a negation
     fn execNegation(self: *Vm) Error!void {
-        const right = self.pop() orelse return Error.MissingValue;
-        const integer = right.unwrapAs(.integer) orelse return Error.InvalidOperator;
+        const right = self.pop() orelse return self.fail("Missing value");
+        const integer = right.unwrapAs(.integer) orelse return self.fail("Expected integer");
 
         const res = try self.newValue();
         res.* = .{ .integer = -integer };
@@ -363,7 +372,7 @@ pub const Vm = struct {
 
     /// Analyzes and executes the '!' operator
     fn execNot(self: *Vm) Error!void {
-        const right = self.pop() orelse return Error.MissingValue;
+        const right = self.pop() orelse return self.fail("Missing value");
 
         const val = switch (right.*) {
             .boolean => !right.boolean,
@@ -375,9 +384,9 @@ pub const Vm = struct {
 
     /// Executes the ~ operator
     fn execBitwiseNot(self: *Vm) Error!void {
-        const value = self.pop() orelse return Error.MissingValue;
+        const value = self.pop() orelse return self.fail("Missing value");
 
-        const integer = value.unwrapAs(.integer) orelse return Error.InvalidOperator;
+        const integer = value.unwrapAs(.integer) orelse return self.fail("Expected integer");
 
         const ret = try self.newValue();
         ret.* = .{ .integer = ~integer };
@@ -407,7 +416,7 @@ pub const Vm = struct {
 
             if (i == 1)
                 list_type = val.lufType()
-            else if (!val.isType(list_type)) return Error.MissingValue;
+            else if (!val.isType(list_type)) return self.fail("Mismatching types");
             list.items[len - i] = val;
         }
 
@@ -443,8 +452,8 @@ pub const Vm = struct {
                 key_type = key.lufType();
                 value_type = value.lufType();
             } else {
-                if (!key.isType(key_type)) return Error.MissingValue;
-                if (!value.isType(value_type)) return Error.MissingValue;
+                if (!key.isType(key_type)) return self.fail("Mismatching types");
+                if (!value.isType(value_type)) return self.fail("Mismatching types");
             }
 
             map.putAssumeCapacity(key, value);
@@ -455,11 +464,11 @@ pub const Vm = struct {
 
     /// Creates a new iterable
     fn makeIterable(self: *Vm, inst: byte_code.Instruction) Error!void {
-        const iterable = self.pop() orelse return Error.MissingValue;
+        const iterable = self.pop() orelse return self.fail("Missing value");
 
         switch (iterable.lufType()) {
             .list, .range, .string => {},
-            else => return Error.InvalidOperator,
+            else => return self.fail("Unsupported value for iterable"),
         }
 
         const value = try self.newValue();
@@ -482,7 +491,7 @@ pub const Vm = struct {
     fn execNextIter(self: *Vm) Error!void {
         const value = self.pop().?;
 
-        var iterator = value.unwrapAs(.iterable) orelse return Error.InvalidOperator;
+        var iterator = value.unwrapAs(.iterable) orelse return self.fail("Expected iterable");
         const next = try self.newValue();
         try iterator.next(&self.arena.allocator, next);
         if (!next.isType(.nil)) {
@@ -515,8 +524,8 @@ pub const Vm = struct {
         const ret = try self.newValue();
         ret.* = .{
             .range = .{
-                .start = left.unwrapAs(.integer) orelse return Error.InvalidOperator,
-                .end = right.unwrapAs(.integer) orelse return Error.InvalidOperator,
+                .start = left.unwrapAs(.integer) orelse return self.fail("Expected integer for range"),
+                .end = right.unwrapAs(.integer) orelse return self.fail("Expected integer for range"),
             },
         };
         return self.push(ret);
@@ -524,14 +533,14 @@ pub const Vm = struct {
 
     /// Analyzes an index/reference pushes the value on the stack
     fn getIndexValue(self: *Vm) Error!void {
-        const index = self.pop() orelse return Error.MissingValue;
-        const left = self.pop() orelse return Error.MissingValue;
+        const index = self.pop() orelse return self.fail("Missing value");
+        const left = self.pop() orelse return self.fail("Missing value");
 
         switch (left.*) {
             .list => |list| {
                 switch (index.*) {
                     .integer => |int| {
-                        if (int < 0 or int > list.items.len) return Error.OutOfBounds;
+                        if (int < 0 or int > list.items.len) return self.fail("Out of bounds");
                         return self.push(list.items[@intCast(u64, int)]);
                     },
                     .string => |name| {
@@ -546,12 +555,15 @@ pub const Vm = struct {
 
                             //create a shallow copy
                             const res = try self.newValue();
-                            res.* = (builtin.func(self, args) catch return Error.InvalidOperator).*;
+                            res.* = (builtin.func(
+                                self,
+                                args,
+                            ) catch return self.fail("Could not execute builtin function")).*;
 
                             return self.push(res);
                         }
                     },
-                    else => return error.InvalidOperator,
+                    else => return self.fail("Expected string or integer on rhs"),
                 }
             },
             .map => |map| {
@@ -565,7 +577,7 @@ pub const Vm = struct {
             .string => |string| {
                 switch (index.*) {
                     .integer => |int| {
-                        if (int < 0 or int > string.len) return Error.OutOfBounds;
+                        if (int < 0 or int > string.len) return self.fail("Out of bounds");
 
                         const val = try self.newValue();
                         val.* = .{ .string = string[@intCast(usize, int)..@intCast(usize, int + 1)] };
@@ -577,27 +589,30 @@ pub const Vm = struct {
 
                             //create a shallow copy
                             const res = try self.newValue();
-                            res.* = (builtin.func(self, &[_]*Value{left}) catch return Error.InvalidOperator).*;
+                            res.* = (builtin.func(
+                                self,
+                                &[_]*Value{left},
+                            ) catch return self.fail("Could not execute builtin function")).*;
 
                             return self.push(res);
                         }
                     },
-                    else => return Error.InvalidOperator,
+                    else => return self.fail("Expected string or integer on rhs"),
                 }
             },
             .module => |mod| {
-                if (!index.isType(.string)) return error.InvalidOperator;
+                if (!index.isType(.string)) return self.fail("Expected string");
 
                 // Find the definition in the module, if it doesn't exist, it's an error.
                 // this differs from a regular map where we return null
                 if (mod.attributes.map.get(index)) |val| {
                     return self.push(val);
                 } else {
-                    return error.MissingValue;
+                    return self.fail("Identifier not found in module");
                 }
             },
             ._enum => |enm| {
-                const enum_value = index.unwrapAs(.string) orelse return Error.InvalidOperator;
+                const enum_value = index.unwrapAs(.string) orelse return self.fail("Expected string");
 
                 for (enm) |field, i| {
                     if (std.mem.eql(u8, field, enum_value)) {
@@ -607,22 +622,22 @@ pub const Vm = struct {
                     }
                 }
 
-                return error.InvalidOperator;
+                return self.fail("Enum identifier does not exist");
             },
-            else => return error.InvalidOperator,
+            else => return self.fail("Unsupported type"),
         }
     }
 
     /// Sets the lhs by the value on top of the current stack
     /// This also does type checking to ensure the lhs and rhs are equal types
     fn setIndexValue(self: *Vm) Error!void {
-        const value = self.pop() orelse return Error.MissingValue;
-        const right = self.pop() orelse return Error.MissingValue;
-        const left = self.pop() orelse return Error.MissingValue;
+        const value = self.pop() orelse return self.fail("Missing value");
+        const right = self.pop() orelse return self.fail("Missing value");
+        const left = self.pop() orelse return self.fail("Missing value");
 
         if (left.isType(.list) and right.isType(.integer)) {
             const list = left.list;
-            if (right.integer < 0 or right.integer > list.items.len) return Error.OutOfBounds;
+            if (right.integer < 0 or right.integer > list.items.len) return self.fail("Out of bounds");
             list.items[@intCast(usize, right.integer)].* = value.*;
             return self.push(&Value.Nil);
         } else if (left.isType(.map)) {
@@ -632,12 +647,12 @@ pub const Vm = struct {
                 return self.push(&Value.Nil);
             } else {
                 // replace with more descriptive Error
-                return Error.MissingValue;
+                return self.fail("Value not found");
             }
         }
 
         // replace with more descriptive Error
-        return Error.MissingValue;
+        return self.fail("Unsupported type");
     }
 
     /// Analyzes the current instruction to execture a function call
@@ -652,7 +667,7 @@ pub const Vm = struct {
         // if it's not a function call, we can expect it to be a builtin function
         if (val.* != .function) return;
 
-        if (arg_len != val.function.arg_len) return Error.MissingValue;
+        if (arg_len != val.function.arg_len) return self.fail("Mismatching argument length");
 
         var cur_frame = self.frame();
         if (cur_frame.fp == val and next.op == .return_value) {
@@ -676,34 +691,20 @@ pub const Vm = struct {
     /// Reads the file name, open it, and compile its source code.
     /// After compilator, the symbols will be saved in a map and returned
     fn importModule(self: *Vm, file_name: []const u8) Error!*Value {
-        const file = std.fs.cwd().openFile(file_name, .{}) catch {
-            return Error.InvalidOperator;
-        };
-        defer file.close();
-        const size = file.getEndPos() catch {
-            return Error.InvalidOperator;
-        };
+        const file = std.fs.cwd().openFile(file_name, .{}) catch return Error.RuntimeError;
 
-        const source = file.readAllAlloc(self.allocator, size, size) catch {
-            return Error.OutOfMemory;
-        };
+        defer file.close();
+        const size = file.getEndPos() catch return Error.RuntimeError;
+
+        const source = file.readAllAlloc(self.allocator, size, size) catch return Error.RuntimeError;
         defer self.allocator.free(source);
 
         // we should probably save this bytecode so we can free it at a later point
-        var code = compiler.compile(self.allocator, source) catch {
-            return Error.InvalidOperator;
-        };
+        var code = compiler.compile(self.allocator, source, &self.errors) catch return Error.RuntimeError;
         defer code.deinit();
 
         const last_ip = self.ip;
         const last_sp = self.sp;
-
-        try self.call_stack.append(.{
-            .fp = null,
-            .sp = 0,
-            .ip = 0,
-            .instructions = code.instructions,
-        });
 
         try self.run(code);
 
@@ -731,7 +732,6 @@ pub const Vm = struct {
             attributes.putAssumeCapacityNoClobber(name, value);
         }
 
-        _ = self.call_stack.pop();
         const ret = try self.newValue();
         ret.* = .{ .map = attributes };
         return ret;
@@ -740,10 +740,10 @@ pub const Vm = struct {
     /// Loads a module, if not existing, compiles the source code of the given file name
     fn loadModule(self: *Vm) Error!void {
         const val = self.pop().?;
-        const name = val.unwrapAs(.string) orelse return Error.InvalidOperator;
+        const name = val.unwrapAs(.string) orelse return self.fail("Expected a string");
 
         const mod = self.imports.get(name) orelse blk: {
-            const imp = try self.importModule(name);
+            const imp = self.importModule(name) catch return self.fail("Could not import module");
             try self.imports.put(name, imp);
             break :blk imp;
         };
@@ -768,18 +768,18 @@ pub const Vm = struct {
 
         switch (prong_value.*) {
             .integer => |integer| {
-                const capture = capture_value.unwrapAs(.integer) orelse return Error.InvalidOperator;
-                return self.analIntCmp(.equal, capture, integer);
+                const capture = capture_value.unwrapAs(.integer) orelse return self.fail("Expected an integer");
+                return self.execIntCmp(.equal, capture, integer);
             },
             .string => |string| {
-                const capture = capture_value.unwrapAs(.string) orelse return Error.InvalidOperator;
-                return self.analStringCmp(.equal, capture, string);
+                const capture = capture_value.unwrapAs(.string) orelse return self.fail("Expected a string");
+                return self.execStringCmp(.equal, capture, string);
             },
             .range => |range| {
-                const capture = capture_value.unwrapAs(.integer) orelse return Error.InvalidOperator;
+                const capture = capture_value.unwrapAs(.integer) orelse return self.fail("Expected an integer");
                 return self.push(if (capture >= range.start and capture <= range.end) &Value.True else &Value.False);
             },
-            else => return Error.InvalidOperator,
+            else => return self.fail("Unsupported type, switching are only allowed for integers, strings and ranges"),
         }
     }
 
@@ -787,19 +787,26 @@ pub const Vm = struct {
     fn newValue(self: *Vm) !*Value {
         return self.arena.allocator.create(Value);
     }
+
+    /// Appends an error message to `errors` and returns a `Vm.Error`
+    fn fail(self: *Vm, comptime msg: []const u8) Error!void {
+        //TODO implement a way to add location information
+        try self.errors.add("Runtime error: " ++ msg, 0, .err);
+        return Error.RuntimeError;
+    }
+
+    /// Checks each given type if they are equal or not
+    fn resolveType(self: *Vm, values: []*const Value) Error!Type {
+        std.debug.assert(values.len > 0);
+        const cur_tag: Type = values[0].lufType();
+        if (values.len == 1) return cur_tag;
+
+        for (values[1..]) |value|
+            if (!value.isType(cur_tag)) try self.fail("Mismatching types");
+
+        return cur_tag;
+    }
 };
-
-/// Checks each given type if they are equal or not
-fn resolveType(values: []*const Value) Vm.Error!Type {
-    std.debug.assert(values.len > 0);
-    const cur_tag: Type = values[0].lufType();
-    if (values.len == 1) return cur_tag;
-
-    for (values[1..]) |value|
-        if (!value.isType(cur_tag)) return Vm.Error.InvalidOperator;
-
-    return cur_tag;
-}
 
 /// Evalutes if the given `Value` is truthy.
 /// Only accepts booleans and 'Nil'.
@@ -835,10 +842,10 @@ test "Integer arithmetic" {
     };
 
     inline for (test_cases) |case| {
-        var code = try compiler.compile(testing.allocator, case.input);
-        defer code.deinit();
-        var vm = try run(code, testing.allocator);
+        var vm = Vm.init(testing.allocator);
+        try vm.compileAndRun(case.input);
         defer vm.deinit();
+
         testing.expect(case.expected == vm.peek().integer);
         testing.expectEqual(@as(usize, 0), vm.sp);
     }
@@ -863,10 +870,10 @@ test "Boolean" {
     };
 
     inline for (test_cases) |case| {
-        var code = try compiler.compile(testing.allocator, case.input);
-        defer code.deinit();
-        var vm = try run(code, testing.allocator);
+        var vm = Vm.init(testing.allocator);
+        try vm.compileAndRun(case.input);
         defer vm.deinit();
+
         testing.expect(case.expected == vm.peek().boolean);
         testing.expectEqual(@as(usize, 0), vm.sp);
     }
@@ -884,10 +891,10 @@ test "Conditional" {
     };
 
     inline for (test_cases) |case| {
-        var code = try compiler.compile(testing.allocator, case.input);
-        defer code.deinit();
-        var vm = try run(code, testing.allocator);
+        var vm = Vm.init(testing.allocator);
+        try vm.compileAndRun(case.input);
         defer vm.deinit();
+
         if (@TypeOf(case.expected) == comptime_int) {
             testing.expect(case.expected == vm.peek().integer);
         } else {
@@ -905,10 +912,10 @@ test "Declaration" {
     };
 
     inline for (test_cases) |case| {
-        var code = try compiler.compile(testing.allocator, case.input);
-        defer code.deinit();
-        var vm = try run(code, testing.allocator);
+        var vm = Vm.init(testing.allocator);
+        try vm.compileAndRun(case.input);
         defer vm.deinit();
+
         testing.expect(case.expected == vm.peek().integer);
         testing.expectEqual(@as(usize, 0), vm.sp);
     }
@@ -922,10 +929,10 @@ test "Strings" {
     };
 
     inline for (test_cases) |case| {
-        var code = try compiler.compile(testing.allocator, case.input);
-        defer code.deinit();
-        var vm = try run(code, testing.allocator);
+        var vm = Vm.init(testing.allocator);
+        try vm.compileAndRun(case.input);
         defer vm.deinit();
+
         testing.expectEqualStrings(case.expected, vm.peek().string);
         testing.expectEqual(@as(usize, 0), vm.sp);
     }
@@ -939,9 +946,8 @@ test "Arrays" {
     };
 
     inline for (test_cases) |case| {
-        var code = try compiler.compile(testing.allocator, case.input);
-        defer code.deinit();
-        var vm = try run(code, testing.allocator);
+        var vm = Vm.init(testing.allocator);
+        try vm.compileAndRun(case.input);
         defer vm.deinit();
 
         const list = vm.peek().list;
@@ -962,9 +968,8 @@ test "Maps" {
     };
 
     inline for (test_cases) |case| {
-        var code = try compiler.compile(testing.allocator, case.input);
-        defer code.deinit();
-        var vm = try run(code, testing.allocator);
+        var vm = Vm.init(testing.allocator);
+        try vm.compileAndRun(case.input);
         defer vm.deinit();
 
         const map = vm.peek().map;
@@ -999,9 +1004,8 @@ test "Index" {
     };
 
     inline for (test_cases) |case| {
-        var code = try compiler.compile(testing.allocator, case.input);
-        defer code.deinit();
-        var vm = try run(code, testing.allocator);
+        var vm = Vm.init(testing.allocator);
+        try vm.compileAndRun(case.input);
         defer vm.deinit();
 
         if (@TypeOf(case.expected) == comptime_int)
@@ -1023,9 +1027,8 @@ test "Basic function calls with no arguments" {
     };
 
     inline for (test_cases) |case| {
-        var code = try compiler.compile(testing.allocator, case.input);
-        defer code.deinit();
-        var vm = try run(code, testing.allocator);
+        var vm = Vm.init(testing.allocator);
+        try vm.compileAndRun(case.input);
         defer vm.deinit();
 
         if (@TypeOf(case.expected) == comptime_int)
@@ -1043,9 +1046,8 @@ test "Globals vs Locals" {
     };
 
     inline for (test_cases) |case| {
-        var code = try compiler.compile(testing.allocator, case.input);
-        defer code.deinit();
-        var vm = try run(code, testing.allocator);
+        var vm = Vm.init(testing.allocator);
+        try vm.compileAndRun(case.input);
         defer vm.deinit();
 
         if (@TypeOf(case.expected) == comptime_int)
@@ -1064,9 +1066,8 @@ test "Functions with arguments" {
     };
 
     inline for (test_cases) |case| {
-        var code = try compiler.compile(testing.allocator, case.input);
-        defer code.deinit();
-        var vm = try run(code, testing.allocator);
+        var vm = Vm.init(testing.allocator);
+        try vm.compileAndRun(case.input);
         defer vm.deinit();
 
         if (@TypeOf(case.expected) == comptime_int)
@@ -1086,9 +1087,8 @@ test "Builtins" {
     };
 
     inline for (test_cases) |case| {
-        var code = try compiler.compile(testing.allocator, case.input);
-        defer code.deinit();
-        var vm = try run(code, testing.allocator);
+        var vm = Vm.init(testing.allocator);
+        try vm.compileAndRun(case.input);
         defer vm.deinit();
 
         testing.expectEqual(@as(i64, case.expected), vm.peek().integer);
@@ -1104,9 +1104,8 @@ test "While loop" {
     };
 
     inline for (test_cases) |case| {
-        var code = try compiler.compile(testing.allocator, case.input);
-        defer code.deinit();
-        var vm = try run(code, testing.allocator);
+        var vm = Vm.init(testing.allocator);
+        try vm.compileAndRun(case.input);
         defer vm.deinit();
 
         testing.expectEqual(@as(i64, case.expected), vm.peek().integer);
@@ -1124,9 +1123,8 @@ test "Tail recursion" {
         \\}
         \\func(2) 
     ;
-    var code = try compiler.compile(testing.allocator, input);
-    defer code.deinit();
-    var vm = try run(code, testing.allocator);
+    var vm = Vm.init(testing.allocator);
+    try vm.compileAndRun(input);
     defer vm.deinit();
 
     testing.expectEqual(@as(i64, 10), vm.peek().integer);
@@ -1147,9 +1145,8 @@ test "For loop" {
         \\}
         \\sum
     ;
-    var code = try compiler.compile(testing.allocator, input);
-    defer code.deinit();
-    var vm = try run(code, testing.allocator);
+    var vm = Vm.init(testing.allocator);
+    try vm.compileAndRun(input);
     defer vm.deinit();
 
     testing.expectEqual(@as(i64, 8), vm.peek().integer);
@@ -1167,9 +1164,8 @@ test "Range" {
         \\}
         \\sum
     ;
-    var code = try compiler.compile(testing.allocator, input);
-    defer code.deinit();
-    var vm = try run(code, testing.allocator);
+    var vm = Vm.init(testing.allocator);
+    try vm.compileAndRun(input);
     defer vm.deinit();
 
     testing.expectEqual(@as(i64, 4950), vm.peek().integer);
@@ -1178,9 +1174,8 @@ test "Range" {
 
 test "For loop - String" {
     const input = "mut result = \"hello\" const string = \"world\" for(string)|c, i|{result+=c}result";
-    var code = try compiler.compile(testing.allocator, input);
-    defer code.deinit();
-    var vm = try run(code, testing.allocator);
+    var vm = Vm.init(testing.allocator);
+    try vm.compileAndRun(input);
     defer vm.deinit();
 
     testing.expectEqualStrings("helloworld", vm.peek().string);
@@ -1195,9 +1190,8 @@ test "Enum expression and comparison" {
         \\  5
         \\}
     ;
-    var code = try compiler.compile(testing.allocator, input);
-    defer code.deinit();
-    var vm = try run(code, testing.allocator);
+    var vm = Vm.init(testing.allocator);
+    try vm.compileAndRun(input);
     defer vm.deinit();
 
     testing.expectEqual(@as(i64, 5), vm.peek().integer);
@@ -1215,9 +1209,8 @@ test "Enum expression and comparison" {
         \\}
         \\x
     ;
-    var code = try compiler.compile(testing.allocator, input);
-    defer code.deinit();
-    var vm = try run(code, testing.allocator);
+    var vm = Vm.init(testing.allocator);
+    try vm.compileAndRun(input);
     defer vm.deinit();
     testing.expectEqual(@as(i64, 50), vm.peek().integer);
     testing.expectEqual(@as(usize, 0), vm.sp);
