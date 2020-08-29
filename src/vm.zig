@@ -69,6 +69,7 @@ pub const Vm = struct {
         self.arena.deinit();
         self.call_stack.deinit();
         self.imports.deinit();
+        self.errors.deinit();
         self.* = undefined;
     }
 
