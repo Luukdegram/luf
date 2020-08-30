@@ -32,6 +32,7 @@ pub const Node = union(NodeType) {
     boolean: *Bool,
     if_expression: *IfExpression,
     func_lit: *FunctionLiteral,
+    func_arg: *FunctionArgument,
     call_expression: *CallExpression,
     string_lit: *StringLiteral,
     array: *ArrayLiteral,
@@ -65,6 +66,7 @@ pub const Node = union(NodeType) {
         boolean,
         if_expression,
         func_lit,
+        func_arg,
         call_expression,
         string_lit,
         array,
@@ -263,6 +265,14 @@ pub const Node = union(NodeType) {
         params: []const Node,
         body: ?Node,
         ret_type: Node,
+    };
+
+    /// Represents an argument inside a function, contains both the
+    /// identifier as the type of the argument.
+    pub const FunctionArgument = struct {
+        token: Token,
+        value: []const u8,
+        arg_type: Node,
     };
 
     /// Node representing a call expression and holds the function to be called

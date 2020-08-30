@@ -1061,9 +1061,9 @@ test "Globals vs Locals" {
 
 test "Functions with arguments" {
     const test_cases = .{
-        .{ .input = "const x = fn(x) int { return x } x(3)", .expected = 3 },
-        .{ .input = "const x = fn(a, b) int { return a + b } x(3,5)", .expected = 8 },
-        .{ .input = "const x = fn(a, b) int { const z = a + b return z } x(3,5)", .expected = 8 },
+        .{ .input = "const x = fn(x: int) int { return x } x(3)", .expected = 3 },
+        .{ .input = "const x = fn(a: int, b: int) int { return a + b } x(3,5)", .expected = 8 },
+        .{ .input = "const x = fn(a: int, b: int) int { const z = a + b return z } x(3,5)", .expected = 8 },
     };
 
     inline for (test_cases) |case| {
@@ -1116,7 +1116,7 @@ test "While loop" {
 
 test "Tail recursion" {
     const input =
-        \\const func = fn(a) int {
+        \\const func = fn(a: int) int {
         \\  if (a == 10) {
         \\      return a
         \\  }

@@ -410,7 +410,7 @@ pub const Compiler = struct {
 
                 for (function.params) |param| {
                     // function arguments are not mutable by default
-                    _ = (try self.scope.define(param.identifier.value, false)) orelse return self.fail(
+                    _ = (try self.scope.define(param.func_arg.value, false)) orelse return self.fail(
                         "Identifier has already been declared",
                         function.token.start,
                     );
@@ -862,7 +862,7 @@ test "Compile AST to bytecode" {
             },
         },
         .{
-            .input = "const func = fn(x) int { return x } func(5)",
+            .input = "const func = fn(x: int) int { return x } func(5)",
             .consts = &[_]Value{ Value{ .function = .{ .arg_len = 1, .locals = 1, .instructions = undefined } }, Value{ .integer = 5 } },
             .opcodes = &[_]bytecode.Opcode{
                 .jump,

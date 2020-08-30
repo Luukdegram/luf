@@ -431,19 +431,32 @@ pub const Parser = struct {
             return list.toOwnedSlice();
         }
 
-        try list.append(try self.parseIdentifier());
-        try self.expectPeek(.colon);
-        
+        try list.append(try self.parseArgument());
 
         while (self.peekIsType(.comma)) {
             self.next();
             self.next();
-            try list.append(try self.parseIdentifier());
+            try list.append(try self.parseArgument());
         }
 
         try self.expectPeek(.right_parenthesis);
 
         return list.toOwnedSlice();
+    }
+
+    /// Parses an argument that contains an identifier Node and its type
+    fn parseArgument(self: *Parser) Error!Node {
+        const node = try self.allocator.create(Node.FunctionArgument);
+        node.* = .{
+            .token = self.current_token,
+            .value = self.source[self.current_token.start..self.current_token.end],
+            .arg_type = undefined,
+        };
+        try self.expectPeek(.colon);
+        self.next();
+        node.arg_type = try self.parseTypeExpression();
+
+        return Node{ .func_arg = node };
     }
 
     /// Parses the current token into a call expression
@@ -1071,7 +1084,7 @@ test "If else-if expression" {
 }
 
 test "Function literal" {
-    const input = "fn(x, y) fn(x) int { x + y }";
+    const input = "fn(x: int, y: int) fn(x: int) int { x + y }";
     const allocator = testing.allocator;
     var errors = Errors.init(allocator);
     defer errors.deinit();
@@ -1086,8 +1099,8 @@ test "Function literal" {
     const func = tree.nodes[0].expression.value.func_lit;
     testing.expect(func.params.len == 2);
 
-    testing.expectEqualSlices(u8, func.params[0].identifier.value, "x");
-    testing.expectEqualSlices(u8, func.params[1].identifier.value, "y");
+    testing.expectEqualSlices(u8, func.params[0].func_arg.value, "x");
+    testing.expectEqualSlices(u8, func.params[1].func_arg.value, "y");
 
     const body = func.body.?.block_statement.nodes[0];
     const infix = body.expression.value.infix;
@@ -1099,8 +1112,8 @@ test "Function literal" {
 test "Function parameters" {
     const test_cases = .{
         .{ .input = "fn() void {}", .expected = &[_][]const u8{} },
-        .{ .input = "fn(x) void {}", .expected = &[_][]const u8{"x"} },
-        .{ .input = "fn(x, y, z) void {}", .expected = &[_][]const u8{ "x", "y", "z" } },
+        .{ .input = "fn(x: int) void {}", .expected = &[_][]const u8{"x"} },
+        .{ .input = "fn(x: int, y: int, z: int) void {}", .expected = &[_][]const u8{ "x", "y", "z" } },
     };
     const allocator = testing.allocator;
     inline for (test_cases) |case| {
@@ -1115,7 +1128,7 @@ test "Function parameters" {
         testing.expect(func.params.len == case.expected.len);
 
         inline for (case.expected) |exp, i| {
-            testing.expectEqualSlices(u8, exp, func.params[i].identifier.value);
+            testing.expectEqualSlices(u8, exp, func.params[i].func_arg.value);
         }
     }
 }
