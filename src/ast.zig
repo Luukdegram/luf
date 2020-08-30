@@ -111,6 +111,20 @@ pub const Node = union(NodeType) {
         };
     }
 
+    /// Returns the inner type of a Node. i.e. this will return `Type.integer` for []int
+    /// This will also return the final result type of functions that return functions
+    /// i.e. this will return `Type.integer` for 'fn() fn()int {}'.
+    pub fn getInnerType(self: Node) @import("value.zig").Type {
+        return switch (self) {
+            .type_def => |td| if (td.value) |val| val.getInnerType() else td.getType(),
+            .array => |list| list.type_def.getInnerType(),
+            .func_lit => |func| func.ret_type.getInnerType(),
+            .func_arg => |arg| arg.arg_type.getInnerType(),
+            .expression => |exp| exp.value.getInnerType(),
+            else => self.getType(),
+        };
+    }
+
     /// Represents a String
     pub const StringLiteral = struct {
         token: Token,
@@ -120,7 +134,9 @@ pub const Node = union(NodeType) {
     /// Node representing an array
     pub const ArrayLiteral = struct {
         token: Token,
-        value: []const Node,
+        value: ?[]const Node,
+        type_def: Node,
+        len: ?Node,
     };
 
     /// Node representing a map

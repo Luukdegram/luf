@@ -58,7 +58,7 @@ pub const Errors = struct {
 
             //write the source code lines and point to token's index
             try writer.print("{}\n", .{source[start .. err.index + end]});
-            try writer.writeByteNTimes(' ', err.index - start);
+            try writer.writeByteNTimes('~', err.index - start);
             try writer.writeAll("\x1b[0;35m^\n\x1b[0m");
         }
     }

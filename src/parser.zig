@@ -207,7 +207,7 @@ pub const Parser = struct {
             .@"if" => try self.parseIfExpression(),
             .left_parenthesis => try self.parseGroupedExpression(),
             .function => try self.parseFunctionLiteral(true),
-            .left_bracket => try self.parseArray(),
+            .left_bracket => try self.parseArray(false),
             .left_brace => try self.parseMap(),
             .while_loop => try self.parseWhile(),
             .for_loop => try self.parseFor(),
@@ -504,9 +504,27 @@ pub const Parser = struct {
     }
 
     /// Parses the token into an `ArrayLiteral`
-    fn parseArray(self: *Parser) Error!Node {
+    fn parseArray(self: *Parser, is_type_defintion: bool) Error!Node {
         const array = try self.allocator.create(Node.ArrayLiteral);
-        array.* = .{ .token = self.current_token, .value = try self.parseArguments(.right_bracket) };
+        array.* = .{ .token = self.current_token, .value = null, .type_def = undefined, .len = null };
+
+        if (!self.peekIsType(.right_bracket)) {
+            self.next();
+            array.len = try self.parseExpression(.lowest);
+        }
+        try self.expectPeek(.right_bracket);
+
+        self.next();
+
+        array.type_def = try self.parseTypeExpression();
+
+        // if this is a type declaration, i.e fn(x: []int) then don't parse arguments
+        if (!is_type_defintion) {
+            try self.expectPeek(.left_brace);
+
+            array.value = try self.parseArguments(.right_brace);
+        }
+
         return Node{ .array = array };
     }
 
@@ -798,6 +816,7 @@ pub const Parser = struct {
 
         switch (self.current_token.token_type) {
             .bool_type, .int_type, .string_type, .void_type => {},
+            .left_bracket => node.value = try self.parseArray(true),
             .function => node.value = try self.parseFunctionLiteral(false),
             else => return self.fail("Unexpected token, expected a type", self.current_token.start),
         }
@@ -1193,7 +1212,7 @@ test "Member expression" {
 }
 
 test "Array literal" {
-    const input = "[1, 2 * 2, 3 + 3]";
+    const input = "[]int{1, 2 * 2, 3 + 3}";
     const allocator = testing.allocator;
 
     var errors = Errors.init(allocator);
@@ -1204,9 +1223,9 @@ test "Array literal" {
     testing.expect(tree.nodes.len == 1);
 
     const array = tree.nodes[0].expression.value.array;
-    testing.expect(array.value.len == 3);
-    testing.expect(array.value[0].int_lit.value == 1);
-    testing.expect(array.value[1].infix.operator == .multiply);
+    testing.expect(array.value.?.len == 3);
+    testing.expect(array.value.?[0].int_lit.value == 1);
+    testing.expect(array.value.?[1].infix.operator == .multiply);
 }
 
 test "Array index" {
@@ -1377,6 +1396,7 @@ test "Type definitions" {
     const cases = [_][]const u8{
         "fn(x: int, y: int)void{}",
         "const x: int = 10",
+        "fn(x: []int)fn()string{}",
     };
 
     const allocator = testing.allocator;
@@ -1386,7 +1406,7 @@ test "Type definitions" {
     const function = try parse(allocator, cases[0], &errors);
     defer function.deinit();
 
-    const func_type = function.nodes[0].expression.value.func_lit.ret_type.getType();
+    const func_type = function.nodes[0].getInnerType();
     const arg_type = function.nodes[0].expression.value.func_lit.params[0].getType();
     testing.expectEqual(Type._void, func_type);
     testing.expectEqual(Type.integer, arg_type);
@@ -1396,4 +1416,14 @@ test "Type definitions" {
 
     const decl_type = declaration.nodes[0].getType();
     testing.expectEqual(Type.integer, decl_type);
+
+    const array = try parse(allocator, cases[2], &errors);
+    defer array.deinit();
+
+    const array_type = array.nodes[0].expression.value.func_lit.params[0].getType();
+    const scalar_type = array.nodes[0].expression.value.func_lit.params[0].getInnerType();
+    const ret_type = array.nodes[0].getInnerType();
+    testing.expectEqual(Type.list, array_type);
+    testing.expectEqual(Type.integer, scalar_type);
+    testing.expectEqual(Type.string, ret_type);
 }
