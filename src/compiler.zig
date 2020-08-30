@@ -36,8 +36,6 @@ pub fn compile(
         .instructions = bytecode.Instructions.init(allocator),
         .constants = Values.init(allocator),
         .allocator = allocator,
-        .last_inst = undefined,
-        .prev_inst = undefined,
         .scope = &root_scope,
         .errors = _errors,
     };
@@ -67,8 +65,6 @@ pub const Compiler = struct {
     constants: Values,
     allocator: *Allocator,
     errors: *errors.Errors,
-    last_inst: EmitInst,
-    prev_inst: EmitInst,
 
     scope: *Scope,
 
@@ -215,7 +211,6 @@ pub const Compiler = struct {
     fn emit(self: *Compiler, op: bytecode.Opcode) !usize {
         const pos = self.instructions.items.len;
         try self.instructions.append(bytecode.gen(op, null));
-        self.saveEmitInst(op, pos);
         return pos;
     }
 
@@ -223,25 +218,17 @@ pub const Compiler = struct {
     fn emitOp(self: *Compiler, op: bytecode.Opcode, operand: u16) !usize {
         const pos = self.instructions.items.len;
         try self.instructions.append(bytecode.gen(op, operand));
-        self.saveEmitInst(op, pos);
         return pos;
-    }
-
-    /// Sets the previous and last instruction that were emitted
-    fn saveEmitInst(self: *Compiler, op: bytecode.Opcode, pos: usize) void {
-        self.prev_inst = self.last_inst;
-        self.last_inst = EmitInst{ .op = op, .pos = pos };
     }
 
     /// Returns true if the last emitted instruction was given opcode
     fn lastInstIs(self: *Compiler, op: bytecode.Opcode) bool {
-        return self.last_inst.op == op;
+        return self.instructions.items[self.instructions.items.len - 1].op == op;
     }
 
     /// Removes the last instruction
     fn removeLastInst(self: *Compiler) void {
-        _ = self.instructions.popOrNull();
-        self.last_inst = self.prev_inst;
+        _ = self.instructions.pop();
     }
 
     /// Sets the current `Scope` to its parent's scope and cleans up the closing scope's memory
@@ -424,9 +411,7 @@ pub const Compiler = struct {
                 // if the last instruction is a pop rather than some value
                 // replace it with a normal return statement
                 if (self.lastInstIs(.pop)) {
-                    const last: *bytecode.Instruction = &self.instructions.items[self.last_inst.pos];
-                    last.op = .return_value;
-                    self.last_inst.op = last.op;
+                    self.instructions.items[self.instructions.items.len - 1].op = .return_value;
                 }
 
                 // if no return_value found, emit a regular return instruction

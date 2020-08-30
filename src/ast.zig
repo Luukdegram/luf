@@ -88,6 +88,29 @@ pub const Node = union(NodeType) {
         type_def,
     };
 
+    /// Returns the Luf `Type` that Node corresponds to
+    pub fn getType(self: Node) @import("value.zig").Type {
+        return switch (self) {
+            .declaration => |x| if (x.type_def) |td| td.getType() else x.value.getType(),
+            .@"return" => |ret| ret.value.getType(),
+            .prefix => |pre| pre.right.getType(),
+            .int_lit => .integer,
+            .expression => |exp| exp.value.getType(),
+            .boolean => .boolean,
+            .func_lit => .function,
+            .func_arg => |arg| arg.arg_type.getType(),
+            .string_lit => .string,
+            .array => .list,
+            .map => .map,
+            .nil => .nil,
+            .import => .module,
+            .range => .range,
+            .@"enum" => ._enum,
+            .type_def => |td| td.getType(),
+            else => unreachable,
+        };
+    }
+
     /// Represents a String
     pub const StringLiteral = struct {
         token: Token,
@@ -125,6 +148,7 @@ pub const Node = union(NodeType) {
         token: Token,
         name: Node,
         value: Node,
+        type_def: ?Node,
         mutable: bool = false,
     };
 
@@ -356,5 +380,18 @@ pub const Node = union(NodeType) {
     pub const TypeDef = struct {
         token: Token,
         value: ?Node,
+
+        /// Returns a Luf `Type` based on the token of the `TypeDef`
+        pub fn getType(self: *const TypeDef) @import("value.zig").Type {
+            return switch (self.token.token_type) {
+                .bool_type => .boolean,
+                .string_type => .string,
+                .int_type => .integer,
+                .void_type => ._void,
+                .function => self.value.?.getType(),
+                .left_bracket => self.value.?.getType(),
+                else => unreachable,
+            };
+        }
     };
 };

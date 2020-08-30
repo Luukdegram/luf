@@ -141,23 +141,30 @@ pub const Parser = struct {
 
     /// Parses a declaration
     fn parseDeclaration(self: *Parser) Error!Node {
-        const tmp_token = self.current_token;
+        const decl = try self.allocator.create(Node.Declaration);
+        decl.* = .{
+            .token = self.current_token,
+            .name = undefined,
+            .value = undefined,
+            .type_def = null,
+            .mutable = self.current_token.token_type == .mutable,
+        };
 
         try self.expectPeek(.identifier);
 
-        const name = try self.parseIdentifier();
+        decl.name = try self.parseIdentifier();
+
+        if (self.peekIsType(.colon)) {
+            self.next();
+            self.next();
+            decl.type_def = try self.parseTypeExpression();
+        }
 
         try self.expectPeek(.assign);
 
         self.next();
 
-        const decl = try self.allocator.create(Node.Declaration);
-        decl.* = .{
-            .token = tmp_token,
-            .name = name,
-            .value = try self.parseExpression(.lowest),
-            .mutable = tmp_token.token_type == .mutable,
-        };
+        decl.value = try self.parseExpression(.lowest);
 
         return Node{ .declaration = decl };
     }
@@ -1362,4 +1369,31 @@ test "Enum" {
         testing.expectEqual(@as(u64, i + 1), p.switch_prong.left.int_lit.value);
     }
     testing.expect(switch_stmt.prongs[1].switch_prong.right == .block_statement);
+}
+
+test "Type definitions" {
+    const Type = @import("value.zig").Type;
+
+    const cases = [_][]const u8{
+        "fn(x: int, y: int)void{}",
+        "const x: int = 10",
+    };
+
+    const allocator = testing.allocator;
+    var errors = Errors.init(allocator);
+    defer errors.deinit();
+
+    const function = try parse(allocator, cases[0], &errors);
+    defer function.deinit();
+
+    const func_type = function.nodes[0].expression.value.func_lit.ret_type.getType();
+    const arg_type = function.nodes[0].expression.value.func_lit.params[0].getType();
+    testing.expectEqual(Type._void, func_type);
+    testing.expectEqual(Type.integer, arg_type);
+
+    const declaration = try parse(allocator, cases[1], &errors);
+    defer declaration.deinit();
+
+    const decl_type = declaration.nodes[0].getType();
+    testing.expectEqual(Type.integer, decl_type);
 }
