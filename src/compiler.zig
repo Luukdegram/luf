@@ -416,7 +416,10 @@ pub const Compiler = struct {
                     );
                 }
 
-                try self.compile(function.body);
+                try self.compile(function.body orelse return self.fail(
+                    "Function missing body",
+                    function.token.start,
+                ));
 
                 // if the last instruction is a pop rather than some value
                 // replace it with a normal return statement
@@ -783,7 +786,7 @@ test "Compile AST to bytecode" {
             },
         },
         .{
-            .input = "fn(){ 1 + 2 }",
+            .input = "fn() void { 1 + 2 }",
             .consts = &[_]Value{ Value{ .integer = 1 }, Value{ .integer = 2 }, Value{ .function = .{ .arg_len = 0, .locals = 0, .instructions = undefined } } },
             .opcodes = &[_]bytecode.Opcode{
                 .jump,
@@ -796,7 +799,7 @@ test "Compile AST to bytecode" {
             },
         },
         .{
-            .input = "fn(){ }",
+            .input = "fn() void { }",
             .consts = &[_]Value{Value{ .function = .{ .arg_len = 0, .locals = 0, .instructions = undefined } }},
             .opcodes = &[_]bytecode.Opcode{
                 .jump,
@@ -807,7 +810,7 @@ test "Compile AST to bytecode" {
             },
         },
         .{
-            .input = "fn(){ 1 }()",
+            .input = "fn() void { 1 }()",
             .consts = &[_]Value{ Value{ .integer = 1 }, Value{ .function = .{ .arg_len = 0, .locals = 0, .instructions = undefined } } },
             .opcodes = &[_]bytecode.Opcode{
                 .jump,
@@ -819,7 +822,7 @@ test "Compile AST to bytecode" {
             },
         },
         .{
-            .input = "const x = fn(){ 1 } x()",
+            .input = "const x = fn() void { 1 } x()",
             .consts = &[_]Value{ Value{ .integer = 1 }, Value{ .function = .{ .arg_len = 0, .locals = 0, .instructions = undefined } } },
             .opcodes = &[_]bytecode.Opcode{
                 .jump,
@@ -833,7 +836,7 @@ test "Compile AST to bytecode" {
             },
         },
         .{
-            .input = "const x = 5 fn(){ return x }",
+            .input = "const x = 5 fn() int { return x }",
             .consts = &[_]Value{ Value{ .integer = 5 }, Value{ .function = .{ .arg_len = 0, .locals = 0, .instructions = undefined } } },
             .opcodes = &[_]bytecode.Opcode{
                 .load_const,
@@ -846,7 +849,7 @@ test "Compile AST to bytecode" {
             },
         },
         .{
-            .input = "fn(){ const x = 5 return x }",
+            .input = "fn() int { const x = 5 return x }",
             .consts = &[_]Value{ Value{ .integer = 5 }, Value{ .function = .{ .arg_len = 0, .locals = 1, .instructions = undefined } } },
             .opcodes = &[_]bytecode.Opcode{
                 .jump,
@@ -859,7 +862,7 @@ test "Compile AST to bytecode" {
             },
         },
         .{
-            .input = "const func = fn(x){ return x } func(5)",
+            .input = "const func = fn(x) int { return x } func(5)",
             .consts = &[_]Value{ Value{ .function = .{ .arg_len = 1, .locals = 1, .instructions = undefined } }, Value{ .integer = 5 } },
             .opcodes = &[_]bytecode.Opcode{
                 .jump,

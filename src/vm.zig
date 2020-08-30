@@ -1021,10 +1021,10 @@ test "Index" {
 
 test "Basic function calls with no arguments" {
     const test_cases = .{
-        .{ .input = "const x = fn() { return 1 + 2 } x()", .expected = 3 },
-        .{ .input = "const x = fn() { return 1 } const y = fn() { return 5 } x() + y()", .expected = 6 },
-        .{ .input = "const x = fn() { return 5 10 } x()", .expected = 5 },
-        .{ .input = "const x = fn() { } x()", .expected = &Value.Nil },
+        .{ .input = "const x = fn() int { return 1 + 2 } x()", .expected = 3 },
+        .{ .input = "const x = fn() int { return 1 } const y = fn() int { return 5 } x() + y()", .expected = 6 },
+        .{ .input = "const x = fn() int { return 5 10 } x()", .expected = 5 },
+        .{ .input = "const x = fn() void { } x()", .expected = &Value.Nil },
     };
 
     inline for (test_cases) |case| {
@@ -1042,8 +1042,8 @@ test "Basic function calls with no arguments" {
 
 test "Globals vs Locals" {
     const test_cases = .{
-        .{ .input = "const x = fn() { const x = 5 return x } x()", .expected = 5 },
-        .{ .input = "const x = fn() { const y = 1 const z = 2 return y + z } x()", .expected = 3 },
+        .{ .input = "const x = fn() int { const x = 5 return x } x()", .expected = 5 },
+        .{ .input = "const x = fn() int { const y = 1 const z = 2 return y + z } x()", .expected = 3 },
     };
 
     inline for (test_cases) |case| {
@@ -1061,9 +1061,9 @@ test "Globals vs Locals" {
 
 test "Functions with arguments" {
     const test_cases = .{
-        .{ .input = "const x = fn(x) { return x } x(3)", .expected = 3 },
-        .{ .input = "const x = fn(a, b) { return a + b } x(3,5)", .expected = 8 },
-        .{ .input = "const x = fn(a, b) { const z = a + b return z } x(3,5)", .expected = 8 },
+        .{ .input = "const x = fn(x) int { return x } x(3)", .expected = 3 },
+        .{ .input = "const x = fn(a, b) int { return a + b } x(3,5)", .expected = 8 },
+        .{ .input = "const x = fn(a, b) int { const z = a + b return z } x(3,5)", .expected = 8 },
     };
 
     inline for (test_cases) |case| {
@@ -1116,7 +1116,7 @@ test "While loop" {
 
 test "Tail recursion" {
     const input =
-        \\const func = fn(a) {
+        \\const func = fn(a) int {
         \\  if (a == 10) {
         \\      return a
         \\  }
@@ -1174,7 +1174,7 @@ test "Range" {
 }
 
 test "For loop - String" {
-    const input = "mut result = \"hello\" const string = \"world\" for(string)|c, i|{result+=c}result";
+    const input = "mut result = \"hello\" const w = \"world\" for(w)|c, i|{result+=c}result";
     var vm = Vm.init(testing.allocator);
     try vm.compileAndRun(input);
     defer vm.deinit();

@@ -199,7 +199,7 @@ pub const Parser = struct {
             .@"true", .@"false" => try self.parseBoolean(),
             .@"if" => try self.parseIfExpression(),
             .left_parenthesis => try self.parseGroupedExpression(),
-            .function => try self.parseFunctionLiteral(),
+            .function => try self.parseFunctionLiteral(true),
             .left_bracket => try self.parseArray(),
             .left_brace => try self.parseMap(),
             .while_loop => try self.parseWhile(),
@@ -396,20 +396,26 @@ pub const Parser = struct {
 
     /// Parses current tokens into a function literal.
     /// Returns errors if no left parenthesis or brace is found.
-    fn parseFunctionLiteral(self: *Parser) Error!Node {
+    fn parseFunctionLiteral(self: *Parser, parse_body: bool) Error!Node {
         const func = try self.allocator.create(Node.FunctionLiteral);
         func.* = .{
             .token = self.current_token,
             .params = undefined,
-            .body = undefined,
+            .body = null,
+            .ret_type = undefined,
         };
 
         try self.expectPeek(.left_parenthesis);
 
         func.params = try self.parseFunctionParameters();
 
-        try self.expectPeek(.left_brace);
-        func.body = try self.parseBlockStatement();
+        self.next();
+        func.ret_type = try self.parseTypeExpression();
+
+        if (parse_body) {
+            try self.expectPeek(.left_brace);
+            func.body = try self.parseBlockStatement();
+        }
 
         return Node{ .func_lit = func };
     }
@@ -419,15 +425,15 @@ pub const Parser = struct {
     fn parseFunctionParameters(self: *Parser) Error![]Node {
         var list = ArrayList(Node).init(self.allocator);
         errdefer list.deinit();
+        self.next();
 
-        if (self.peekIsType(.right_parenthesis)) {
-            self.next();
+        if (self.currentIsType(.right_parenthesis)) {
             return list.toOwnedSlice();
         }
 
-        self.next();
-
         try list.append(try self.parseIdentifier());
+        try self.expectPeek(.colon);
+        
 
         while (self.peekIsType(.comma)) {
             self.next();
@@ -747,6 +753,7 @@ pub const Parser = struct {
         return Node{ .switch_statement = node };
     }
 
+    /// Parses a switch prong i.e. x: 5 + 5 into a `Node.SwitchProng`
     fn parseSwitchProng(self: *Parser) Error!Node {
         const node = try self.allocator.create(Node.SwitchProng);
         node.* = .{ .token = undefined, .left = try self.parseExpression(.lowest), .right = undefined };
@@ -761,6 +768,21 @@ pub const Parser = struct {
             try self.parseExpressionStatement();
 
         return Node{ .switch_prong = node };
+    }
+
+    /// Parses a type literal into a `Node.TypeDef` `Node`.
+    /// i.e. parses const x: bool = true where 'bool' is the type expression
+    fn parseTypeExpression(self: *Parser) Error!Node {
+        const node = try self.allocator.create(Node.TypeDef);
+        node.* = .{ .token = self.current_token, .value = null };
+
+        switch (self.current_token.token_type) {
+            .bool_type, .int_type, .string_type, .void_type => {},
+            .function => node.value = try self.parseFunctionLiteral(false),
+            else => return self.fail("Unexpected token, expected a type", self.current_token.start),
+        }
+
+        return Node{ .type_def = node };
     }
 
     /// Determines if the next token is the expected token or not.
@@ -778,12 +800,12 @@ pub const Parser = struct {
 
     /// Helper function to check if the peek token is of given type
     fn peekIsType(self: Parser, token_type: Token.TokenType) bool {
-        return @enumToInt(self.peek_token.token_type) == @enumToInt(token_type);
+        return self.peek_token.token_type == token_type;
     }
 
     /// Helper function to check if the current token is of given type
     fn currentIsType(self: Parser, token_type: Token.TokenType) bool {
-        return @enumToInt(self.current_token.token_type) == @enumToInt(token_type);
+        return self.current_token.token_type == token_type;
     }
 };
 
@@ -1049,11 +1071,14 @@ test "If else-if expression" {
 }
 
 test "Function literal" {
-    const input = "fn(x, y) { x + y }";
+    const input = "fn(x, y) fn(x) int { x + y }";
     const allocator = testing.allocator;
     var errors = Errors.init(allocator);
     defer errors.deinit();
-    const tree = try parse(allocator, input, &errors);
+    const tree = parse(allocator, input, &errors) catch |err| {
+        try errors.write(input, std.io.getStdErr().writer());
+        return err;
+    };
     defer tree.deinit();
 
     testing.expect(tree.nodes.len == 1);
@@ -1064,7 +1089,7 @@ test "Function literal" {
     testing.expectEqualSlices(u8, func.params[0].identifier.value, "x");
     testing.expectEqualSlices(u8, func.params[1].identifier.value, "y");
 
-    const body = func.body.block_statement.nodes[0];
+    const body = func.body.?.block_statement.nodes[0];
     const infix = body.expression.value.infix;
     testing.expectEqual(infix.operator, .add);
     testing.expectEqualSlices(u8, infix.left.identifier.value, "x");
@@ -1073,9 +1098,9 @@ test "Function literal" {
 
 test "Function parameters" {
     const test_cases = .{
-        .{ .input = "fn() {}", .expected = &[_][]const u8{} },
-        .{ .input = "fn(x) {}", .expected = &[_][]const u8{"x"} },
-        .{ .input = "fn(x, y, z) {}", .expected = &[_][]const u8{ "x", "y", "z" } },
+        .{ .input = "fn() void {}", .expected = &[_][]const u8{} },
+        .{ .input = "fn(x) void {}", .expected = &[_][]const u8{"x"} },
+        .{ .input = "fn(x, y, z) void {}", .expected = &[_][]const u8{ "x", "y", "z" } },
     };
     const allocator = testing.allocator;
     inline for (test_cases) |case| {

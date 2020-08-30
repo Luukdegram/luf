@@ -50,6 +50,7 @@ pub const Node = union(NodeType) {
     @"enum": *EnumLiteral,
     switch_statement: *SwitchLiteral,
     switch_prong: *SwitchProng,
+    type_def: *TypeDef,
 
     /// Possible Nodes which are supported
     pub const NodeType = enum {
@@ -82,6 +83,7 @@ pub const Node = union(NodeType) {
         @"enum",
         switch_statement,
         switch_prong,
+        type_def,
     };
 
     /// Represents a String
@@ -259,7 +261,8 @@ pub const Node = union(NodeType) {
     pub const FunctionLiteral = struct {
         token: Token,
         params: []const Node,
-        body: Node,
+        body: ?Node,
+        ret_type: Node,
     };
 
     /// Node representing a call expression and holds the function to be called
@@ -337,5 +340,11 @@ pub const Node = union(NodeType) {
         token: Token,
         left: Node,
         right: Node,
+    };
+
+    /// Represents the type of the parent node
+    pub const TypeDef = struct {
+        token: Token,
+        value: ?Node,
     };
 };

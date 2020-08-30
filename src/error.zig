@@ -54,7 +54,7 @@ pub const Errors = struct {
             try writer.print("{}error: \x1b[0m{}\n", .{ color_prefix, err.fmt });
 
             const start = findStart(source, err.index);
-            const end = findEnd(source[err.index..]) orelse source.len;
+            const end = findEnd(source[err.index..]);
 
             //write the source code lines and point to token's index
             try writer.print("{}\n", .{source[start .. err.index + end]});
@@ -71,8 +71,9 @@ pub const Errors = struct {
     }
 
     /// finds the line ending in the given slice
-    fn findEnd(slice: []const u8) ?usize {
-        for (slice) |c, i| if (c == '\n') return i;
-        return null;
+    fn findEnd(slice: []const u8) usize {
+        var count: usize = 0;
+        for (slice) |c, i| count += if (c == '\n') return i else @as(usize, 1);
+        return count;
     }
 };

@@ -78,6 +78,11 @@ pub const Token = struct {
         @"break",
         @"enum",
         @"switch",
+        // types
+        bool_type,
+        int_type,
+        string_type,
+        void_type,
     };
 
     /// Lookup 'table' to check if an identifier is a keyword
@@ -100,6 +105,10 @@ pub const Token = struct {
         .{ "continue", .@"continue" },
         .{ "enum", .@"enum" },
         .{ "switch", .@"switch" },
+        .{ "bool", .bool_type },
+        .{ "int", .int_type },
+        .{ "string", .string_type },
+        .{ "void", .void_type },
     });
 
     /// Returns the string value of the token
@@ -170,6 +179,11 @@ pub const Token = struct {
             .@"continue" => "continue",
             .@"enum" => "enum",
             .@"switch" => "switch",
+            // types
+            .bool_type => "bool",
+            .string_type => "string",
+            .int_type => "int",
+            .void_type => "void",
         };
     }
 };
@@ -201,6 +215,10 @@ test "Keywords" {
         "break",
         "enum",
         "switch",
+        "bool",
+        "int",
+        "string",
+        "void",
     };
 
     for (keywords) |keyword| {
