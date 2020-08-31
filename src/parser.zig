@@ -1284,9 +1284,9 @@ test "Map Literal" {
         testing.expect(case.value == pair.value.int_lit.value);
     }
 
-    testing.expectEqual(Type.map, tree.nodes[0].getType());
-    testing.expectEqual(Type.string, tree.nodes[0].getInnerType());
-    testing.expectEqual(Type.integer, map.type_def_value.?.getInnerType());
+    testing.expectEqual(Type.map, tree.nodes[0].getType().?);
+    testing.expectEqual(Type.string, tree.nodes[0].getInnerType().?);
+    testing.expectEqual(Type.integer, map.type_def_value.?.getInnerType().?);
 }
 
 test "While loop" {
@@ -1427,14 +1427,14 @@ test "Type definitions" {
 
     const func_type = function.nodes[0].getInnerType();
     const arg_type = function.nodes[0].expression.value.func_lit.params[0].getType();
-    testing.expectEqual(Type._void, func_type);
-    testing.expectEqual(Type.integer, arg_type);
+    testing.expectEqual(Type._void, func_type.?);
+    testing.expectEqual(Type.integer, arg_type.?);
 
     const declaration = try parse(allocator, cases[1], &errors);
     defer declaration.deinit();
 
     const decl_type = declaration.nodes[0].getType();
-    testing.expectEqual(Type.integer, decl_type);
+    testing.expectEqual(Type.integer, decl_type.?);
 
     const array = try parse(allocator, cases[2], &errors);
     defer array.deinit();
@@ -1442,7 +1442,7 @@ test "Type definitions" {
     const array_type = array.nodes[0].expression.value.func_lit.params[0].getType();
     const scalar_type = array.nodes[0].expression.value.func_lit.params[0].getInnerType();
     const ret_type = array.nodes[0].getInnerType();
-    testing.expectEqual(Type.list, array_type);
-    testing.expectEqual(Type.integer, scalar_type);
-    testing.expectEqual(Type.string, ret_type);
+    testing.expectEqual(Type.list, array_type.?);
+    testing.expectEqual(Type.integer, scalar_type.?);
+    testing.expectEqual(Type.string, ret_type.?);
 }

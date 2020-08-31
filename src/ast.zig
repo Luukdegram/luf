@@ -88,7 +88,7 @@ pub const Node = union(NodeType) {
     };
 
     /// Returns the Luf `Type` that Node corresponds to
-    pub fn getType(self: Node) Type {
+    pub fn getType(self: Node) ?Type {
         return switch (self) {
             .declaration => |x| if (x.type_def) |td| td.getType() else x.value.getType(),
             .@"return" => |ret| ret.value.getType(),
@@ -105,21 +105,61 @@ pub const Node = union(NodeType) {
             .range => .range,
             .@"enum" => ._enum,
             .type_def => |td| td.getType(),
-            else => unreachable,
+            .infix => |inf| inf.left.getType(),
+            else => null,
         };
     }
 
     /// Returns the inner type of a Node. i.e. this will return `Type.integer` for []int
     /// This will also return the final result type of functions that return functions
     /// i.e. this will return `Type.integer` for 'fn() fn()int {}'.
-    pub fn getInnerType(self: Node) Type {
+    pub fn getInnerType(self: Node) ?Type {
         return switch (self) {
             .type_def => |td| if (td.value) |val| val.getInnerType() else td.getType(),
             .data_structure => |list| list.type_def_key.getInnerType(),
             .func_lit => |func| func.ret_type.getInnerType(),
             .func_arg => |arg| arg.arg_type.getInnerType(),
             .expression => |exp| exp.value.getInnerType(),
+            .map_pair => |pair| pair.key.getInnerType(),
+            .declaration => |decl| if (decl.type_def) |td| td.getInnerType() else decl.value.getInnerType(),
+            .range => .integer,
             else => self.getType(),
+        };
+    }
+
+    /// Returns the position of the token which generated the `Node`
+    pub fn tokenPos(self: Node) usize {
+        return switch (self) {
+            .declaration => |x| x.token.start,
+            .identifier => |x| x.token.start,
+            .@"return" => |x| x.token.start,
+            .prefix => |x| x.token.start,
+            .infix => |x| x.token.start,
+            .int_lit => |x| x.token.start,
+            .expression => |x| x.token.start,
+            .block_statement => |x| x.token.start,
+            .boolean => |x| x.token.start,
+            .if_expression => |x| x.token.start,
+            .func_lit => |x| x.token.start,
+            .func_arg => |x| x.token.start,
+            .call_expression => |x| x.token.start,
+            .string_lit => |x| x.token.start,
+            .data_structure => |x| x.token.start,
+            .map_pair => |x| x.token.start,
+            .index => |x| x.token.start,
+            .while_loop => |x| x.token.start,
+            .for_loop => |x| x.token.start,
+            .assignment => |x| x.token.start,
+            .comment => |x| x.token.start,
+            .nil => |x| x.token.start,
+            .import => |x| x.token.start,
+            .@"continue" => |x| x.token.start,
+            .@"break" => |x| x.token.start,
+            .range => |x| x.token.start,
+            .@"enum" => |x| x.token.start,
+            .switch_statement => |x| x.token.start,
+            .switch_prong => |x| x.token.start,
+            .type_def => |x| x.token.start,
         };
     }
 
@@ -330,6 +370,8 @@ pub const Node = union(NodeType) {
         capture: Node,
         index: ?Node,
         block: Node,
+
+        pub var index_node = IntegerLiteral{ .token = undefined, .value = 0 };
     };
 
     /// Represents an assignment '=' for setting the value of an existing variable
@@ -392,7 +434,7 @@ pub const Node = union(NodeType) {
         value: ?Node,
 
         /// Returns a Luf `Type` based on the token of the `TypeDef`
-        pub fn getType(self: *const TypeDef) Type {
+        pub fn getType(self: *const TypeDef) ?Type {
             return switch (self.token.token_type) {
                 .bool_type => .boolean,
                 .string_type => .string,
@@ -400,7 +442,7 @@ pub const Node = union(NodeType) {
                 .void_type => ._void,
                 .function => self.value.?.getType(),
                 .left_bracket => self.value.?.getType(),
-                else => unreachable,
+                else => null,
             };
         }
     };

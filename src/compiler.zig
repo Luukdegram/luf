@@ -2,7 +2,9 @@ const std = @import("std");
 const bytecode = @import("bytecode.zig");
 const parser = @import("parser.zig");
 const ast = @import("ast.zig");
-const Value = @import("value.zig").Value;
+const _val = @import("value.zig");
+const Value = _val.Value;
+const Type = _val.Type;
 const Allocator = std.mem.Allocator;
 const testing = std.testing;
 const errors = @import("error.zig");
@@ -77,6 +79,8 @@ pub const Compiler = struct {
         index: u16 = 0,
         /// The scope the symbol belongs to
         scope: Scope.Id,
+        /// The `Ast.Node` that declared the symbol, used to retrieve the symbol's type
+        node: ast.Node,
     };
 
     /// Hashmap of `Symbol` where the key is the Symbol's name
@@ -102,7 +106,7 @@ pub const Compiler = struct {
         /// Some `Scope` types can have a payload
         const Tag = union(Id) {
             global,
-            function: void,
+            function: *const ast.Node.FunctionLiteral,
             loop: struct {
                 start: u16,
                 breaks: std.ArrayList(*bytecode.Instruction),
@@ -117,7 +121,7 @@ pub const Compiler = struct {
                 .symbols = SymbolTable.init(self.allocator),
                 .id = switch (id) {
                     .global => .{ .global = {} },
-                    .function => .{ .function = {} },
+                    .function => .{ .function = undefined },
                     .loop => .{ .loop = .{ .start = 0, .breaks = std.ArrayList(*bytecode.Instruction).init(self.allocator) } },
                 },
                 .parent = self,
@@ -128,7 +132,7 @@ pub const Compiler = struct {
 
         /// Defines a new symbol and saves it in the symbol table
         /// Returns an error if Symbol already exists
-        fn define(self: *Scope, name: []const u8, mutable: bool) !?Symbol {
+        fn define(self: *Scope, name: []const u8, mutable: bool, node: ast.Node) !?Symbol {
             if (self.resolve(name)) |_| return null;
             const index = self.symbols.items().len;
 
@@ -137,6 +141,7 @@ pub const Compiler = struct {
                 .mutable = mutable,
                 .index = @intCast(u16, index),
                 .scope = self.id,
+                .node = node,
             };
             try self.symbols.put(name, symbol);
             return symbol;
@@ -153,14 +158,6 @@ pub const Compiler = struct {
             self.symbols.deinit();
             self.allocator.destroy(self);
         }
-    };
-
-    /// Instruction that has already been emitted.
-    /// This is used to generate a new instruction if it needs to be reapplied
-    /// after being emitted
-    const EmitInst = struct {
-        op: bytecode.Opcode,
-        pos: usize,
     };
 
     /// Compiler errorset
@@ -246,6 +243,12 @@ pub const Compiler = struct {
         self.scope = try self.scope.fork(id);
     }
 
+    /// Recursively looks for the scope with the given Tag
+    fn findScope(self: *Compiler, scope: *const Scope, tag: Scope.Id) ?*const Scope {
+        if (scope.id == tag) return scope;
+        return if (self.scope.parent) |parent| self.findScope(parent, tag) else null;
+    }
+
     /// Attempts to resolve a symbol from the symbol table
     /// If not found, will attempt to resolve it from a parent scope
     fn resolveSymbol(self: *Compiler, scope: *const Scope, name: []const u8) ?Symbol {
@@ -255,6 +258,55 @@ pub const Compiler = struct {
             self.resolveSymbol(scope.parent.?, name)
         else
             null;
+    }
+
+    /// Returns a Luf `Type` based on the given node
+    fn resolveType(self: *Compiler, node: ast.Node) !Type {
+        if (node.getType()) |t| return t;
+
+        return switch (node) {
+            .identifier => |id| {
+                const symbol = self.resolveSymbol(
+                    self.scope,
+                    id.value,
+                ) orelse return self.fail("Undefined symbol", id.token.start);
+
+                return self.resolveType(symbol.node);
+            },
+            .infix => |inf| return self.resolveType(inf.left),
+            .declaration => |decl| {
+                if (decl.type_def) |td| return td.getType().?;
+
+                return self.resolveType(decl.value);
+            },
+            .index => |index| return self.resolveType(index.left),
+            .call_expression => |cal| return self.resolveType(cal.function),
+            else => std.debug.panic("TODO, implement type resolving for type: {}\n", .{node}),
+        };
+    }
+
+    /// Resolves the inner type of a node. i.e. this will return `Type.integer` for a list []int
+    fn resolveScalarType(self: *Compiler, node: ast.Node) !Type {
+        if (node.getInnerType()) |i| return i;
+        return switch (node) {
+            .identifier => |id| {
+                const symbol = self.resolveSymbol(
+                    self.scope,
+                    id.value,
+                ) orelse return self.fail("Undefined symbol", id.token.start);
+
+                return self.resolveScalarType(symbol.node);
+            },
+            .infix => |inf| return self.resolveScalarType(inf.left),
+            .declaration => |decl| {
+                if (decl.type_def) |td| return td.getInnerType().?;
+
+                return self.resolveScalarType(decl.value);
+            },
+            .index => |index| return self.resolveScalarType(index.left),
+            .call_expression => |cal| return self.resolveScalarType(cal.function),
+            else => std.debug.panic("TODO, implement scalar type resolving for type: {}\n", .{node}),
+        };
     }
 
     /// Compiles the given node into Instructions
@@ -273,6 +325,15 @@ pub const Compiler = struct {
                     _ = try self.emit(.load_void);
             },
             .infix => |inf| {
+                var lhs = try self.resolveType(inf.left);
+                var rhs = try self.resolveType(inf.right);
+
+                if (lhs == .list or lhs == .range) lhs = try self.resolveScalarType(inf.left);
+                if (rhs == .list or rhs == .range) rhs = try self.resolveScalarType(inf.right);
+
+                if (lhs != rhs)
+                    return self.fail("Right hand side type mismatching with left hand side", inf.right.tokenPos());
+
                 try self.compile(inf.left);
                 try self.compile(inf.right);
                 _ = try self.emit(switch (inf.operator) {
@@ -346,7 +407,16 @@ pub const Compiler = struct {
                 self.instructions.items[jump_pos].ptr = @intCast(u16, len);
             },
             .declaration => |decl| {
-                const symbol = (try self.scope.define(decl.name.identifier.value, decl.mutable)) orelse return self.fail(
+                if (decl.type_def) |td| {
+                    const explicit_type = try self.resolveType(td);
+                    var rhs_type = try self.resolveType(decl.value);
+                    // if function, get the return type of the function
+                    if (rhs_type == .function) rhs_type = try self.resolveScalarType(decl.value);
+
+                    if (explicit_type != rhs_type) return self.fail("Mismatching types", decl.value.tokenPos());
+                }
+
+                const symbol = (try self.scope.define(decl.name.identifier.value, decl.mutable, node)) orelse return self.fail(
                     "Identifier has already been declared",
                     decl.token.start,
                 );
@@ -372,7 +442,12 @@ pub const Compiler = struct {
                 _ = try self.emitOp(.load_const, try self.addConstant(val));
             },
             .data_structure => |ds| {
+                const inner_type = try self.resolveScalarType(node);
+
+                // ds.value will only be null if it's specified as a type rather than an expression
                 for (ds.value.?) |element| {
+                    if (inner_type != try self.resolveScalarType(element)) return self.fail("Unmatching type for element", element.tokenPos());
+
                     try self.compile(element);
                 }
 
@@ -390,11 +465,12 @@ pub const Compiler = struct {
             .func_lit => |function| {
                 const jump_pos = try self.emit(.jump);
                 try self.createScope(.function);
-                const inst_ptr = self.instructions.items.len;
+                self.scope.id.function = function;
+                const inst_ptr = jump_pos + 1;
 
                 for (function.params) |param| {
                     // function arguments are not mutable by default
-                    _ = (try self.scope.define(param.func_arg.value, false)) orelse return self.fail(
+                    _ = (try self.scope.define(param.func_arg.value, false, param)) orelse return self.fail(
                         "Identifier has already been declared",
                         function.token.start,
                     );
@@ -432,20 +508,54 @@ pub const Compiler = struct {
             },
             .call_expression => |call| {
                 // function is either builtin or defined on a type
+                // for now this can only be checked at runtime as the compiler is unaware of builtins
                 if (call.function == .index) {
                     for (call.arguments) |arg| {
                         try self.compile(arg);
                     }
                     try self.compile(call.function);
                 } else {
+                    // if it's an identifier, we first do a lookup to retrieve it's declaration node
+                    // then return the function declaration. else we return the function itself
+                    // in the case of an anonymous function
+                    const function_node = if (call.function == .identifier) blk: {
+                        const function = self.resolveSymbol(self.scope, call.function.identifier.value) orelse
+                            return self.fail("Tried to call undefined function", call.function.tokenPos());
+                        break :blk function.node.declaration.value.func_lit;
+                    } else
+                        call.function.func_lit;
+
+                    if (function_node.params.len != call.arguments.len)
+                        return self.fail("Incorrect number of arguments given", call.token.start);
+
                     try self.compile(call.function);
-                    for (call.arguments) |arg| {
+
+                    for (call.arguments) |arg, i| {
+                        const arg_type = try self.resolveType(arg);
+                        const func_arg_type = try self.resolveType(function_node.params[i]);
+
+                        if (arg_type != func_arg_type)
+                            return self.fail("Mismatching types for parameter", arg.tokenPos());
+
                         try self.compile(arg);
                     }
                     _ = try self.emitOp(.call, @intCast(u16, call.arguments.len));
                 }
             },
             .@"return" => |ret| {
+                const scope = self.findScope(self.scope, .function) orelse
+                    return self.fail("Unexpected return statement. Return can only be done while inside a function", node.tokenPos());
+
+                const func_ret_type = scope.id.function.ret_type.getType();
+                var ret_type = try self.resolveType(ret.value);
+
+                if (ret_type == .function) {
+                    ret_type = try self.resolveScalarType(ret.value);
+                }
+
+                if (func_ret_type != ret_type)
+                    return self.fail("Mismatching return type", ret.value.tokenPos());
+
                 try self.compile(ret.value);
                 _ = try self.emit(.return_value);
             },
@@ -488,7 +598,7 @@ pub const Compiler = struct {
                 const end_jump = try self.emit(.jump_false);
 
                 // parser already parses it as an identifier, no need to check here again
-                const capture = (try self.scope.define(loop.capture.identifier.value, false)) orelse return self.fail(
+                const capture = (try self.scope.define(loop.capture.identifier.value, false, loop.iter)) orelse return self.fail(
                     "Capture identifier has already been declared",
                     loop.token.start,
                 );
@@ -497,11 +607,15 @@ pub const Compiler = struct {
 
                 // as above, parser ensures it's an identifier
                 if (loop.index) |i| {
-                    const symbol = (try self.scope.define(i.identifier.value, false)) orelse return self.fail(
-                        "Index identifier has already been declared",
-                        loop.token.start,
-                    );
+                    // loop is just a boolean, so create a new Node that represents the integer for the counter
+                    const index_node = &ast.Node.ForLoop.index_node;
+                    index_node.token = i.identifier.token;
+
+                    const symbol = (try self.scope.define(i.identifier.value, false, ast.Node{ .int_lit = index_node })) orelse
+                        return self.fail("Index identifier has already been declared", loop.token.start);
+
                     if (symbol.scope != .loop) return self.fail("Expected a loop scope", loop.token.start);
+
                     _ = try self.emitOp(.assign_local, symbol.index);
                 }
 
@@ -537,6 +651,10 @@ pub const Compiler = struct {
 
                     if (!symbol.mutable) return self.fail("Identifier is constant", asg.token.start);
 
+                    const right_type = try self.resolveType(asg.right);
+                    const left_type = try self.resolveType(symbol.node);
+                    if (left_type != right_type) return self.fail("Mismatching types for assignment", asg.token.start);
+
                     try self.compile(asg.right);
 
                     if (symbol.scope == .global)
@@ -545,23 +663,31 @@ pub const Compiler = struct {
                         _ = try self.emitOp(.assign_local, symbol.index);
                 } else if (asg.left == .index) {
                     const index = asg.left.index;
+
+                    const lhs_type = try self.resolveScalarType(index.left);
+                    const rhs_type = try self.resolveScalarType(asg.right);
+
+                    if (lhs_type != rhs_type) return self.fail("Mismatching types", asg.right.tokenPos());
+
                     try self.compile(index.left);
                     try self.compile(index.index);
                     try self.compile(asg.right);
                     _ = try self.emit(.set_by_index);
                 } else {
-                    return self.fail("Expected an identifier or index on left hand side", asg.token.start);
+                    return self.fail("Expected an identifier or index on left hand side", asg.left.tokenPos());
                 }
             },
             .nil => _ = try self.emit(.load_nil),
             .import => |imp| {
+                if ((try self.resolveType(imp.value)) != .string) return self.fail("Expected a string", imp.value.tokenPos());
+
                 try self.compile(imp.value);
                 _ = try self.emit(.load_module);
             },
             .@"break" => |br| {
                 if (self.scope.id != .loop)
                     return self.fail(
-                        "Breaks can only be used while inside a loop",
+                        "Breaks can only be used while inside a for or while loop",
                         br.token.start,
                     );
 
@@ -572,23 +698,18 @@ pub const Compiler = struct {
             .@"continue" => |cont| {
                 if (self.scope.id != .loop)
                     return self.fail(
-                        "Continue can only be used while inside a loop",
+                        "Continue can only be used while inside a for or while loop",
                         cont.token.start,
                     );
 
                 _ = try self.emitOp(.jump, self.scope.id.loop.start);
             },
             .range => |range| {
-                if (range.left != .identifier and range.left != .int_lit)
-                    return self.fail(
-                        "Expected an identifier or integer on left hand side",
-                        range.token.start,
-                    );
-                if (range.right != .identifier and range.right != .int_lit)
-                    return self.fail(
-                        "Expected an identifier or integer on right hand side",
-                        range.token.start,
-                    );
+                const lhs_type = try self.resolveScalarType(range.left);
+                const rhs_type = try self.resolveScalarType(range.right);
+
+                if (lhs_type != .integer) return self.fail("Expected an integer type as range start", range.left.tokenPos());
+                if (rhs_type != .integer) return self.fail("Expected an integer type as range end", range.right.tokenPos());
 
                 try self.compile(range.left);
                 try self.compile(range.right);
@@ -611,21 +732,33 @@ pub const Compiler = struct {
             // currently, switches operate on runtime until static types are implemented
             .switch_statement => |sw| {
                 try self.compile(sw.capture);
+                const capture_type = try self.resolveType(sw.capture);
+                if (capture_type != .integer and capture_type != .string)
+                    return self.fail("Switches are only allowed for integers, enums and strings", sw.capture.tokenPos());
 
-                for (sw.prongs) |p, i| {
-                    const prong = p.switch_prong;
-                    // compile lhs of prong
-                    try self.compile(prong.left);
-
-                    // match with capture, capture is not popped from stack until the end
-                    _ = try self.emit(.match);
-                    const last_jump_false = try self.emit(.jump_false);
-                    try self.compile(prong.right);
-                    self.instructions.items[last_jump_false].ptr = @intCast(u16, self.instructions.items.len);
+                for (sw.prongs) |p| {
+                    try self.compile(p);
                 }
                 _ = try self.emit(.pop);
             },
-            else => {},
+            .switch_prong => |prong| {
+                const prong_type = try self.resolveType(prong.left);
+                switch (prong_type) {
+                    .integer, .string, .range => {},
+                    else => return self.fail("Unpermitted type in switch case", prong.left.tokenPos()),
+                }
+
+                // compile lhs of prong
+                try self.compile(prong.left);
+
+                // match with capture, capture is not popped from stack until the end
+                _ = try self.emit(.match);
+                const last_jump_false = try self.emit(.jump_false);
+                try self.compile(prong.right);
+                self.instructions.items[last_jump_false].ptr = @intCast(u16, self.instructions.items.len);
+            },
+
+            else => {}, //TypeDef and Comments are not compiled
         }
     }
 };

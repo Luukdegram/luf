@@ -1122,7 +1122,7 @@ test "Tail recursion" {
         \\  }
         \\  return func(a + 1)  
         \\}
-        \\func(2) 
+        \\const f: int = func(2) 
     ;
     var vm = Vm.init(testing.allocator);
     try vm.compileAndRun(input);
@@ -1199,7 +1199,7 @@ test "Enum expression and comparison" {
     testing.expectEqual(@as(usize, 0), vm.sp);
 }
 
-test "Enum expression and comparison" {
+test "Switch case" {
     const input =
         \\const range = 0..9
         \\mut x = 0
