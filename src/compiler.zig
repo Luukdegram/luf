@@ -398,9 +398,8 @@ pub const Compiler = struct {
                     try self.compile(pong);
 
                     if (self.lastInstIs(.pop)) self.removeLastInst();
-                } else {
+                } else
                     _ = try self.emit(.load_void);
-                }
 
                 // set the true jump to the current stack position
                 const len = self.instructions.items.len;
@@ -416,10 +415,8 @@ pub const Compiler = struct {
                     if (explicit_type != rhs_type) return self.fail("Mismatching types", decl.value.tokenPos());
                 }
 
-                const symbol = (try self.scope.define(decl.name.identifier.value, decl.mutable, node)) orelse return self.fail(
-                    "Identifier has already been declared",
-                    decl.token.start,
-                );
+                const symbol = (try self.scope.define(decl.name.identifier.value, decl.mutable, node)) orelse
+                    return self.fail("Identifier has already been declared", decl.token.start);
 
                 try self.compile(decl.value);
 
@@ -477,7 +474,7 @@ pub const Compiler = struct {
                 }
 
                 try self.compile(function.body orelse return self.fail(
-                    "Function missing body",
+                    "Function body missing",
                     function.token.start,
                 ));
 
