@@ -427,7 +427,7 @@ pub const Vm = struct {
 
     /// Analyzes and creates a new map
     fn makeMap(self: *Vm, inst: byte_code.Instruction) Error!void {
-        const len = inst.ptr / 2;
+        const len = inst.ptr;
         var map = Value.Map{};
         errdefer map.deinit(&self.arena.allocator);
 
@@ -963,9 +963,9 @@ test "Arrays" {
 
 test "Maps" {
     const test_cases = .{
-        .{ .input = "{1:2, 2:1, 5:6}", .expected = &[_]i64{ 6, 1, 2 }, .keys = &[_]i64{ 5, 2, 1 } },
-        .{ .input = "{}", .expected = &[_]i64{}, .keys = &[_]i64{} },
-        .{ .input = "{\"foo\":1}", .expected = &[_]i64{1}, .keys = &[_][]const u8{"foo"} },
+        .{ .input = "[]int:int{1:2, 2:1, 5:6}", .expected = &[_]i64{ 6, 1, 2 }, .keys = &[_]i64{ 5, 2, 1 } },
+        .{ .input = "[]int:int{}", .expected = &[_]i64{}, .keys = &[_]i64{} },
+        .{ .input = "[]string:int{\"foo\":1}", .expected = &[_]i64{1}, .keys = &[_][]const u8{"foo"} },
     };
 
     inline for (test_cases) |case| {
@@ -996,11 +996,11 @@ test "Index" {
     const test_cases = .{
         .{ .input = "[]int{1, 2, 3}[1]", .expected = 2 },
         .{ .input = "const list = []int{1, 2, 3} list[1] = 10 list[1]", .expected = 10 },
-        .{ .input = "{1: 5}[1]", .expected = 5 },
-        .{ .input = "{2: 5}[0]", .expected = &Value.Nil },
-        .{ .input = "{2: 5}[2] = 1", .expected = &Value.Nil },
-        .{ .input = "const map = {2: 5} map[2] = 1 map[2]", .expected = 1 },
-        .{ .input = "{\"foo\": 15}[\"foo\"]", .expected = 15 },
+        .{ .input = "[]int:int{1: 5}[1]", .expected = 5 },
+        .{ .input = "[]int:int{2: 5}[0]", .expected = &Value.Nil },
+        .{ .input = "[]int:int{2: 5}[2] = 1", .expected = &Value.Nil },
+        .{ .input = "const map = []int:int{2: 5} map[2] = 1 map[2]", .expected = 1 },
+        .{ .input = "[]string:int{\"foo\": 15}[\"foo\"]", .expected = 15 },
         .{ .input = "\"hello\"[1]", .expected = "e" },
     };
 

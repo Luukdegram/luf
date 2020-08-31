@@ -371,16 +371,12 @@ pub const Compiler = struct {
                 const val = Value{ .string = try self.allocator.dupe(u8, string.value) };
                 _ = try self.emitOp(.load_const, try self.addConstant(val));
             },
-            .array => |array| {
-                for (array.value.?) |element| {
+            .data_structure => |ds| {
+                for (ds.value.?) |element| {
                     try self.compile(element);
                 }
 
-                _ = try self.emitOp(.make_array, @intCast(u16, array.value.?.len));
-            },
-            .map => |map| {
-                for (map.value) |pair| try self.compile(pair);
-                _ = try self.emitOp(.make_map, @intCast(u16, map.value.len * 2));
+                _ = try self.emitOp(if (ds.d_type == .array) .make_array else .make_map, @intCast(u16, ds.value.?.len));
             },
             .map_pair => |pair| {
                 try self.compile(pair.key);
@@ -735,7 +731,7 @@ test "Compile AST to bytecode" {
             .opcodes = &[_]bytecode.Opcode{ .load_const, .load_const, .load_const, .make_array, .bind_global },
         },
         .{
-            .input = "const x = {1: 2, 2: 1, 5: 6}",
+            .input = "const x = []int:int{1: 2, 2: 1, 5: 6}",
             .consts = &[_]i64{ 1, 2, 2, 1, 5, 6 },
             .opcodes = &[_]bytecode.Opcode{
                 .load_const,
@@ -760,7 +756,7 @@ test "Compile AST to bytecode" {
             },
         },
         .{
-            .input = "{1: 10}[0]",
+            .input = "[]int:int{1: 10}[0]",
             .consts = &[_]i64{ 1, 10, 0 },
             .opcodes = &[_]bytecode.Opcode{
                 .load_const,

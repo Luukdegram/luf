@@ -207,8 +207,7 @@ pub const Parser = struct {
             .@"if" => try self.parseIfExpression(),
             .left_parenthesis => try self.parseGroupedExpression(),
             .function => try self.parseFunctionLiteral(true),
-            .left_bracket => try self.parseArray(false),
-            .left_brace => try self.parseMap(),
+            .left_bracket => try self.parseDataStructure(false),
             .while_loop => try self.parseWhile(),
             .for_loop => try self.parseFor(),
             .nil => try self.parseNil(),
@@ -504,35 +503,52 @@ pub const Parser = struct {
     }
 
     /// Parses the token into an `ArrayLiteral`
-    fn parseArray(self: *Parser, is_type_defintion: bool) Error!Node {
-        const array = try self.allocator.create(Node.ArrayLiteral);
-        array.* = .{ .token = self.current_token, .value = null, .type_def = undefined, .len = null };
+    fn parseDataStructure(self: *Parser, is_type_defintion: bool) Error!Node {
+        const ds = try self.allocator.create(Node.DataStructure);
+        ds.* = .{
+            .token = self.current_token,
+            .d_type = .array,
+            .value = null,
+            .type_def_key = undefined,
+            .type_def_value = null,
+            .len = null,
+        };
 
         if (!self.peekIsType(.right_bracket)) {
             self.next();
-            array.len = try self.parseExpression(.lowest);
+            ds.len = try self.parseIntegerLiteral();
         }
         try self.expectPeek(.right_bracket);
 
         self.next();
 
-        array.type_def = try self.parseTypeExpression();
+        ds.type_def_key = try self.parseTypeExpression();
+        if (self.peekIsType(.colon)) {
+            self.next();
+            self.next();
+            ds.type_def_value = try self.parseTypeExpression();
+            ds.d_type = .map;
+        }
 
         // if this is a type declaration, i.e fn(x: []int) then don't parse arguments
         if (!is_type_defintion) {
             try self.expectPeek(.left_brace);
 
-            array.value = try self.parseArguments(.right_brace);
+            ds.value = if (ds.d_type == .array)
+                try self.parseArguments(.right_brace)
+            else
+                try self.parseMap();
+
+            if (ds.len) |len|
+                if (ds.value.?.len != len.int_lit.value)
+                    return self.fail("Mismatching data structure size", self.current_token.start);
         }
 
-        return Node{ .array = array };
+        return Node{ .data_structure = ds };
     }
 
-    /// Parses the token into a `MapLiteral`
-    fn parseMap(self: *Parser) Error!Node {
-        const map = try self.allocator.create(Node.MapLiteral);
-        map.* = .{ .token = self.current_token, .value = undefined };
-
+    /// Parses the map key:value pairs into a list of Nodes
+    fn parseMap(self: *Parser) Error![]Node {
         var pairs = std.ArrayList(Node).init(self.allocator);
 
         while (!self.peekIsType(.right_brace)) {
@@ -545,9 +561,7 @@ pub const Parser = struct {
 
         try self.expectPeek(.right_brace);
 
-        map.value = pairs.toOwnedSlice();
-
-        return Node{ .map = map };
+        return pairs.toOwnedSlice();
     }
 
     /// Parses the next token into a Key Value `MapPair`
@@ -816,7 +830,7 @@ pub const Parser = struct {
 
         switch (self.current_token.token_type) {
             .bool_type, .int_type, .string_type, .void_type => {},
-            .left_bracket => node.value = try self.parseArray(true),
+            .left_bracket => node.value = try self.parseDataStructure(true),
             .function => node.value = try self.parseFunctionLiteral(false),
             else => return self.fail("Unexpected token, expected a type", self.current_token.start),
         }
@@ -1222,7 +1236,7 @@ test "Array literal" {
 
     testing.expect(tree.nodes.len == 1);
 
-    const array = tree.nodes[0].expression.value.array;
+    const array = tree.nodes[0].expression.value.data_structure;
     testing.expect(array.value.?.len == 3);
     testing.expect(array.value.?[0].int_lit.value == 1);
     testing.expect(array.value.?[1].infix.operator == .multiply);
@@ -1245,7 +1259,8 @@ test "Array index" {
 }
 
 test "Map Literal" {
-    const input = "{\"foo\": 1, \"bar\": 5}";
+    const Type = @import("value.zig").Type;
+    const input = "[]string:int{\"foo\": 1, \"bar\": 5}";
     const allocator = testing.allocator;
 
     var errors = Errors.init(allocator);
@@ -1255,8 +1270,8 @@ test "Map Literal" {
 
     testing.expect(tree.nodes.len == 1);
 
-    const map = tree.nodes[0].expression.value.map;
-    testing.expect(map.value.len == 2);
+    const map = tree.nodes[0].expression.value.data_structure;
+    testing.expect(map.value.?.len == 2);
 
     const expected = .{
         .{ .key = "foo", .value = 1 },
@@ -1264,10 +1279,14 @@ test "Map Literal" {
     };
 
     inline for (expected) |case, i| {
-        const pair: *Node.MapPair = map.value[i].map_pair;
+        const pair: *Node.MapPair = map.value.?[i].map_pair;
         testing.expectEqualSlices(u8, case.key, pair.key.string_lit.value);
         testing.expect(case.value == pair.value.int_lit.value);
     }
+
+    testing.expectEqual(Type.map, tree.nodes[0].getType());
+    testing.expectEqual(Type.string, tree.nodes[0].getInnerType());
+    testing.expectEqual(Type.integer, map.type_def_value.?.getInnerType());
 }
 
 test "While loop" {

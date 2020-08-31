@@ -1,6 +1,7 @@
 const std = @import("std");
 const Token = @import("token.zig").Token;
 const Errors = @import("error.zig").Errors;
+const Type = @import("value.zig").Type;
 
 //! All AST Nodes are defined here
 //! The `Parser` parses all of the `Lexer`'s tokens into these nodes
@@ -35,8 +36,7 @@ pub const Node = union(NodeType) {
     func_arg: *FunctionArgument,
     call_expression: *CallExpression,
     string_lit: *StringLiteral,
-    array: *ArrayLiteral,
-    map: *MapLiteral,
+    data_structure: *DataStructure,
     map_pair: *MapPair,
     index: *IndexExpression,
     while_loop: *WhileLoop,
@@ -69,8 +69,7 @@ pub const Node = union(NodeType) {
         func_arg,
         call_expression,
         string_lit,
-        array,
-        map,
+        data_structure,
         map_pair,
         index,
         while_loop,
@@ -89,7 +88,7 @@ pub const Node = union(NodeType) {
     };
 
     /// Returns the Luf `Type` that Node corresponds to
-    pub fn getType(self: Node) @import("value.zig").Type {
+    pub fn getType(self: Node) Type {
         return switch (self) {
             .declaration => |x| if (x.type_def) |td| td.getType() else x.value.getType(),
             .@"return" => |ret| ret.value.getType(),
@@ -100,8 +99,7 @@ pub const Node = union(NodeType) {
             .func_lit => .function,
             .func_arg => |arg| arg.arg_type.getType(),
             .string_lit => .string,
-            .array => .list,
-            .map => .map,
+            .data_structure => |ds| if (ds.d_type == .array) Type.list else Type.map,
             .nil => .nil,
             .import => .module,
             .range => .range,
@@ -114,10 +112,10 @@ pub const Node = union(NodeType) {
     /// Returns the inner type of a Node. i.e. this will return `Type.integer` for []int
     /// This will also return the final result type of functions that return functions
     /// i.e. this will return `Type.integer` for 'fn() fn()int {}'.
-    pub fn getInnerType(self: Node) @import("value.zig").Type {
+    pub fn getInnerType(self: Node) Type {
         return switch (self) {
             .type_def => |td| if (td.value) |val| val.getInnerType() else td.getType(),
-            .array => |list| list.type_def.getInnerType(),
+            .data_structure => |list| list.type_def_key.getInnerType(),
             .func_lit => |func| func.ret_type.getInnerType(),
             .func_arg => |arg| arg.arg_type.getInnerType(),
             .expression => |exp| exp.value.getInnerType(),
@@ -131,21 +129,17 @@ pub const Node = union(NodeType) {
         value: []const u8,
     };
 
-    /// Node representing an array
-    pub const ArrayLiteral = struct {
+    /// Node representing a data structure such as a list or map
+    pub const DataStructure = struct {
         token: Token,
+        d_type: enum { array, map },
         value: ?[]const Node,
-        type_def: Node,
+        type_def_key: Node,
+        type_def_value: ?Node,
         len: ?Node,
     };
 
-    /// Node representing a map
-    pub const MapLiteral = struct {
-        token: Token,
-        value: []const Node,
-    };
-
-    /// Node presents a key/value pair for inside a `MapLiteral`
+    /// Node presents a key/value pair for inside a `DataStructure`
     pub const MapPair = struct {
         token: Token,
         key: Node,
@@ -398,7 +392,7 @@ pub const Node = union(NodeType) {
         value: ?Node,
 
         /// Returns a Luf `Type` based on the token of the `TypeDef`
-        pub fn getType(self: *const TypeDef) @import("value.zig").Type {
+        pub fn getType(self: *const TypeDef) Type {
             return switch (self.token.token_type) {
                 .bool_type => .boolean,
                 .string_type => .string,
