@@ -31,6 +31,7 @@ pub fn compile(
         .symbols = Compiler.SymbolTable.init(allocator),
         .id = .global,
         .allocator = allocator,
+        .index = 0,
     };
     defer root_scope.symbols.deinit();
 
@@ -43,6 +44,12 @@ pub fn compile(
     };
     errdefer compiler.instructions.deinit();
     errdefer compiler.constants.deinit();
+    defer compiler.exitScope();
+
+    // declare all identifiers first
+    for (tree.nodes) |node| {
+        try compiler.forwardDeclareNode(node);
+    }
 
     for (tree.nodes) |node| {
         try compiler.compile(node);
@@ -81,6 +88,8 @@ pub const Compiler = struct {
         scope: Scope.Id,
         /// The `Ast.Node` that declared the symbol, used to retrieve the symbol's type
         node: ast.Node,
+        /// Set to `true` if the symbol was created during forward declaration
+        forward_declared: bool,
     };
 
     /// Hashmap of `Symbol` where the key is the Symbol's name
@@ -95,6 +104,8 @@ pub const Compiler = struct {
         /// If not a global scope, the scope will own a parent
         parent: ?*Scope = null,
         allocator: *Allocator,
+        /// points to the current index of the symbol list
+        index: usize,
 
         /// The type of the scope
         const Id = enum {
@@ -126,22 +137,27 @@ pub const Compiler = struct {
                 },
                 .parent = self,
                 .allocator = self.allocator,
+                .index = 0,
             };
             return new_scope;
         }
 
         /// Defines a new symbol and saves it in the symbol table
         /// Returns an error if Symbol already exists
-        fn define(self: *Scope, name: []const u8, mutable: bool, node: ast.Node) !?Symbol {
-            if (self.resolve(name)) |_| return null;
-            const index = self.symbols.items().len;
+        fn define(self: *Scope, name: []const u8, mutable: bool, node: ast.Node, forward_declared: bool) !?Symbol {
+            if (self.symbols.get(name)) |_| return null;
 
-            const symbol = Symbol{
+            defer {
+                self.index += 1;
+            }
+
+            var symbol = Symbol{
                 .name = name,
                 .mutable = mutable,
-                .index = @intCast(u16, index),
+                .index = @intCast(u16, self.index),
                 .scope = self.id,
                 .node = node,
+                .forward_declared = forward_declared,
             };
             try self.symbols.put(name, symbol);
             return symbol;
@@ -309,6 +325,19 @@ pub const Compiler = struct {
         };
     }
 
+    /// Retrieves all symbols for Nodes of type declaration
+    fn forwardDeclareNode(self: *Compiler, node: ast.Node) Error!void {
+        if (node != .declaration or node.declaration.value != .func_lit) return;
+
+        const decl = node.declaration;
+
+        const symbol = (try self.scope.define(decl.name.identifier.value, decl.mutable, node, true)) orelse
+            return self.fail("Identifier has already been declared", node.tokenPos());
+
+        try self.compile(decl.value);
+        _ = try self.emitOp(.bind_global, symbol.index);
+    }
+
     /// Compiles the given node into Instructions
     fn compile(self: *Compiler, node: ast.Node) Error!void {
         switch (node) {
@@ -415,8 +444,14 @@ pub const Compiler = struct {
                     if (explicit_type != rhs_type) return self.fail("Mismatching types", decl.value.tokenPos());
                 }
 
-                const symbol = (try self.scope.define(decl.name.identifier.value, decl.mutable, node)) orelse
-                    return self.fail("Identifier has already been declared", decl.token.start);
+                if (self.resolveSymbol(self.scope, decl.name.identifier.value)) |*s| {
+                    if (decl.value == .func_lit and s.forward_declared) {
+                        //s.forward_declared = false;
+                        return;
+                    } else
+                        return self.fail("Identifier has already been declared", decl.token.start);
+                }
+                const symbol = (try self.scope.define(decl.name.identifier.value, decl.mutable, node, false)).?;
 
                 try self.compile(decl.value);
 
@@ -467,7 +502,7 @@ pub const Compiler = struct {
 
                 for (function.params) |param| {
                     // function arguments are not mutable by default
-                    _ = (try self.scope.define(param.func_arg.value, false, param)) orelse return self.fail(
+                    _ = (try self.scope.define(param.func_arg.value, false, param, false)) orelse return self.fail(
                         "Identifier has already been declared",
                         function.token.start,
                     );
@@ -600,7 +635,7 @@ pub const Compiler = struct {
                 const end_jump = try self.emit(.jump_false);
 
                 // parser already parses it as an identifier, no need to check here again
-                const capture = (try self.scope.define(loop.capture.identifier.value, false, loop.iter)) orelse return self.fail(
+                const capture = (try self.scope.define(loop.capture.identifier.value, false, loop.iter, false)) orelse return self.fail(
                     "Capture identifier has already been declared",
                     loop.token.start,
                 );
@@ -613,7 +648,7 @@ pub const Compiler = struct {
                     const index_node = &ast.Node.ForLoop.index_node;
                     index_node.token = i.identifier.token;
 
-                    const symbol = (try self.scope.define(i.identifier.value, false, ast.Node{ .int_lit = index_node })) orelse
+                    const symbol = (try self.scope.define(i.identifier.value, false, ast.Node{ .int_lit = index_node }, false)) orelse
                         return self.fail("Index identifier has already been declared", loop.token.start);
 
                     if (symbol.scope != .loop) return self.fail("Expected a loop scope", loop.token.start);
