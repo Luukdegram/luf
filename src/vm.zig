@@ -1214,3 +1214,17 @@ test "Switch case" {
     testing.expectEqual(@as(i64, 50), vm.peek().integer);
     testing.expectEqual(@as(usize, 0), vm.sp);
 }
+
+test "Import module" {
+    const input =
+        \\const imp = import("examples/to_import.luf")
+        \\const result = imp.add(2, 5)
+        \\result
+    ;
+
+    var vm = Vm.init(testing.allocator);
+    try vm.compileAndRun(input);
+    defer vm.deinit();
+    testing.expectEqual(@as(i64, 7), vm.peek().integer);
+    testing.expectEqual(@as(usize, 0), vm.sp);
+}
