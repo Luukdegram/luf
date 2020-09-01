@@ -42,7 +42,7 @@ pub fn main() !void {
     defer vm.deinit();
     vm.compileAndRun(source) catch |err| {
         try vm.errors.write(source, writer);
-        return err;
+        return;
     };
 
     try vm.peek().print(writer);

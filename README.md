@@ -4,7 +4,7 @@ Luf is a statically typed embeddable scripting language written in [Zig](https:/
 The goal of this project is to create a simple, expressive scripting language that can be used to implement new ideas. As most of it is experimental, I would currently not recommend this for any serious use.
 
 ## Resources
-- [Examples](examples/README.md)
+- [Examples](examples)
 - [Documentation](docs/README.md)
 - [Building from source](#building-from-source)
 - [Contributing](CONTRIBUTING)
@@ -14,7 +14,7 @@ The goal of this project is to create a simple, expressive scripting language th
 [![Linux status](https://github.com/Luukdegram/luf/workflows/Linux/badge.svg)](https://github.com/Luukdegram/luf/actions) 
 [![Windows](https://github.com/Luukdegram/luf/workflows/Windows/badge.svg)](https://github.com/Luukdegram/luf/actions) [![MacOS](https://github.com/Luukdegram/luf/workflows/MacOS/badge.svg)](https://github.com/Luukdegram/luf/actions)
 
-I try to keep with the latest version of Zig to be able to use all of its features (and bug fixes).
+I try to keep up with the latest version of Zig to be able to use all of its features (and bug fixes).
 Currently, Luf expects atleast version `0.6.0+69de1a51c` while an earlier version may work.
 
 ### Building
