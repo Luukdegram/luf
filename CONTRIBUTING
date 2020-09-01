@@ -1,0 +1,4 @@
+All contributions are welcome, both small and large. Before creating a Pull Request, please first check openstanding issues and other PR's to ensure nobody else is already working on it.
+Checking issues also helps fixing bugs faster, which allows me to work on new features.
+
+All contributions towards the Luf language require tests. If a bug was found and fixed, a test is required to verify its functionality but also ensures all edge cases are handled.

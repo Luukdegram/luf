@@ -4,10 +4,10 @@ Luf is a statically typed embeddable scripting language written in [Zig](https:/
 The goal of this project is to create a simple, expressive scripting language that can be used to implement new ideas. As most of it is experimental, I would currently not recommend this for any serious use.
 
 ## Resources
-- Examples (TODO)
-- Documentation (TODO)
+- [Examples](examples/README.md)
+- [Documentation](docs/README.md)
 - [Building from source](#building-from-source)
-- Contributing (TODO)
+- [Contributing](CONTRIBUTING)
 - [Editor Support](#editor-support)
 
 ## Building from source
