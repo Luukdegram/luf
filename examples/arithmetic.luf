@@ -1,0 +1,9 @@
+const x = 15
+const y = 20
+
+mut z = x + y
+z = z << 1
+
+
+//this allows example to print last value
+z

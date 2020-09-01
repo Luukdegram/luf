@@ -212,7 +212,7 @@ pub const Vm = struct {
 
     /// Returns the previously popped `Value`
     /// Note that this results in UB if the stack is empty.
-    fn peek(self: *Vm) *Value {
+    pub fn peek(self: *Vm) *Value {
         return self.stack[self.sp];
     }
 
@@ -706,7 +706,6 @@ pub const Vm = struct {
 
         const last_ip = self.ip;
         const last_sp = self.sp;
-
         try self.run(code);
 
         // Get all constants exposed by the source file
@@ -742,7 +741,6 @@ pub const Vm = struct {
     fn loadModule(self: *Vm) Error!void {
         const val = self.pop().?;
         const name = val.unwrapAs(.string) orelse return self.fail("Expected a string");
-
         const mod = self.imports.get(name) orelse blk: {
             const imp = self.importModule(name) catch return self.fail("Could not import module");
             try self.imports.put(name, imp);

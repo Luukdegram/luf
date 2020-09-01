@@ -1,0 +1,12 @@
+mut x = 5
+
+if (x == 4) {
+    x = 2
+} else if (x == 3){
+    x = 1
+} else {
+    x = 0
+}
+
+//this allows example to print last value
+x

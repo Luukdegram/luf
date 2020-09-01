@@ -1,0 +1,8 @@
+const MyEnum = enum{
+    first_enum,
+    second_enum,
+    third_enum
+}
+
+//this allows example to print last value
+MyEnum.third_enum

@@ -194,6 +194,47 @@ pub const Value = union(Type) {
     pub const List = std.ArrayListUnmanaged(*Value);
     pub const Map = std.HashMapUnmanaged(*const Value, *Value, hash, eql, true);
     pub const NativeFn = fn (vm: *@import("vm.zig").Vm, args: []*Value) anyerror!*Value;
+
+    /// Prints a `Value` to the given `writer`
+    pub fn print(self: *const Value, writer: anytype) @TypeOf(writer).Error!void {
+        switch (self.*) {
+            .integer => |int| try writer.print("{}", .{int}),
+            .boolean => |boolean| try writer.print("{}", .{boolean}),
+            .string => |string| try writer.writeAll(string),
+            .nil => |nil| try writer.writeAll("nil"),
+            .list => |list| {
+                try writer.writeAll("[");
+                for (list.items) |item, i| {
+                    try item.print(writer);
+                    if (i != list.items.len - 1)
+                        try writer.writeAll(",\n");
+                }
+                try writer.writeAll("]\n");
+            },
+            .map => |map| {
+                try writer.writeAll("{");
+                for (map.entries.items) |item, i| {
+                    try item.key.print(writer);
+                    try writer.writeAll(":");
+                    try item.value.print(writer);
+                    if (i != map.items().len - 1)
+                        try writer.writeAll(",\n");
+                }
+                try writer.writeAll("}\n");
+            },
+            .range => |range| try writer.print("{}..{}", .{ range.start, range.end }),
+            ._enum => |enm| {
+                try writer.writeAll("{");
+                for (enm) |item, i| {
+                    try writer.writeAll(item);
+                    if (i != enm.len - 1)
+                        try writer.writeAll(",\n");
+                }
+                try writer.writeAll("}\n");
+            },
+            else => try writer.writeAll("void"),
+        }
+    }
 };
 
 /// Scope maps identifiers to their names and can be used

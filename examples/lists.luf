@@ -1,0 +1,7 @@
+const list = []int{1,2,3}
+const map = []string:int{"hello":1, "world":2}
+
+const sum = map["hello"] + map["world"]
+
+//this allows example to print last value
+sum
