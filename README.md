@@ -11,7 +11,8 @@ The goal of this project is to create a simple, expressive scripting language th
 - [Editor Support](#editor-support)
 
 ## Building from source
-![CI](https://github.com/Luukdegram/luf/workflows/ci/badge.svg)
+[![Linux status](https://github.com/Luukdegram/luf/workflows/Linux/badge.svg)](https://github.com/Luukdegram/luf/actions) 
+[![Windows](https://github.com/Luukdegram/luf/workflows/Windows/badge.svg)](https://github.com/Luukdegram/luf/actions) [![MacOS](https://github.com/Luukdegram/luf/workflows/MacOS/badge.svg)](https://github.com/Luukdegram/luf/actions)
 
 I try to keep with the latest version of Zig to be able to use all of its features (and bug fixes).
 Currently, Luf expects atleast version `0.6.0+69de1a51c` while an earlier version may work.
