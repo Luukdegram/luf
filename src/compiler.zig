@@ -504,36 +504,41 @@ pub const Compiler = struct {
                 self.instructions.items[jump_pos].ptr = @intCast(u16, last_pos);
             },
             .call_expression => |call| {
+                const initial_function_type = try self.resolveType(call.function);
                 // function is either builtin or defined on a type
                 // for now this can only be checked at runtime as the compiler is unaware of builtins
-                if (call.function == .index) {
+                if (call.function == .index and initial_function_type != .module) {
                     for (call.arguments) |arg| {
                         try self.compile(arg);
                     }
                     try self.compile(call.function);
                 } else {
-                    // if it's an identifier, we first do a lookup to retrieve it's declaration node
-                    // then return the function declaration. else we return the function itself
-                    // in the case of an anonymous function
+                    //if it's an identifier, we first do a lookup to retrieve it's declaration node
+                    //then return the function declaration. else we return the function itself
+                    //in the case of an anonymous function
                     const function_node = if (call.function == .identifier) blk: {
                         const function = self.resolveSymbol(self.scope, call.function.identifier.value) orelse
                             return self.fail("Tried to call undefined function", call.function.tokenPos());
                         break :blk function.node.declaration.value.func_lit;
-                    } else
-                        call.function.func_lit;
+                    } else if (initial_function_type != .module)
+                        call.function.func_lit
+                    else
+                        null;
 
-                    if (function_node.params.len != call.arguments.len)
-                        return self.fail("Incorrect number of arguments given", call.token.start);
+                    if (function_node) |n|
+                        if (n.params.len != call.arguments.len)
+                            return self.fail("Incorrect number of arguments given", call.token.start);
 
                     try self.compile(call.function);
 
                     for (call.arguments) |arg, i| {
-                        const arg_type = try self.resolveType(arg);
-                        const func_arg_type = try self.resolveType(function_node.params[i]);
+                        if (initial_function_type != .module) {
+                            const arg_type = try self.resolveType(arg);
+                            const func_arg_type = try self.resolveType(function_node.?.params[i]);
 
-                        if (arg_type != func_arg_type)
-                            return self.fail("Mismatching types for parameter", arg.tokenPos());
-
+                            if (arg_type != func_arg_type)
+                                return self.fail("Mismatching types for parameter", arg.tokenPos());
+                        }
                         try self.compile(arg);
                     }
                     _ = try self.emitOp(.call, @intCast(u16, call.arguments.len));

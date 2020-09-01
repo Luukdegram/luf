@@ -1,0 +1,6 @@
+const imp = import("examples/to_import.luf")
+
+const sum = imp.add(1, 2)
+
+//this allows example to print last value
+sum
