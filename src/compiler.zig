@@ -31,7 +31,6 @@ pub fn compile(
         .symbols = Compiler.SymbolTable.init(allocator),
         .id = .global,
         .allocator = allocator,
-        .index = 0,
     };
     defer root_scope.symbols.deinit();
 
@@ -47,9 +46,7 @@ pub fn compile(
     defer compiler.exitScope();
 
     // declare all identifiers first
-    for (tree.nodes) |node| {
-        try compiler.forwardDeclareNode(node);
-    }
+    try compiler.forwardDeclareNodes(tree.nodes);
 
     for (tree.nodes) |node| {
         try compiler.compile(node);
@@ -104,8 +101,6 @@ pub const Compiler = struct {
         /// If not a global scope, the scope will own a parent
         parent: ?*Scope = null,
         allocator: *Allocator,
-        /// points to the current index of the symbol list
-        index: usize,
 
         /// The type of the scope
         const Id = enum {
@@ -137,7 +132,6 @@ pub const Compiler = struct {
                 },
                 .parent = self,
                 .allocator = self.allocator,
-                .index = 0,
             };
             return new_scope;
         }
@@ -147,14 +141,12 @@ pub const Compiler = struct {
         fn define(self: *Scope, name: []const u8, mutable: bool, node: ast.Node, forward_declared: bool) !?Symbol {
             if (self.symbols.get(name)) |_| return null;
 
-            defer {
-                self.index += 1;
-            }
+            const index = @intCast(u16, self.symbols.items().len);
 
             var symbol = Symbol{
                 .name = name,
                 .mutable = mutable,
-                .index = @intCast(u16, self.index),
+                .index = index,
                 .scope = self.id,
                 .node = node,
                 .forward_declared = forward_declared,
@@ -326,16 +318,26 @@ pub const Compiler = struct {
     }
 
     /// Retrieves all symbols for Nodes of type declaration
-    fn forwardDeclareNode(self: *Compiler, node: ast.Node) Error!void {
-        if (node != .declaration or node.declaration.value != .func_lit) return;
+    fn forwardDeclareNodes(self: *Compiler, nodes: []const ast.Node) Error!void {
+        var symbol_names = std.ArrayList([]const u8).init(self.allocator);
+        defer symbol_names.deinit();
 
-        const decl = node.declaration;
+        for (nodes) |node| {
+            if (node != .declaration or node.declaration.value != .func_lit) continue;
 
-        const symbol = (try self.scope.define(decl.name.identifier.value, decl.mutable, node, true)) orelse
-            return self.fail("Identifier has already been declared", node.tokenPos());
+            const decl = node.declaration;
 
-        try self.compile(decl.value);
-        _ = try self.emitOp(.bind_global, symbol.index);
+            const symbol = (try self.scope.define(decl.name.identifier.value, decl.mutable, node, true)) orelse
+                return self.fail("Identifier has already been declared", node.tokenPos());
+
+            try symbol_names.append(symbol.name);
+        }
+
+        for (symbol_names.items) |name| {
+            const symbol: Symbol = self.scope.symbols.get(name).?;
+            try self.compile(symbol.node.declaration.value);
+            _ = try self.emitOp(.bind_global, symbol.index);
+        }
     }
 
     /// Compiles the given node into Instructions
@@ -357,8 +359,8 @@ pub const Compiler = struct {
                 var lhs = try self.resolveType(inf.left);
                 var rhs = try self.resolveType(inf.right);
 
-                if (lhs == .list or lhs == .range) lhs = try self.resolveScalarType(inf.left);
-                if (rhs == .list or rhs == .range) rhs = try self.resolveScalarType(inf.right);
+                if (lhs == .list or lhs == .range or lhs == .function) lhs = try self.resolveScalarType(inf.left);
+                if (rhs == .list or rhs == .range or rhs == .function) rhs = try self.resolveScalarType(inf.right);
 
                 if (lhs != rhs)
                     return self.fail("Right hand side type mismatching with left hand side", inf.right.tokenPos());
@@ -445,7 +447,7 @@ pub const Compiler = struct {
                 }
 
                 if (self.resolveSymbol(self.scope, decl.name.identifier.value)) |*s| {
-                    if (decl.value == .func_lit and s.forward_declared) {
+                    if (decl.value == .func_lit) {
                         //s.forward_declared = false;
                         return;
                     } else
