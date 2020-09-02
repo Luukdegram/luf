@@ -145,10 +145,8 @@ pub const Vm = struct {
                 },
                 .bind_global => {
                     const val = self.pop().?;
-                    if (self.globals.items.len > inst.ptr)
-                        self.globals.items[inst.ptr] = val
-                    else
-                        try self.globals.append(val);
+                    try self.globals.resize(inst.ptr + 1);
+                    self.globals.items[inst.ptr] = val;
                 },
                 .load_global => try self.push(self.globals.items[inst.ptr]),
                 .make_array => try self.makeArray(inst),
@@ -175,11 +173,9 @@ pub const Vm = struct {
                 .bind_local => self.stack[current_frame.sp + inst.ptr] = self.pop().?,
                 .load_local => try self.push(self.stack[current_frame.sp + inst.ptr]),
                 .assign_global => {
-                    const value = self.pop().?;
-                    if (self.globals.items.len > inst.ptr)
-                        self.globals.items[inst.ptr] = value
-                    else
-                        try self.globals.append(value);
+                    const val = self.pop().?;
+                    try self.globals.resize(inst.ptr + 1);
+                    self.globals.items[inst.ptr] = val;
                 },
                 .assign_local => self.stack[current_frame.sp + inst.ptr] = self.pop().?,
                 .load_module => try self.loadModule(),
@@ -842,8 +838,8 @@ test "Integer arithmetic" {
 
     inline for (test_cases) |case| {
         var vm = Vm.init(testing.allocator);
-        try vm.compileAndRun(case.input);
         defer vm.deinit();
+        try vm.compileAndRun(case.input);
 
         testing.expect(case.expected == vm.peek().integer);
         testing.expectEqual(@as(usize, 0), vm.sp);
@@ -870,8 +866,8 @@ test "Boolean" {
 
     inline for (test_cases) |case| {
         var vm = Vm.init(testing.allocator);
-        try vm.compileAndRun(case.input);
         defer vm.deinit();
+        try vm.compileAndRun(case.input);
 
         testing.expect(case.expected == vm.peek().boolean);
         testing.expectEqual(@as(usize, 0), vm.sp);
@@ -891,8 +887,8 @@ test "Conditional" {
 
     inline for (test_cases) |case| {
         var vm = Vm.init(testing.allocator);
-        try vm.compileAndRun(case.input);
         defer vm.deinit();
+        try vm.compileAndRun(case.input);
 
         if (@TypeOf(case.expected) == comptime_int) {
             testing.expect(case.expected == vm.peek().integer);
@@ -912,10 +908,10 @@ test "Declaration" {
 
     inline for (test_cases) |case| {
         var vm = Vm.init(testing.allocator);
-        try vm.compileAndRun(case.input);
         defer vm.deinit();
+        try vm.compileAndRun(case.input);
 
-        testing.expect(case.expected == vm.peek().integer);
+        testing.expectEqual(@as(i64, case.expected), vm.peek().integer);
         testing.expectEqual(@as(usize, 0), vm.sp);
     }
 }
@@ -929,8 +925,8 @@ test "Strings" {
 
     inline for (test_cases) |case| {
         var vm = Vm.init(testing.allocator);
-        try vm.compileAndRun(case.input);
         defer vm.deinit();
+        try vm.compileAndRun(case.input);
 
         testing.expectEqualStrings(case.expected, vm.peek().string);
         testing.expectEqual(@as(usize, 0), vm.sp);
@@ -946,8 +942,8 @@ test "Arrays" {
 
     inline for (test_cases) |case| {
         var vm = Vm.init(testing.allocator);
-        try vm.compileAndRun(case.input);
         defer vm.deinit();
+        try vm.compileAndRun(case.input);
 
         const list = vm.peek().list;
         testing.expect(list.items.len == case.expected.len);
@@ -968,8 +964,8 @@ test "Maps" {
 
     inline for (test_cases) |case| {
         var vm = Vm.init(testing.allocator);
-        try vm.compileAndRun(case.input);
         defer vm.deinit();
+        try vm.compileAndRun(case.input);
 
         const map = vm.peek().map;
         testing.expect(map.items().len == case.expected.len);
@@ -1004,8 +1000,8 @@ test "Index" {
 
     inline for (test_cases) |case| {
         var vm = Vm.init(testing.allocator);
-        try vm.compileAndRun(case.input);
         defer vm.deinit();
+        try vm.compileAndRun(case.input);
 
         if (@TypeOf(case.expected) == comptime_int)
             testing.expectEqual(@as(i64, case.expected), vm.peek().integer)
@@ -1027,8 +1023,8 @@ test "Basic function calls with no arguments" {
 
     inline for (test_cases) |case| {
         var vm = Vm.init(testing.allocator);
-        try vm.compileAndRun(case.input);
         defer vm.deinit();
+        try vm.compileAndRun(case.input);
 
         if (@TypeOf(case.expected) == comptime_int)
             testing.expectEqual(@as(i64, case.expected), vm.peek().integer)
@@ -1044,10 +1040,14 @@ test "Globals vs Locals" {
         .{ .input = "const x = fn() int { const y = 1 const z = 2 return y + z } x()", .expected = 3 },
     };
 
-    inline for (test_cases) |case| {
+    inline for (test_cases) |case, i| {
         var vm = Vm.init(testing.allocator);
-        try vm.compileAndRun(case.input);
         defer vm.deinit();
+        if (i == 0) {
+            testing.expectError(compiler.Compiler.Error.CompilerError, vm.compileAndRun(case.input));
+            continue;
+        } else
+            try vm.compileAndRun(case.input);
 
         if (@TypeOf(case.expected) == comptime_int)
             testing.expectEqual(@as(i64, case.expected), vm.peek().integer)
@@ -1066,8 +1066,8 @@ test "Functions with arguments" {
 
     inline for (test_cases) |case| {
         var vm = Vm.init(testing.allocator);
-        try vm.compileAndRun(case.input);
         defer vm.deinit();
+        try vm.compileAndRun(case.input);
 
         if (@TypeOf(case.expected) == comptime_int)
             testing.expectEqual(@as(i64, case.expected), vm.peek().integer)
@@ -1087,8 +1087,8 @@ test "Builtins" {
 
     inline for (test_cases) |case| {
         var vm = Vm.init(testing.allocator);
-        try vm.compileAndRun(case.input);
         defer vm.deinit();
+        try vm.compileAndRun(case.input);
 
         testing.expectEqual(@as(i64, case.expected), vm.peek().integer);
         testing.expectEqual(@as(usize, 0), vm.sp);
@@ -1097,15 +1097,15 @@ test "Builtins" {
 
 test "While loop" {
     const test_cases = .{
-        .{ .input = "mut i = 0 while (i > 10) {mut i = 10} i", .expected = 0 },
+        .{ .input = "mut i = 0 while (i > 10) {i = 10} i", .expected = 0 },
         .{ .input = "mut i = 0 while (i < 10) {i = 10} i", .expected = 10 },
         .{ .input = "mut i = 0 while (i < 10) { if(i==5) { break } i = 5} i", .expected = 5 },
     };
 
     inline for (test_cases) |case| {
         var vm = Vm.init(testing.allocator);
-        try vm.compileAndRun(case.input);
         defer vm.deinit();
+        try vm.compileAndRun(case.input);
 
         testing.expectEqual(@as(i64, case.expected), vm.peek().integer);
         testing.expectEqual(@as(usize, 0), vm.sp);
@@ -1123,8 +1123,8 @@ test "Tail recursion" {
         \\const f: int = func(2) 
     ;
     var vm = Vm.init(testing.allocator);
-    try vm.compileAndRun(input);
     defer vm.deinit();
+    try vm.compileAndRun(input);
 
     testing.expectEqual(@as(i64, 10), vm.peek().integer);
     testing.expectEqual(@as(usize, 0), vm.sp);
@@ -1145,8 +1145,8 @@ test "For loop" {
         \\sum
     ;
     var vm = Vm.init(testing.allocator);
-    try vm.compileAndRun(input);
     defer vm.deinit();
+    try vm.compileAndRun(input);
 
     testing.expectEqual(@as(i64, 8), vm.peek().integer);
     testing.expectEqual(@as(usize, 0), vm.sp);
@@ -1164,8 +1164,8 @@ test "Range" {
         \\sum
     ;
     var vm = Vm.init(testing.allocator);
-    try vm.compileAndRun(input);
     defer vm.deinit();
+    try vm.compileAndRun(input);
 
     testing.expectEqual(@as(i64, 4950), vm.peek().integer);
     testing.expectEqual(@as(usize, 0), vm.sp);
@@ -1174,8 +1174,8 @@ test "Range" {
 test "For loop - String" {
     const input = "mut result = \"hello\" const w = \"world\" for(w)|c, i|{result+=c}result";
     var vm = Vm.init(testing.allocator);
-    try vm.compileAndRun(input);
     defer vm.deinit();
+    try vm.compileAndRun(input);
 
     testing.expectEqualStrings("helloworld", vm.peek().string);
     testing.expectEqual(@as(usize, 0), vm.sp);
@@ -1190,8 +1190,8 @@ test "Enum expression and comparison" {
         \\}
     ;
     var vm = Vm.init(testing.allocator);
-    try vm.compileAndRun(input);
     defer vm.deinit();
+    try vm.compileAndRun(input);
 
     testing.expectEqual(@as(i64, 5), vm.peek().integer);
     testing.expectEqual(@as(usize, 0), vm.sp);
@@ -1209,8 +1209,9 @@ test "Switch case" {
         \\x
     ;
     var vm = Vm.init(testing.allocator);
-    try vm.compileAndRun(input);
     defer vm.deinit();
+    try vm.compileAndRun(input);
+
     testing.expectEqual(@as(i64, 50), vm.peek().integer);
     testing.expectEqual(@as(usize, 0), vm.sp);
 }
@@ -1223,8 +1224,23 @@ test "Import module" {
     ;
 
     var vm = Vm.init(testing.allocator);
-    try vm.compileAndRun(input);
     defer vm.deinit();
+    try vm.compileAndRun(input);
+    testing.expectEqual(@as(i64, 7), vm.peek().integer);
+    testing.expectEqual(@as(usize, 0), vm.sp);
+}
+
+test "Forward declared" {
+    const input =
+        \\ const x = add(2, 5)
+        \\ const add = fn(a: int, b: int) int {
+        \\      return a + b
+        \\ }
+    ;
+
+    var vm = Vm.init(testing.allocator);
+    defer vm.deinit();
+    try vm.compileAndRun(input);
     testing.expectEqual(@as(i64, 7), vm.peek().integer);
     testing.expectEqual(@as(usize, 0), vm.sp);
 }
