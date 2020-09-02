@@ -192,7 +192,7 @@ pub const Value = union(Type) {
     }
 
     pub const List = std.ArrayListUnmanaged(*Value);
-    pub const Map = std.HashMapUnmanaged(*const Value, *Value, hash, eql, true);
+    pub const Map = std.ArrayHashMapUnmanaged(*const Value, *Value, hash, eql, true);
     pub const NativeFn = fn (vm: *@import("vm.zig").Vm, args: []*Value) anyerror!*Value;
 
     /// Prints a `Value` to the given `writer`

@@ -90,7 +90,7 @@ pub const Compiler = struct {
     };
 
     /// Hashmap of `Symbol` where the key is the Symbol's name
-    const SymbolTable = std.StringHashMap(Symbol);
+    const SymbolTable = std.StringArrayHashMap(Symbol);
 
     /// Scope of the current state (function, global, etc)
     const Scope = struct {
