@@ -33,7 +33,7 @@ pub const Value = union(Type) {
     function: struct {
         arg_len: usize,
         locals: usize,
-        instructions: []const @import("bytecode.zig").Instruction,
+        entry: usize,
     },
     list: List,
     map: Map,
@@ -93,6 +93,27 @@ pub const Value = union(Type) {
         return @field(self, @tagName(tag));
     }
 
+    /// Creates a new `Value` of type integer
+    pub fn newInteger(value: i64) Value {
+        return .{ .integer = value };
+    }
+
+    /// Creates a new `Value` of type function
+    pub fn newFunction(locals: usize, arg_len: usize, entry_point: usize) Value {
+        return .{
+            .function = .{
+                .arg_len = arg_len,
+                .locals = locals,
+                .entry = entry_point,
+            },
+        };
+    }
+
+    /// Creates a new `Value` of type string
+    pub fn newString(value: []const u8) Value {
+        return .{ .string = value };
+    }
+
     pub var True = Value{ .boolean = true };
     pub var False = Value{ .boolean = false };
     pub var Nil: Value = .nil;
@@ -134,8 +155,7 @@ pub const Value = union(Type) {
             .function => |func| {
                 hashFn(&hasher, func.arg_len);
                 hashFn(&hasher, func.locals);
-                hashFn(&hasher, func.instructions.len);
-                hashFn(&hasher, func.instructions.ptr);
+                hashFn(&hasher, func.entry);
             },
             .list => |list| {
                 hashFn(&hasher, list.items.len);
@@ -145,7 +165,10 @@ pub const Value = union(Type) {
                 hashFn(&hasher, map.items().len);
                 hashFn(&hasher, map.items().ptr);
             },
-            .native => |native| hashFn(&hasher, native.func),
+            .native => |native| {
+                hashFn(&hasher, native.arg_len);
+                hashFn(&hasher, native.func);
+            },
             .nil => {},
             else => unreachable,
         }

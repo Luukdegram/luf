@@ -97,13 +97,7 @@ pub const Instructions = struct {
     /// Can be used to check if last instruction is of given opcode
     pub fn lastIs(self: Instructions, op: Opcode) bool {
         const last = self.list.items[self.list.items.len - 1];
-        return switch (last) {
-            .op => |p| p == op,
-            .ptr => |ptr| ptr.op == op,
-            .integer => op == .load_integer,
-            .string => op == .load_string,
-            .function => op == .load_func,
-        };
+        return last.getOp() == op;
     }
 
     /// Replaces the ptr of an instruction, this is used for jumping instructions

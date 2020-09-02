@@ -41,14 +41,12 @@ pub const Vm = struct {
     const CallStack = std.ArrayList(Frame);
     /// Function `Frame` on the callstack
     const Frame = struct {
-        /// Frame pointer which contains the actual function `Value`
+        /// Frame pointer which contains the actual function `Value`, which is used to check for tail recursion
         fp: ?*const Value,
         /// `Instruction` pointer to the position of the function in the bytecode's instruction set
         ip: usize,
-        /// Stack pointer. Mostly used to reset the stack pointer between scope changes
+        /// Stack pointer of the current scope. Used to load function locals onto the stack
         sp: usize,
-        /// Instructions to run on the current call stack
-        instructions: []const byte_code.Instruction,
     };
 
     pub fn init(allocator: *Allocator) Vm {
@@ -87,24 +85,32 @@ pub const Vm = struct {
             .fp = null,
             .sp = 0,
             .ip = 0,
-            .instructions = code.instructions,
         });
 
-        while (self.frame().ip < self.frame().instructions.len) {
+        while (self.frame().ip < code.instructions.len) {
             var current_frame = self.frame();
             defer current_frame.ip += 1;
-            const inst = current_frame.instructions[current_frame.ip];
+            const inst = code.instructions[current_frame.ip];
 
-            switch (inst.op) {
-                .load_const => {
-                    // const val = try self.newValue();
-                    //const tmp = code.constants[inst.ptr];
-                    // val.* = if (tmp.isType(.string))
-                    //     .{ .string = try self.arena.allocator.dupe(u8, tmp.string) }
-                    // else
-                    //     tmp;
-                    // try self.push(val);
+            switch (inst.getOp()) {
+                .load_integer => {
+                    const val = try self.newValue();
+                    val.* = Value.newInteger(@bitCast(i64, inst.integer));
+                    try self.push(val);
                 },
+                .load_string => {
+                    const val = try self.newValue();
+                    val.* = Value.newString(try self.arena.allocator.dupe(u8, inst.string));
+                    try self.push(val);
+                },
+                .load_func => {
+                    const func = inst.function;
+                    const val = try self.newValue();
+                    val.* = Value.newFunction(func.locals, func.arg_len, func.entry);
+                    try self.push(val);
+                },
+                //deprecated so no-op
+                .load_const => {},
                 .equal,
                 .not_equal,
                 .less_than,
@@ -169,7 +175,7 @@ pub const Vm = struct {
                     // push the return value back to the stack
                     try self.push(rv);
                 },
-                .call => try self.execFunctionCall(inst, current_frame.instructions[current_frame.ip + 1]),
+                .call => try self.execFunctionCall(inst, code.instructions[current_frame.ip + 1]),
                 .bind_local => self.stack[current_frame.sp + inst.ptr.pos] = self.pop().?,
                 .load_local => try self.push(self.stack[current_frame.sp + inst.ptr.pos]),
                 .assign_global => {
@@ -183,7 +189,6 @@ pub const Vm = struct {
                 .iter_next => try self.execNextIter(),
                 .make_range => try self.makeRange(),
                 .match => try self.execSwitchProng(),
-                else => {},
             }
         }
 
@@ -678,9 +683,8 @@ pub const Vm = struct {
 
         try self.call_stack.append(.{
             .fp = val,
-            .ip = 0,
+            .ip = val.function.entry,
             .sp = self.sp - arg_len,
-            .instructions = val.function.instructions,
         });
 
         self.sp = self.frame().sp + val.function.locals + 1;
