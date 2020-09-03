@@ -33,7 +33,7 @@ pub const Value = union(Type) {
     function: struct {
         arg_len: usize,
         locals: usize,
-        instructions: []const @import("bytecode.zig").Instruction,
+        entry: usize,
     },
     list: List,
     map: Map,
@@ -93,6 +93,27 @@ pub const Value = union(Type) {
         return @field(self, @tagName(tag));
     }
 
+    /// Creates a new `Value` of type integer
+    pub fn newInteger(value: i64) Value {
+        return .{ .integer = value };
+    }
+
+    /// Creates a new `Value` of type function
+    pub fn newFunction(locals: usize, arg_len: usize, entry_point: usize) Value {
+        return .{
+            .function = .{
+                .arg_len = arg_len,
+                .locals = locals,
+                .entry = entry_point,
+            },
+        };
+    }
+
+    /// Creates a new `Value` of type string
+    pub fn newString(value: []const u8) Value {
+        return .{ .string = value };
+    }
+
     pub var True = Value{ .boolean = true };
     pub var False = Value{ .boolean = false };
     pub var Nil: Value = .nil;
@@ -134,8 +155,7 @@ pub const Value = union(Type) {
             .function => |func| {
                 hashFn(&hasher, func.arg_len);
                 hashFn(&hasher, func.locals);
-                hashFn(&hasher, func.instructions.len);
-                hashFn(&hasher, func.instructions.ptr);
+                hashFn(&hasher, func.entry);
             },
             .list => |list| {
                 hashFn(&hasher, list.items.len);
@@ -145,7 +165,10 @@ pub const Value = union(Type) {
                 hashFn(&hasher, map.items().len);
                 hashFn(&hasher, map.items().ptr);
             },
-            .native => |native| hashFn(&hasher, native.func),
+            .native => |native| {
+                hashFn(&hasher, native.arg_len);
+                hashFn(&hasher, native.func);
+            },
             .nil => {},
             else => unreachable,
         }
@@ -234,61 +257,5 @@ pub const Value = union(Type) {
             },
             else => try writer.writeAll("void"),
         }
-    }
-};
-
-/// Scope maps identifiers to their names and can be used
-/// to store and retrieve the value of an identifier.
-pub const Scope = struct {
-    store: Map,
-    parent: ?*Scope = null,
-    allocator: *Allocator,
-
-    const Map = std.StringHashMap(Value);
-
-    pub fn init(allocator: *Allocator) Scope {
-        return Scope{ .store = Map.init(allocator), .allocator = allocator };
-    }
-
-    /// Creates a new `Value` on the stack of the scope
-    pub fn create(self: Scope) !*Value {
-        return self.allocator.create(Value);
-    }
-
-    /// Creates a new Scope from the given scope where the parent is set
-    /// to the given Scope.
-    pub fn clone(self: *Scope) !*Scope {
-        const scope = try self.allocator.create(Scope);
-        scope.* = .{
-            .store = Map.init(self.allocator),
-            .parent = self,
-            .allocator = self.allocator,
-        };
-        return scope;
-    }
-
-    /// Returns null if identifier does not exist within the Scope or any its parent scopes,
-    /// else returns its value
-    pub fn get(self: Scope, name: []const u8) ?Value {
-        var val = self.store.get(name);
-        if (val == null and self.parent != null) {
-            val = self.parent.?.get(name);
-        }
-
-        return val;
-    }
-
-    /// Saves the identifier and its value. Will overwrite any existing identifier
-    /// TODO: Constness checking
-    pub fn set(self: *Scope, name: []const u8, value: Value) !void {
-        return self.store.put(name, value);
-    }
-
-    /// Frees Scope's memory.
-    /// Note: This only frees the memory of the Scope and its internal map,
-    /// not the objects stored inside.
-    pub fn deinit(self: *Scope) void {
-        self.store.deinit();
-        self.* = undefined;
     }
 };

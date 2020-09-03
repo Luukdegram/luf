@@ -41,14 +41,12 @@ pub const Vm = struct {
     const CallStack = std.ArrayList(Frame);
     /// Function `Frame` on the callstack
     const Frame = struct {
-        /// Frame pointer which contains the actual function `Value`
+        /// Frame pointer which contains the actual function `Value`, which is used to check for tail recursion
         fp: ?*const Value,
         /// `Instruction` pointer to the position of the function in the bytecode's instruction set
         ip: usize,
-        /// Stack pointer. Mostly used to reset the stack pointer between scope changes
+        /// Stack pointer of the current scope. Used to load function locals onto the stack
         sp: usize,
-        /// Instructions to run on the current call stack
-        instructions: []const byte_code.Instruction,
     };
 
     pub fn init(allocator: *Allocator) Vm {
@@ -87,24 +85,32 @@ pub const Vm = struct {
             .fp = null,
             .sp = 0,
             .ip = 0,
-            .instructions = code.instructions,
         });
 
-        while (self.frame().ip < self.frame().instructions.len) {
+        while (self.frame().ip < code.instructions.len) {
             var current_frame = self.frame();
             defer current_frame.ip += 1;
-            const inst = current_frame.instructions[current_frame.ip];
+            const inst = code.instructions[current_frame.ip];
 
-            switch (inst.op) {
-                .load_const => {
+            switch (inst.getOp()) {
+                .load_integer => {
                     const val = try self.newValue();
-                    const tmp = code.constants[inst.ptr];
-                    val.* = if (tmp.isType(.string))
-                        .{ .string = try self.arena.allocator.dupe(u8, tmp.string) }
-                    else
-                        tmp;
+                    val.* = Value.newInteger(@bitCast(i64, inst.integer));
                     try self.push(val);
                 },
+                .load_string => {
+                    const val = try self.newValue();
+                    val.* = Value.newString(try self.arena.allocator.dupe(u8, inst.string));
+                    try self.push(val);
+                },
+                .load_func => {
+                    const func = inst.function;
+                    const val = try self.newValue();
+                    val.* = Value.newFunction(func.locals, func.arg_len, func.entry);
+                    try self.push(val);
+                },
+                //deprecated so no-op
+                .load_const => {},
                 .equal,
                 .not_equal,
                 .less_than,
@@ -138,19 +144,20 @@ pub const Vm = struct {
                 .bitwise_not => try self.execBitwiseNot(),
                 .load_nil => try self.push(&Value.Nil),
                 .load_void => try self.push(&Value.Void),
-                .jump => current_frame.ip = inst.ptr - 1,
+                .jump => current_frame.ip = inst.ptr.pos - 1,
                 .jump_false => {
                     const condition = self.pop().?;
-                    if (!isTrue(condition)) current_frame.ip = inst.ptr - 1;
+                    if (!isTrue(condition)) current_frame.ip = inst.ptr.pos - 1;
                 },
                 .bind_global => {
                     const val = self.pop().?;
-                    try self.globals.resize(inst.ptr + 1);
-                    self.globals.items[inst.ptr] = val;
+                    try self.globals.resize(inst.ptr.pos + 1);
+                    self.globals.items[inst.ptr.pos] = val;
                 },
-                .load_global => try self.push(self.globals.items[inst.ptr]),
+                .load_global => try self.push(self.globals.items[inst.ptr.pos]),
                 .make_array => try self.makeArray(inst),
                 .make_map => try self.makeMap(inst),
+                .make_enum => try self.makeEnum(inst),
                 .get_by_index => try self.getIndexValue(),
                 .set_by_index => try self.setIndexValue(),
                 .@"return" => {
@@ -169,16 +176,16 @@ pub const Vm = struct {
                     // push the return value back to the stack
                     try self.push(rv);
                 },
-                .call => try self.execFunctionCall(inst, current_frame.instructions[current_frame.ip + 1]),
-                .bind_local => self.stack[current_frame.sp + inst.ptr] = self.pop().?,
-                .load_local => try self.push(self.stack[current_frame.sp + inst.ptr]),
+                .call => try self.execFunctionCall(inst, code.instructions[current_frame.ip + 1]),
+                .bind_local => self.stack[current_frame.sp + inst.ptr.pos] = self.pop().?,
+                .load_local => try self.push(self.stack[current_frame.sp + inst.ptr.pos]),
                 .assign_global => {
                     const val = self.pop().?;
-                    try self.globals.resize(inst.ptr + 1);
-                    self.globals.items[inst.ptr] = val;
+                    try self.globals.resize(inst.ptr.pos + 1);
+                    self.globals.items[inst.ptr.pos] = val;
                 },
-                .assign_local => self.stack[current_frame.sp + inst.ptr] = self.pop().?,
-                .load_module => try self.loadModule(),
+                .assign_local => self.stack[current_frame.sp + inst.ptr.pos] = self.pop().?,
+                .load_module => {},
                 .make_iter => try self.makeIterable(inst),
                 .iter_next => try self.execNextIter(),
                 .make_range => try self.makeRange(),
@@ -392,7 +399,7 @@ pub const Vm = struct {
 
     /// Analyzes the instruction and builds an array
     fn makeArray(self: *Vm, inst: byte_code.Instruction) Error!void {
-        const len = inst.ptr;
+        const len = inst.ptr.pos;
         var list = Value.List{};
         try list.resize(&self.arena.allocator, len);
         errdefer list.deinit(&self.arena.allocator);
@@ -423,7 +430,7 @@ pub const Vm = struct {
 
     /// Analyzes and creates a new map
     fn makeMap(self: *Vm, inst: byte_code.Instruction) Error!void {
-        const len = inst.ptr;
+        const len = inst.ptr.pos;
         var map = Value.Map{};
         errdefer map.deinit(&self.arena.allocator);
 
@@ -459,6 +466,25 @@ pub const Vm = struct {
         return self.push(res);
     }
 
+    /// Constructs a new enum `Value`
+    fn makeEnum(self: *Vm, inst: byte_code.Instruction) Error!void {
+        const len = inst.ptr.pos;
+
+        var enums_values = try std.ArrayList([]const u8).initCapacity(&self.arena.allocator, @as(usize, len));
+        errdefer enums_values.deinit();
+
+        var i: usize = 0;
+        while (i < len) : (i += 1) {
+            const value = self.pop().?.unwrapAs(.string) orelse return self.fail("Enum contains invalid field");
+            enums_values.appendAssumeCapacity(value);
+        }
+
+        var enm = try self.newValue();
+        enm.* = .{ ._enum = enums_values.toOwnedSlice() };
+
+        return self.push(enm);
+    }
+
     /// Creates a new iterable
     fn makeIterable(self: *Vm, inst: byte_code.Instruction) Error!void {
         const iterable = self.pop() orelse return self.fail("Missing value");
@@ -471,7 +497,7 @@ pub const Vm = struct {
         const value = try self.newValue();
         value.* = .{
             .iterable = .{
-                .expose_index = inst.ptr != 0,
+                .expose_index = inst.ptr.pos != 0,
                 .index = 0,
                 .value = iterable,
             },
@@ -658,7 +684,7 @@ pub const Vm = struct {
     ///
     /// `next` is required to detect if we can optimize tail recursion
     fn execFunctionCall(self: *Vm, inst: byte_code.Instruction, next: byte_code.Instruction) Error!void {
-        const arg_len = inst.ptr;
+        const arg_len = inst.ptr.pos;
         const val = self.stack[self.sp - (1 + arg_len)];
 
         // if it's not a function call, we can expect it to be a builtin function
@@ -677,82 +703,81 @@ pub const Vm = struct {
 
         try self.call_stack.append(.{
             .fp = val,
-            .ip = 0,
+            .ip = val.function.entry,
             .sp = self.sp - arg_len,
-            .instructions = val.function.instructions,
         });
 
         self.sp = self.frame().sp + val.function.locals + 1;
     }
 
-    /// Reads the file name, open it, and compile its source code.
-    /// After compilator, the symbols will be saved in a map and returned
-    fn importModule(self: *Vm, file_name: []const u8) Error!*Value {
-        const file = std.fs.cwd().openFile(file_name, .{}) catch return Error.RuntimeError;
+    // /// Reads the file name, open it, and compile its source code.
+    // /// After compilator, the symbols will be saved in a map and returned
+    // fn importModule(self: *Vm, file_name: []const u8) Error!*Value {
+    //     const file = std.fs.cwd().openFile(file_name, .{}) catch return Error.RuntimeError;
 
-        defer file.close();
-        const size = file.getEndPos() catch return Error.RuntimeError;
+    //     defer file.close();
+    //     const size = file.getEndPos() catch return Error.RuntimeError;
 
-        const source = file.readAllAlloc(self.allocator, size, size) catch return Error.RuntimeError;
-        defer self.allocator.free(source);
+    //     const source = file.readAllAlloc(self.allocator, size, size) catch return Error.RuntimeError;
+    //     defer self.allocator.free(source);
 
-        // we should probably save this bytecode so we can free it at a later point
-        var code = compiler.compile(self.allocator, source, &self.errors) catch return Error.RuntimeError;
-        defer code.deinit();
+    //     // we should probably save this bytecode so we can free it at a later point
+    //     var code = compiler.compile(self.allocator, source, &self.errors) catch return Error.RuntimeError;
+    //     defer code.deinit();
 
-        const last_ip = self.ip;
-        const last_sp = self.sp;
-        try self.run(code);
+    //     const last_ip = self.ip;
+    //     const last_sp = self.sp;
+    //     try self.run(code);
 
-        // Get all constants exposed by the source file
-        var attributes = Value.Map{};
-        try attributes.ensureCapacity(&self.arena.allocator, code.symbols.items().len);
-        for (code.symbols.items()) |entry, i| {
-            const symbol: compiler.Compiler.Symbol = entry.value;
-            std.debug.assert(symbol.scope == .global);
+    //     // Get all constants exposed by the source file
+    //     var attributes = Value.Map{};
+    //     try attributes.ensureCapacity(&self.arena.allocator, code.symbols.items().len);
+    //     for (code.symbols.items()) |entry, i| {
+    //         const symbol: compiler.Compiler.Symbol = entry.value;
+    //         std.debug.assert(symbol.scope == .global);
 
-            const name = try self.newValue();
-            name.* = .{ .string = try self.arena.allocator.dupe(u8, symbol.name) };
-            const value = try self.newValue();
-            value.* = code.constants[symbol.index];
+    //         const name = try self.newValue();
+    //         name.* = .{ .string = try self.arena.allocator.dupe(u8, symbol.name) };
+    //         const value = try self.newValue();
+    //         //value.* = code.constants[symbol.index];
 
-            // Create a copy of the function instructions as we're free'ing all compiler memory on scope exit
-            if (value.isType(.function)) {
-                value.function.instructions = try self.arena.allocator.dupe(byte_code.Instruction, value.function.instructions);
-            }
+    //         // Create a copy of the function instructions as we're free'ing all compiler memory on scope exit
+    //         if (value.isType(.function)) {
+    //             value.function.instructions = try self.arena.allocator.dupe(byte_code.Instruction, value.function.instructions);
+    //         }
 
-            if (value.isType(._enum)) {
-                value._enum = try self.arena.allocator.dupe([]const u8, value._enum);
-            }
+    //         if (value.isType(._enum)) {
+    //             value._enum = try self.arena.allocator.dupe([]const u8, value._enum);
+    //         }
 
-            attributes.putAssumeCapacityNoClobber(name, value);
-        }
+    //         attributes.putAssumeCapacityNoClobber(name, value);
+    //     }
 
-        const ret = try self.newValue();
-        ret.* = .{ .map = attributes };
-        return ret;
-    }
+    //     const ret = try self.newValue();
+    //     ret.* = .{ .map = attributes };
+    //     return ret;
+    // }
 
-    /// Loads a module, if not existing, compiles the source code of the given file name
-    fn loadModule(self: *Vm) Error!void {
-        const val = self.pop().?;
-        const name = val.unwrapAs(.string) orelse return self.fail("Expected a string");
-        const mod = self.imports.get(name) orelse blk: {
-            const imp = self.importModule(name) catch return self.fail("Could not import module");
-            try self.imports.put(name, imp);
-            break :blk imp;
-        };
+    // /// Loads a module, if not existing, compiles the source code of the given file name
+    // fn loadModule(self: *Vm) Error!void {
+    //     const val = self.pop().?;
+    //     const name = val.unwrapAs(.string) orelse return self.fail("Expected a string");
+    //     const mod = self.imports.get(name) orelse blk: {
+    //         const imp = self.importModule(name) catch return self.fail("Could not import module");
+    //         try self.imports.put(name, imp);
+    //         break :blk imp;
+    //     };
 
-        const ret = try self.newValue();
-        ret.* = .{
-            .module = .{
-                .name = name,
-                .attributes = mod,
-            },
-        };
+    //     const ret = try self.newValue();
+    //     ret.* = .{
+    //         .module = .{
+    //             .name = name,
+    //             .attributes = mod,
+    //         },
+    //     };
 
-        return self.push(ret);
-    }
+    //     return self.push(ret);
+    // }
 
     /// Compares switch' capture and the current prong.
     /// Unlike execCmp, this does not pop the lhs value from the stack, to maintain it's position
@@ -1223,11 +1248,11 @@ test "Import module" {
         \\result
     ;
 
-    var vm = Vm.init(testing.allocator);
-    defer vm.deinit();
-    try vm.compileAndRun(input);
-    testing.expectEqual(@as(i64, 7), vm.peek().integer);
-    testing.expectEqual(@as(usize, 0), vm.sp);
+    // var vm = Vm.init(testing.allocator);
+    // defer vm.deinit();
+    // try vm.compileAndRun(input);
+    // testing.expectEqual(@as(i64, 7), vm.peek().integer);
+    // testing.expectEqual(@as(usize, 0), vm.sp);
 }
 
 test "Forward declared" {
