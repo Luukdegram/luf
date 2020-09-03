@@ -13,9 +13,8 @@ pub const Tree = struct {
     allocator: *std.mem.Allocator,
 
     /// Frees all memory
-    pub fn deinit(self: *Tree) void {
+    pub fn deinit(self: Tree) void {
         self.arena.promote(self.allocator).deinit();
-        self.allocator.destroy(self);
     }
 };
 

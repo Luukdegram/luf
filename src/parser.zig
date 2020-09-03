@@ -66,7 +66,7 @@ fn findPrecedence(token_type: Token.TokenType) Precedence {
 }
 
 /// Parses source code into an AST tree
-pub fn parse(allocator: *Allocator, source: []const u8, _errors: *Errors) Parser.Error!*Tree {
+pub fn parse(allocator: *Allocator, source: []const u8, _errors: *Errors) Parser.Error!Tree {
     var lexer = Lexer.init(source);
 
     var arena = std.heap.ArenaAllocator.init(allocator);
@@ -88,14 +88,11 @@ pub fn parse(allocator: *Allocator, source: []const u8, _errors: *Errors) Parser
         try nodes.append(try parser.parseStatement());
     }
 
-    const tree = try allocator.create(Tree);
-    tree.* = Tree{
+    return Tree{
         .nodes = nodes.toOwnedSlice(),
         .arena = arena.state,
         .allocator = allocator,
     };
-
-    return tree;
 }
 
 /// Parser retrieves tokens from our Lexer and turns them into

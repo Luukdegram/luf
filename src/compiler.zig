@@ -23,9 +23,6 @@ pub fn compile(
     const tree = try parser.parse(allocator, source, _errors);
     defer tree.deinit();
 
-    var arena = std.heap.ArenaAllocator.init(allocator);
-    errdefer arena.deinit();
-
     var root_scope = Compiler.Scope{
         .symbols = Compiler.SymbolTable.init(allocator),
         .id = .global,
@@ -35,14 +32,13 @@ pub fn compile(
 
     var compiler = Compiler{
         .instructions = Instructions.init(allocator),
-        .constants = Values.init(allocator),
         .allocator = allocator,
         .scope = &root_scope,
         .errors = _errors,
+        .modules = std.StringHashMap(std.StringHashMap(Compiler.Symbol)).init(allocator),
+        .module_states = std.ArrayList(std.heap.ArenaAllocator.State).init(allocator),
     };
-    errdefer compiler.instructions.deinit();
-    errdefer compiler.constants.deinit();
-    defer compiler.exitScope();
+    defer compiler.deinit();
 
     // declare all identifiers first
     try compiler.forwardDeclareNodes(tree.nodes);
@@ -64,9 +60,10 @@ const Values = std.ArrayList(Value);
 /// after calling Compile()
 pub const Compiler = struct {
     instructions: Instructions,
-    constants: Values,
     allocator: *Allocator,
     errors: *errors.Errors,
+    modules: std.StringHashMap(std.StringHashMap(Symbol)),
+    module_states: std.ArrayList(std.heap.ArenaAllocator.State),
 
     scope: *Scope,
 
@@ -193,6 +190,26 @@ pub const Compiler = struct {
         }
     };
 
+    /// Frees up any memory allocated by the compiler
+    fn deinit(self: *Compiler) void {
+        var it = self.modules.iterator();
+        while (it.next()) |mod| {
+            var symbol_it = mod.value.iterator();
+            while (symbol_it.next()) |s| {
+                self.allocator.free(s.key);
+            }
+            mod.value.deinit();
+        }
+        self.modules.deinit();
+        self.exitScope();
+        self.instructions.deinit();
+        for (self.module_states.items) |state| {
+            state.promote(self.allocator).deinit();
+        }
+        self.module_states.deinit();
+        self.* = undefined;
+    }
+
     /// Returns `Error.CompilerError` and appends an error message to the `errors` list.
     fn fail(self: *Compiler, msg: []const u8, index: usize) Error {
         try self.errors.add(msg, index, .err);
@@ -272,7 +289,7 @@ pub const Compiler = struct {
     }
 
     /// Resolves the inner type of a node. i.e. this will return `Type.integer` for a list []int
-    fn resolveScalarType(self: *Compiler, node: ast.Node) !Type {
+    fn resolveScalarType(self: *Compiler, node: ast.Node) Error!Type {
         if (node.getInnerType()) |i| return i;
         return switch (node) {
             .identifier => |id| {
@@ -289,21 +306,41 @@ pub const Compiler = struct {
 
                 return self.resolveScalarType(decl.value);
             },
-            .index => |index| return self.resolveScalarType(index.left),
+            .index => |index| {
+                const temp_type = try self.resolveScalarType(index.left);
+                if (temp_type == .module) {
+                    const function_name = index.index.string_lit.value;
+                    const symbol = self.resolveSymbol(self.scope, index.left.identifier.value) orelse
+                        return self.fail("Identifier does not exist", index.left.tokenPos());
+
+                    const mod = self.modules.get(symbol.node.declaration.value.import.value.string_lit.value).?;
+
+                    const function_symbol: Symbol = mod.get(function_name) orelse
+                        return self.fail("Module does not contain function", index.index.tokenPos());
+
+                    return self.resolveScalarType(function_symbol.node);
+                }
+
+                return self.resolveScalarType(index.left);
+            },
             .call_expression => |cal| return self.resolveScalarType(cal.function),
             else => std.debug.panic("TODO, implement scalar type resolving for type: {}\n", .{node}),
         };
     }
 
     /// Retrieves all symbols for Nodes of type declaration
-    fn forwardDeclareNodes(self: *Compiler, nodes: []const ast.Node) Error!void {
+    fn forwardDeclareNodes(self: *Compiler, nodes: []const ast.Node) !void {
         var symbol_names = std.ArrayList([]const u8).init(self.allocator);
         defer symbol_names.deinit();
 
         for (nodes) |node| {
-            if (node != .declaration or node.declaration.value != .func_lit) continue;
-
+            if (node != .declaration) continue;
             const decl = node.declaration;
+
+            if (decl.value == .import) {
+                try self.forwardDeclareImport(decl.value.import);
+                continue;
+            } else if (decl.value != .func_lit) continue;
 
             const symbol = (try self.scope.define(decl.name.identifier.value, decl.mutable, node, true)) orelse
                 return self.fail("Identifier has already been declared", node.tokenPos());
@@ -316,6 +353,49 @@ pub const Compiler = struct {
             try self.compile(symbol.node.declaration.value);
             try self.emit(Instruction.genPtr(.bind_global, symbol.index));
         }
+    }
+
+    /// Forward declares all functions from a module, so we can do type checking for imported
+    /// functions.
+    fn forwardDeclareImport(self: *Compiler, node: *const ast.Node.Import) !void {
+        const file_name = node.value.string_lit.value;
+        if (self.modules.contains(file_name)) return;
+
+        const file = std.fs.cwd().openFile(file_name, .{}) catch
+            return self.fail("Could not open module", node.value.tokenPos());
+        defer file.close();
+
+        const size = file.getEndPos() catch return self.fail("Could not get module file size", node.value.tokenPos());
+        const source = file.reader().readAllAlloc(self.allocator, size) catch return self.fail("Could not read source of module", node.value.tokenPos());
+        defer self.allocator.free(source);
+
+        const tree = try parser.parse(self.allocator, source, self.errors);
+        errdefer tree.deinit();
+
+        var symbols = std.StringHashMap(Symbol).init(self.allocator);
+        for (tree.nodes) |n, i| {
+            if (n != .declaration or n.declaration.value != .func_lit) continue;
+
+            const decl = n.declaration;
+            const name = try self.allocator.dupe(u8, decl.name.identifier.value);
+            errdefer self.allocator.free(name);
+
+            if (symbols.contains(name)) return self.fail("Identifier already exists", n.tokenPos());
+
+            const func_node = n.declaration.value.func_lit;
+            const symbol = Symbol{
+                .name = name,
+                .mutable = decl.mutable,
+                .scope = .global,
+                .node = n.declaration.value,
+                .forward_declared = true,
+            };
+
+            try symbols.putNoClobber(name, symbol);
+        }
+
+        try self.modules.putNoClobber(file_name, symbols);
+        try self.module_states.append(tree.arena);
     }
 
     /// Compiles the given node into Instructions
@@ -414,7 +494,7 @@ pub const Compiler = struct {
                     const explicit_type = try self.resolveType(td);
                     var rhs_type = try self.resolveType(decl.value);
                     // if function, get the return type of the function
-                    if (rhs_type == .function) rhs_type = try self.resolveScalarType(decl.value);
+                    if (rhs_type == .function or rhs_type == .module) rhs_type = try self.resolveScalarType(decl.value);
 
                     if (explicit_type != rhs_type) return self.fail("Mismatching types", decl.value.tokenPos());
                 }
@@ -523,23 +603,34 @@ pub const Compiler = struct {
                         break :blk function.node.declaration.value.func_lit;
                     } else if (initial_function_type != .module)
                         call.function.func_lit
-                    else
-                        null;
+                    else blk: {
+                        // we handle module functions here
+                        const function_name = call.function.index.index.string_lit.value;
+                        const symbol = self.resolveSymbol(self.scope, call.function.index.left.identifier.value) orelse
+                            return self.fail("Identifier does not exist", call.function.index.left.tokenPos());
 
-                    if (function_node) |n|
-                        if (n.params.len != call.arguments.len)
-                            return self.fail("Incorrect number of arguments given", call.token.start);
+                        const mod: std.StringHashMap(Symbol) = self.modules.get(symbol.node.declaration.value.import.value.string_lit.value).?;
+
+                        const function_symbol: Symbol = mod.get(function_name) orelse
+                            return self.fail("Module does not contain function", call.function.tokenPos());
+
+                        break :blk function_symbol.node.func_lit;
+                    };
+
+                    //if (function_node) |n|
+                    if (function_node.params.len != call.arguments.len)
+                        return self.fail("Incorrect number of arguments given", call.token.start);
 
                     try self.compile(call.function);
 
                     for (call.arguments) |arg, i| {
-                        if (initial_function_type != .module) {
-                            const arg_type = try self.resolveType(arg);
-                            const func_arg_type = try self.resolveType(function_node.?.params[i]);
+                        //if (initial_function_type != .module) {
+                        const arg_type = try self.resolveType(arg);
+                        const func_arg_type = try self.resolveType(function_node.params[i]);
 
-                            if (arg_type != func_arg_type)
-                                return self.fail("Mismatching types for parameter", arg.tokenPos());
-                        }
+                        if (arg_type != func_arg_type)
+                            return self.fail("Mismatching types for parameter", arg.tokenPos());
+                        //}
                         try self.compile(arg);
                     }
 
@@ -997,6 +1088,10 @@ test "Compile AST to bytecode" {
                 .assign_global,
                 .pop,
             },
+        },
+        .{
+            .input = "const imp = import(\"examples/to_import.luf\") const x:int = imp.sum(2, 5)",
+            .opcodes = &[_]Opcode{},
         },
     };
 

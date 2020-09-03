@@ -1242,11 +1242,11 @@ test "Switch case" {
 }
 
 test "Import module" {
-    const input =
-        \\const imp = import("examples/to_import.luf")
-        \\const result = imp.add(2, 5)
-        \\result
-    ;
+    // const input =
+    //     \\const imp = import("examples/to_import.luf")
+    //     \\const result = imp.sum(2, 5)
+    //     \\result
+    // ;
 
     // var vm = Vm.init(testing.allocator);
     // defer vm.deinit();
