@@ -1,3 +1,7 @@
 const sum = fn(x:int, y:int) int {
     return x + y
 }
+
+const add = fn(x: int) int {
+    return sum(20, x)
+}

@@ -29,6 +29,7 @@ pub const Value = union(Type) {
     string: []const u8,
     _void,
     nil,
+    module,
     _return: *Value,
     function: struct {
         arg_len: usize,
@@ -40,10 +41,6 @@ pub const Value = union(Type) {
     native: struct {
         func: NativeFn,
         arg_len: usize,
-    },
-    module: struct {
-        name: []const u8,
-        attributes: *Value,
     },
     range: struct {
         start: i64,
@@ -118,6 +115,7 @@ pub const Value = union(Type) {
     pub var False = Value{ .boolean = false };
     pub var Nil: Value = .nil;
     pub var Void: Value = ._void;
+    pub var Module: Value = .module;
 
     /// Frees Value's memory
     pub fn deinit(self: Value, alloc: *Allocator) void {
@@ -169,6 +167,10 @@ pub const Value = union(Type) {
                 hashFn(&hasher, native.arg_len);
                 hashFn(&hasher, native.func);
             },
+            .range => |range| {
+                hashFn(&hasher, range.start);
+                hashFn(&hasher, range.end);
+            },
             .nil => {},
             else => unreachable,
         }
@@ -195,6 +197,7 @@ pub const Value = union(Type) {
                 }
                 return true;
             },
+            .range => |range| return range.start == b.range.start and range.end == b.range.end,
             else => unreachable,
         };
     }

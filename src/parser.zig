@@ -178,7 +178,7 @@ pub const Parser = struct {
     /// Parses the current token as an Identifier
     fn parseIdentifier(self: *Parser) Error!Node {
         const identifier = try self.allocator.create(Node.Identifier);
-        const val = self.source[self.current_token.start..self.current_token.end];
+        const val = try self.allocator.dupe(u8, self.source[self.current_token.start..self.current_token.end]);
         identifier.* = .{ .token = self.current_token, .value = val };
         return Node{ .identifier = identifier };
     }
@@ -452,7 +452,7 @@ pub const Parser = struct {
         const node = try self.allocator.create(Node.FunctionArgument);
         node.* = .{
             .token = self.current_token,
-            .value = self.source[self.current_token.start..self.current_token.end],
+            .value = try self.allocator.dupe(u8, self.source[self.current_token.start..self.current_token.end]),
             .arg_type = undefined,
         };
         try self.expectPeek(.colon);

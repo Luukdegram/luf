@@ -1,6 +1,6 @@
 const imp = import("examples/to_import.luf")
 
-const sum = imp.add(1, 2)
+const x = imp.sum(2, 5)
 
 //this allows example to print last value
-sum
+x
