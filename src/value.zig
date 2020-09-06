@@ -32,6 +32,7 @@ pub const Value = union(Type) {
     module,
     _return: *Value,
     function: struct {
+        name: ?[]const u8,
         arg_len: usize,
         locals: usize,
         entry: usize,
@@ -96,9 +97,10 @@ pub const Value = union(Type) {
     }
 
     /// Creates a new `Value` of type function
-    pub fn newFunction(locals: usize, arg_len: usize, entry_point: usize) Value {
+    pub fn newFunction(name: ?[]const u8, locals: usize, arg_len: usize, entry_point: usize) Value {
         return .{
             .function = .{
+                .name = name,
                 .arg_len = arg_len,
                 .locals = locals,
                 .entry = entry_point,
@@ -151,6 +153,8 @@ pub const Value = union(Type) {
             .boolean => |boolean| hashFn(&hasher, boolean),
             .string => |str| hasher.update(str),
             .function => |func| {
+                if (func.name) |name|
+                    hasher.update(name);
                 hashFn(&hasher, func.arg_len);
                 hashFn(&hasher, func.locals);
                 hashFn(&hasher, func.entry);

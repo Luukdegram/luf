@@ -338,6 +338,7 @@ pub const Node = union(NodeType) {
         params: []const Node,
         body: ?Node,
         ret_type: Node,
+        name: ?[]const u8,
     };
 
     /// Represents an argument inside a function, contains both the

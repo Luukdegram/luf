@@ -163,6 +163,9 @@ pub const Parser = struct {
 
         decl.value = try self.parseExpression(.lowest);
 
+        if (decl.value == .func_lit)
+            decl.value.func_lit.name = decl.name.identifier.value;
+
         return Node{ .declaration = decl };
     }
 
@@ -406,6 +409,7 @@ pub const Parser = struct {
             .params = undefined,
             .body = null,
             .ret_type = undefined,
+            .name = null,
         };
 
         try self.expectPeek(.left_parenthesis);
