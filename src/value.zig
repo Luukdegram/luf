@@ -31,12 +31,7 @@ pub const Value = union(Type) {
     nil,
     module,
     _return: *Value,
-    function: struct {
-        name: ?[]const u8,
-        arg_len: usize,
-        locals: usize,
-        entry: usize,
-    },
+    function: LufFn,
     list: List,
     map: Map,
     native: struct {
@@ -111,6 +106,88 @@ pub const Value = union(Type) {
     /// Creates a new `Value` of type string
     pub fn newString(value: []const u8) Value {
         return .{ .string = value };
+    }
+
+    /// Creates a Luf `Value` from a Zig value
+    /// Memory is owned by caller and must be freed by caller
+    pub fn fromZig(alloc: *std.mem.Allocator, val: anytype) !*Value {
+        switch (@TypeOf(val)) {
+            void => return &Value.Void,
+            *Value => return val,
+            Value => {
+                const ret = alloc.create(Value);
+                ret.* = val;
+                return val;
+            },
+            bool => return if (val) &Value.True else &Value.False,
+            []u8, []const u8 => {
+                const ret = alloc.create(Value);
+                ret.* = newString(val);
+                return ret;
+            },
+            type => switch (@typeInfo(val)) {
+                .Struct => |info| {
+                    var map = Value.Map{};
+                    errdefer map.deinit(alloc);
+
+                    comptime var decl_count = 0;
+                    inline for (info.decls) |decl| {
+                        if (decl.is_pub) decl_count += 1;
+                    }
+
+                    try map.ensureCapacity(alloc, decl_count);
+
+                    inline for (indo.decls) |decl| {
+                        if (!decl.is_pub) continue;
+
+                        const key = try alloc.create(Value);
+                        key.* = newString(decl.name);
+
+                        const value = try fromZig(allocator, @field(val, decl.name));
+
+                        map.putAssumeCapacityNoClobber(key, value);
+                    }
+
+                    const ret = alloc.create(Value);
+                    ret.* = .{ .map = map };
+                    return ret;
+                },
+                else => @compileError("Unsupported type: " ++ @typeName(val)),
+            },
+            else => switch (@typeInfo(@TypeOf(val))) {
+                .Fn => {},
+                .ComptimeInt, .Int => {
+                    const ret = try alloc.create(Value);
+                    ret.* = newInteger(val);
+                    return ret;
+                },
+                .Pointer => |info| switch (@typeInfo(info.child)) {
+                    .Array => |array_info| switch (array_info.child) {
+                        u8 => {
+                            const ret = try alloc.create(Value);
+                            ret.* = Value.newString(val);
+                            return ret;
+                        },
+                        else => {
+                            const list = Value.List{};
+                            errdefer list.deinit(alloc);
+
+                            try list.ensureCapacity(alloc, array_info.len);
+                            for (list.items) |*item, i| {
+                                item.* = try fromZig(alloc, val[i]);
+                            }
+
+                            const ret = try alloc.create(Value);
+                            ret.* = .{ .list = list };
+                            return ret;
+                        },
+                    },
+                    else => {},
+                },
+                .Null => return &Value.Nil,
+                else => @compileError("Unsupported type: " ++ @typeName(@TypeOf(val))),
+            },
+        }
     }
 
     pub var True = Value{ .boolean = true };
@@ -223,7 +300,8 @@ pub const Value = union(Type) {
 
     pub const List = std.ArrayListUnmanaged(*Value);
     pub const Map = std.ArrayHashMapUnmanaged(*const Value, *Value, hash, eql, true);
-    pub const NativeFn = fn (vm: *@import("vm.zig").Vm, args: []*Value) anyerror!*Value;
+    pub const NativeFn = fn (allocator: *std.mem.Allocator, args: []*Value) anyerror!*Value;
+    pub const LufFn = struct { name: ?[]const u8, arg_len: usize, locals: usize, entry: usize };
 
     /// Prints a `Value` to the given `writer`
     pub fn print(self: *const Value, writer: anytype) @TypeOf(writer).Error!void {
