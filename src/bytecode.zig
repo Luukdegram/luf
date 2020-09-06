@@ -134,6 +134,7 @@ pub const Instruction = union(Type) {
     integer: u64,
     string: []const u8,
     function: struct {
+        name: ?[]const u8,
         locals: u32,
         arg_len: u8,
         entry: u32,
@@ -175,9 +176,10 @@ pub const Instruction = union(Type) {
     }
 
     /// Generates a `function` Instruction
-    pub fn genFunction(locals: usize, arg_len: usize, entry_point: u32) Instruction {
+    pub fn genFunction(name: ?[]const u8, locals: usize, arg_len: usize, entry_point: u32) Instruction {
         return .{
             .function = .{
+                .name = name,
                 .locals = @intCast(u32, locals),
                 .arg_len = @intCast(u8, arg_len),
                 .entry = entry_point,
@@ -211,7 +213,7 @@ pub const Encoder = struct {
             .ptr => |ptr| try emitPtr(writer, ptr.op, ptr.pos),
             .integer => |int| try emitInteger(writer, int),
             .string => |string| try emitString(writer, string),
-            .function => |func| try emitFunc(writer, .{
+            .function => |func| try emitFunc(writer, func.name, .{
                 .locals = func.locals,
                 .arg_len = func.arg_len,
                 .entry = func.entry,
@@ -259,6 +261,7 @@ pub const Encoder = struct {
     /// Emits a `load_func` opcode where the struct is encoded as a byte slice
     fn emitFunc(
         writer: anytype,
+        name: ?[]const u8,
         func: struct {
             locals: u32,
             arg_len: u8,
@@ -266,6 +269,14 @@ pub const Encoder = struct {
         },
     ) !void {
         try emitOp(writer, .load_func);
+        const len: u8 = if (name) |n| @intCast(u8, n.len) else 0;
+        var buffer: [1]u8 = undefined;
+        std.mem.writeIntLittle(u8, &buffer, len);
+
+        try writer.writeAll(&buffer);
+        if (name) |n| {
+            try writer.writeAll(n);
+        }
         return writer.writeAll(std.mem.asBytes(&func));
     }
 };
