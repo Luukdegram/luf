@@ -129,7 +129,7 @@ pub const Compiler = struct {
             function: *const ast.Node.FunctionLiteral,
             loop: struct {
                 start: u32,
-                breaks: std.ArrayList(*Instruction),
+                breaks: std.ArrayList(u32),
             },
         };
 
@@ -143,7 +143,7 @@ pub const Compiler = struct {
                     .global => .{ .global = {} },
                     .module => .{ .module = {} },
                     .function => .{ .function = undefined },
-                    .loop => .{ .loop = .{ .start = 0, .breaks = std.ArrayList(*Instruction).init(self.allocator) } },
+                    .loop => .{ .loop = .{ .start = 0, .breaks = std.ArrayList(u32).init(self.allocator) } },
                 },
                 .parent = self,
                 .allocator = self.allocator,
@@ -706,8 +706,8 @@ pub const Compiler = struct {
                 // jump to end
                 self.instructions.replacePtr(false_jump, end);
 
-                for (self.scope.id.loop.breaks.items) |inst| {
-                    inst.ptr.pos = end;
+                for (self.scope.id.loop.breaks.items) |pos| {
+                    self.instructions.list.items[pos].ptr.pos = end;
                 }
                 self.exitScope();
             },
@@ -761,8 +761,8 @@ pub const Compiler = struct {
                     try self.emit(Instruction.gen(.pop));
                 }
 
-                for (self.scope.id.loop.breaks.items) |inst| {
-                    inst.ptr.pos = end;
+                for (self.scope.id.loop.breaks.items) |pos| {
+                    self.instructions.list.items[pos].ptr.pos = end;
                 }
 
                 // point the end jump to last op
@@ -850,8 +850,7 @@ pub const Compiler = struct {
                     );
 
                 const pos = try self.emitReturnPos(Instruction.genPtr(.jump, 0));
-                const jump = &self.instructions.list.items[pos];
-                try self.scope.id.loop.breaks.append(jump);
+                try self.scope.id.loop.breaks.append(pos);
             },
             .@"continue" => |cont| {
                 if (self.scope.id != .loop)
