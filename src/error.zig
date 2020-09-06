@@ -22,16 +22,21 @@ pub const Errors = struct {
     /// internal list, containing all errors
     /// call deinit() on `Errors` to free its memory
     list: std.ArrayList(Error),
+    /// Allocator used to allocPrint error messages
+    allocator: *std.mem.Allocator,
 
     /// Creates a new Errors object that can be catch errors and print them out to a writer
     pub fn init(allocator: *std.mem.Allocator) Errors {
-        return .{ .list = std.ArrayList(Error).init(allocator) };
+        return .{ .list = std.ArrayList(Error).init(allocator), .allocator = allocator };
     }
 
     /// Appends a new error to the error list
-    pub fn add(self: *Errors, fmt: []const u8, index: usize, kind: Error.ErrorType) !void {
+    pub fn add(self: *Errors, comptime fmt: []const u8, index: usize, kind: Error.ErrorType, args: anytype) !void {
+        const msg = try std.fmt.allocPrint(self.allocator, fmt, args);
+        errdefer self.allocator.free(msg);
+
         return self.list.append(.{
-            .fmt = fmt,
+            .fmt = msg,
             .kind = kind,
             .index = index,
         });
@@ -39,6 +44,9 @@ pub const Errors = struct {
 
     /// Frees the memory of the errors
     pub fn deinit(self: Errors) void {
+        for (self.list.items) |err| {
+            self.allocator.free(err.fmt);
+        }
         return self.list.deinit();
     }
 
@@ -46,6 +54,7 @@ pub const Errors = struct {
     /// source is required as we do not necessarily know the source when we init() `Errors`
     pub fn write(self: *Errors, source: []const u8, writer: anytype) !void {
         while (self.list.popOrNull()) |err| {
+            defer self.allocator.free(err.fmt);
             const color_prefix = switch (err.kind) {
                 .err => "\x1b[0;31m",
                 .info => "\x1b[0;37m",

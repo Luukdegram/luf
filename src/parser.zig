@@ -113,8 +113,8 @@ pub const Parser = struct {
     };
 
     /// Returns `Error.ParserError` and appends an error message to the `errors` list.
-    fn fail(self: *Parser, msg: []const u8, index: usize) Error {
-        try self.err.add(msg, index, .err);
+    fn fail(self: *Parser, comptime msg: []const u8, index: usize, args: anytype) Error {
+        try self.err.add(msg, index, .err, args);
         return Error.ParserError;
     }
 
@@ -211,7 +211,7 @@ pub const Parser = struct {
             .@"break" => try self.parseBreak(),
             .@"continue" => try self.parseContinue(),
             .@"enum" => try self.parseEnum(),
-            else => return self.fail("Unexpected token", self.current_token.start),
+            else => return self.fail("Unexpected token", self.current_token.start, .{}),
         };
 
         while (prec.val() < findPrecedence(self.peek_token.token_type).val()) {
@@ -538,7 +538,11 @@ pub const Parser = struct {
 
             if (ds.len) |len|
                 if (ds.value.?.len != len.int_lit.value)
-                    return self.fail("Mismatching data structure size", self.current_token.start);
+                    return self.fail(
+                        "Expected size {} but found size {}",
+                        self.current_token.start,
+                        .{ ds.value.?.len, len.int_lit.value },
+                    );
         }
 
         return Node{ .data_structure = ds };
@@ -584,7 +588,7 @@ pub const Parser = struct {
 
         index.index = if (token.token_type == .period) blk: {
             if (!self.currentIsType(.identifier))
-                return self.fail("Expected identifier", self.current_token.start);
+                return self.fail("Expected identifier", self.current_token.start, .{});
             break :blk try self.parseStringLiteral();
         } else
             try self.parseExpression(.lowest);
@@ -660,7 +664,7 @@ pub const Parser = struct {
     /// Parses the current expression as an assignment. Compiler does checking for mutating
     fn parseAssignment(self: *Parser, left: Node) Error!Node {
         if (left != .identifier and left != .index)
-            return self.fail("Expected identifier or index", self.current_token.start);
+            return self.fail("Expected identifier or index", self.current_token.start, .{});
 
         const node = try self.allocator.create(Node.Assignment);
         node.* = .{
@@ -829,7 +833,7 @@ pub const Parser = struct {
             .bool_type, .int_type, .string_type, .void_type => {},
             .left_bracket => node.value = try self.parseDataStructure(true),
             .function => node.value = try self.parseFunctionLiteral(false),
-            else => return self.fail("Unexpected token, expected a type", self.current_token.start),
+            else => return self.fail("Unexpected token, expected a type definition", self.current_token.start, .{}),
         }
 
         return Node{ .type_def = node };
@@ -843,8 +847,9 @@ pub const Parser = struct {
             return;
         }
         return self.fail(
-            "Expected token '" ++ Token.string(token_type) ++ "'",
+            "Expected token '" ++ Token.fmtString(token_type) ++ "'",
             self.peek_token.start,
+            .{},
         );
     }
 

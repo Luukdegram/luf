@@ -230,8 +230,8 @@ pub const Compiler = struct {
     }
 
     /// Returns `Error.CompilerError` and appends an error message to the `errors` list.
-    fn fail(self: *Compiler, msg: []const u8, index: usize) Error {
-        try self.errors.add(msg, index, .err);
+    fn fail(self: *Compiler, comptime msg: []const u8, index: usize, args: anytype) Error {
+        try self.errors.add(msg, index, .err, args);
         return Error.CompilerError;
     }
 
@@ -298,7 +298,7 @@ pub const Compiler = struct {
         return switch (node) {
             .identifier => |id| {
                 const symbol = self.resolveSymbol(self.scope, id.value) orelse
-                    return self.fail("Undefined symbol", id.token.start);
+                    return self.fail("'{}' is undefined", id.token.start, .{id.value});
 
                 return self.resolveType(symbol.node);
             },
@@ -322,7 +322,7 @@ pub const Compiler = struct {
                 const symbol = self.resolveSymbol(
                     self.scope,
                     id.value,
-                ) orelse return self.fail("Undefined symbol", id.token.start);
+                ) orelse return self.fail("'{}' is undefined", id.token.start, .{id.value});
 
                 return self.resolveScalarType(symbol.node);
             },
@@ -337,12 +337,16 @@ pub const Compiler = struct {
                 if (temp_type == .module) {
                     const function_name = index.index.string_lit.value;
                     const symbol = self.resolveSymbol(self.scope, index.left.identifier.value) orelse
-                        return self.fail("Identifier does not exist", index.left.tokenPos());
+                        return self.fail(
+                        "'{}' is undefined",
+                        index.left.tokenPos(),
+                        .{index.left.identifier.value},
+                    );
 
                     const mod: *Module = self.modules.get(symbol.node.declaration.value.import.value.string_lit.value).?;
 
                     const function_symbol: Symbol = mod.symbols.get(function_name) orelse
-                        return self.fail("Module does not contain function", index.index.tokenPos());
+                        return self.fail("Module does not contain function '{}'", index.index.tokenPos(), .{function_name});
 
                     return self.resolveScalarType(function_symbol.node);
                 }
@@ -366,7 +370,7 @@ pub const Compiler = struct {
             } else if (decl.value != .func_lit) continue;
 
             const symbol = (try self.defineSymbol(decl.name.identifier.value, decl.mutable, node, true)) orelse
-                return self.fail("Identifier has already been declared", node.tokenPos());
+                return self.fail("'{}' has already been declared", node.tokenPos(), .{decl.name.identifier.value});
         }
         for (self.scope.symbols.items()) |symbol| {
             try self.compile(symbol.value.node.declaration.value);
@@ -381,11 +385,15 @@ pub const Compiler = struct {
         if (self.modules.contains(file_name)) return;
 
         const file = std.fs.cwd().openFile(file_name, .{}) catch
-            return self.fail("Could not open module", node.value.tokenPos());
+            return self.fail("Cannot open file with path '{}'", node.value.tokenPos(), .{file_name});
         defer file.close();
 
-        const size = file.getEndPos() catch return self.fail("Could not get module file size", node.value.tokenPos());
-        const source = file.reader().readAllAlloc(self.allocator, size) catch return self.fail("Could not read source of module", node.value.tokenPos());
+        const size = file.getEndPos() catch return self.fail("Unable to find file size", node.value.tokenPos(), .{});
+        const source = file.reader().readAllAlloc(self.allocator, size) catch return self.fail(
+            "Failed to read content of file with path '{}'",
+            node.value.tokenPos(),
+            .{file_name},
+        );
         defer self.allocator.free(source);
 
         const tree = try parser.parse(self.allocator, source, self.errors);
@@ -403,7 +411,12 @@ pub const Compiler = struct {
             const decl = n.declaration;
             const name = decl.name.identifier.value;
 
-            if (module.symbols.contains(name)) return self.fail("Identifier already exists", n.declaration.name.tokenPos());
+            if (module.symbols.contains(name))
+                return self.fail(
+                    "Identifier '{}' already exists",
+                    n.declaration.name.tokenPos(),
+                    .{name},
+                );
 
             const symbol = Symbol{
                 .name = name,
@@ -445,7 +458,7 @@ pub const Compiler = struct {
                 if (rhs == .list or rhs == .range or rhs == .function) rhs = try self.resolveScalarType(inf.right);
 
                 if (lhs != rhs)
-                    return self.fail("Right hand side type mismatching with left hand side", inf.right.tokenPos());
+                    return self.fail("Expected type {} but found type {}", inf.right.tokenPos(), .{ lhs, rhs });
 
                 try self.compile(inf.left);
                 try self.compile(inf.right);
@@ -520,7 +533,12 @@ pub const Compiler = struct {
                     // if function, get the return type of the function
                     if (rhs_type == .function or rhs_type == .module) rhs_type = try self.resolveScalarType(decl.value);
 
-                    if (explicit_type != rhs_type) return self.fail("Mismatching types", decl.value.tokenPos());
+                    if (explicit_type != rhs_type)
+                        return self.fail(
+                            "Expected type {} but found type {}",
+                            decl.value.tokenPos(),
+                            .{ explicit_type, rhs_type },
+                        );
                 }
 
                 if (self.resolveSymbol(self.scope, decl.name.identifier.value)) |*s| {
@@ -528,7 +546,11 @@ pub const Compiler = struct {
                         s.forward_declared = false;
                         return;
                     } else
-                        return self.fail("Identifier has already been declared", decl.token.start);
+                        return self.fail(
+                        "Identifier '{}' has already been declared",
+                        decl.token.start,
+                        .{decl.name.identifier.value},
+                    );
                 }
                 const symbol = (try self.defineSymbol(decl.name.identifier.value, decl.mutable, node, false)).?;
 
@@ -547,14 +569,20 @@ pub const Compiler = struct {
                     .function, .loop => .load_local,
                 };
                 try self.emit(Instruction.genPtr(opcode, symbol.index));
-            } else return self.fail("Identifier does not exist", id.token.start),
+            } else return self.fail("Identifier '{}' is undefined", id.token.start, .{id.value}),
             .string_lit => |string| try self.emit(Instruction.genString(try self.allocator.dupe(u8, string.value))),
             .data_structure => |ds| {
                 const inner_type = try self.resolveScalarType(node);
 
                 // ds.value will only be null if it's specified as a type rather than an expression
-                for (ds.value.?) |element| {
-                    if (inner_type != try self.resolveScalarType(element)) return self.fail("Unmatching type for element", element.tokenPos());
+                for (ds.value.?) |element, i| {
+                    const el_type = try self.resolveScalarType(element);
+                    if (inner_type != el_type)
+                        return self.fail(
+                            "Expected type {} but found type {} for element {}",
+                            element.tokenPos(),
+                            .{ inner_type, el_type, i },
+                        );
 
                     try self.compile(element);
                 }
@@ -592,12 +620,17 @@ pub const Compiler = struct {
                 for (function.params) |param| {
                     // function arguments are not mutable by default
                     _ = (try self.defineSymbol(param.func_arg.value, false, param, false)) orelse
-                        return self.fail("Identifier has already been declared", function.token.start);
+                        return self.fail(
+                        "Identifier '{}' has already been declared",
+                        function.token.start,
+                        .{param.func_arg.value},
+                    );
                 }
 
                 try self.compile(function.body orelse return self.fail(
                     "Function body missing",
                     function.token.start,
+                    .{},
                 ));
 
                 // if the last instruction is a pop rather than some value
@@ -630,7 +663,11 @@ pub const Compiler = struct {
                     //in the case of an anonymous function
                     const function_node = if (call.function == .identifier) blk: {
                         const function = self.resolveSymbol(self.scope, call.function.identifier.value) orelse
-                            return self.fail("Tried to call undefined function", call.function.tokenPos());
+                            return self.fail(
+                            "Function '{}' is undefined",
+                            call.function.tokenPos(),
+                            .{call.function.identifier.value},
+                        );
                         break :blk function.node.declaration.value.func_lit;
                     } else if (initial_function_type != .module)
                         call.function.func_lit
@@ -638,30 +675,38 @@ pub const Compiler = struct {
                         // we handle module functions here
                         const function_name = call.function.index.index.string_lit.value;
                         const symbol = self.resolveSymbol(self.scope, call.function.index.left.identifier.value) orelse
-                            return self.fail("Identifier does not exist", call.function.index.left.tokenPos());
+                            return self.fail(
+                            "Identifier '{}' does not exist",
+                            call.function.index.left.tokenPos(),
+                            .{call.function.index.left.identifier.value},
+                        );
 
                         const mod = self.modules.get(symbol.node.declaration.value.import.value.string_lit.value).?;
 
                         const decl_symbol: Symbol = mod.symbols.get(function_name) orelse
-                            return self.fail("Module does not contain function", call.function.tokenPos());
+                            return self.fail("Module does not contain function '{}'", call.function.tokenPos(), .{function_name});
 
                         break :blk decl_symbol.node.declaration.value.func_lit;
                     };
 
-                    //if (function_node) |n|
                     if (function_node.params.len != call.arguments.len)
-                        return self.fail("Incorrect number of arguments given", call.token.start);
+                        return self.fail("Expected {} arguments, but found {}", call.token.start, .{
+                            function_node.params.len,
+                            call.arguments.len,
+                        });
 
                     try self.compile(call.function);
 
                     for (call.arguments) |arg, i| {
-                        //if (initial_function_type != .module) {
                         const arg_type = try self.resolveType(arg);
                         const func_arg_type = try self.resolveType(function_node.params[i]);
 
                         if (arg_type != func_arg_type)
-                            return self.fail("Mismatching types for parameter", arg.tokenPos());
-                        //}
+                            return self.fail(
+                                "Expected type '{}' but found type '{}'",
+                                arg.tokenPos(),
+                                .{ func_arg_type, arg_type },
+                            );
                         try self.compile(arg);
                     }
 
@@ -670,7 +715,11 @@ pub const Compiler = struct {
             },
             .@"return" => |ret| {
                 const scope = self.findScope(self.scope, .function) orelse
-                    return self.fail("Unexpected return statement. Return can only be done while inside a function", node.tokenPos());
+                    return self.fail(
+                    "Unexpected return statement. Return can only be done while inside a function body",
+                    node.tokenPos(),
+                    .{},
+                );
 
                 const func_ret_type = scope.id.function.ret_type.getType();
                 var ret_type = try self.resolveType(ret.value);
@@ -680,7 +729,11 @@ pub const Compiler = struct {
                 }
 
                 if (func_ret_type != ret_type)
-                    return self.fail("Mismatching return type", ret.value.tokenPos());
+                    return self.fail(
+                        "Expected return type '{}' but found type '{}'",
+                        ret.value.tokenPos(),
+                        .{ func_ret_type, ret_type },
+                    );
 
                 try self.compile(ret.value);
                 try self.emit(Instruction.gen(.return_value));
@@ -713,7 +766,15 @@ pub const Compiler = struct {
             },
             .for_loop => |loop| {
                 try self.createScope(.loop);
+                const iterator_type = try self.resolveType(loop.iter);
 
+                if (iterator_type != .list and iterator_type != .range and iterator_type != .string) {
+                    return self.fail(
+                        "Expected a list, range or string, but found type '{}'",
+                        loop.iter.tokenPos(),
+                        .{iterator_type},
+                    );
+                }
                 try self.compile(loop.iter);
 
                 try self.emit(Instruction.genPtr(
@@ -728,10 +789,10 @@ pub const Compiler = struct {
 
                 // parser already parses it as an identifier, no need to check here again
                 const capture = (try self.defineSymbol(loop.capture.identifier.value, false, loop.iter, false)) orelse return self.fail(
-                    "Capture identifier has already been declared",
+                    "Capture identifier '{}' has already been declared",
                     loop.token.start,
+                    .{loop.capture.identifier.value},
                 );
-                if (capture.scope != .loop) return self.fail("Expected a loop scope", loop.token.start);
                 try self.emit(Instruction.genPtr(.assign_local, capture.index));
 
                 // as above, parser ensures it's an identifier
@@ -741,9 +802,8 @@ pub const Compiler = struct {
                     index_node.token = i.identifier.token;
 
                     const symbol = (try self.defineSymbol(i.identifier.value, false, ast.Node{ .int_lit = index_node }, false)) orelse
-                        return self.fail("Index identifier has already been declared", loop.token.start);
+                        return self.fail("Identifier '{}' has already been declared", loop.token.start, .{i.identifier.value});
 
-                    if (symbol.scope != .loop) return self.fail("Expected a loop scope", loop.token.start);
                     try self.emit(Instruction.genPtr(.assign_local, symbol.index));
                 }
 
@@ -775,13 +835,21 @@ pub const Compiler = struct {
                     const symbol = self.resolveSymbol(
                         self.scope,
                         asg.left.identifier.value,
-                    ) orelse return self.fail("Identifier could not be found", asg.token.start);
+                    ) orelse return self.fail(
+                        "Identifier '{}' is undefined",
+                        asg.token.start,
+                        .{asg.left.identifier.value},
+                    );
 
-                    if (!symbol.mutable) return self.fail("Identifier is constant", asg.token.start);
+                    if (!symbol.mutable) return self.fail("Identifier '{}' is constant", asg.token.start, .{symbol.name});
 
                     const right_type = try self.resolveType(asg.right);
                     const left_type = try self.resolveType(symbol.node);
-                    if (left_type != right_type) return self.fail("Mismatching types for assignment", asg.token.start);
+                    if (left_type != right_type)
+                        return self.fail("Assignment expected type '{}' but found type '{}'", asg.token.start, .{
+                            left_type,
+                            right_type,
+                        });
 
                     try self.compile(asg.right);
 
@@ -795,28 +863,32 @@ pub const Compiler = struct {
                     const lhs_type = try self.resolveScalarType(index.left);
                     const rhs_type = try self.resolveScalarType(asg.right);
 
-                    if (lhs_type != rhs_type) return self.fail("Mismatching types", asg.right.tokenPos());
+                    if (lhs_type != rhs_type)
+                        return self.fail("Expected type '{}' but found type '{}'", asg.right.tokenPos(), .{
+                            lhs_type,
+                            rhs_type,
+                        });
 
                     try self.compile(index.left);
                     try self.compile(index.index);
                     try self.compile(asg.right);
                     try self.emit(Instruction.gen(.set_by_index));
                 } else {
-                    return self.fail("Expected an identifier or index on left hand side", asg.left.tokenPos());
+                    return self.fail("Expected an identifier on left hand side", asg.left.tokenPos(), .{});
                 }
             },
             .nil => try self.emit(Instruction.gen(.load_nil)),
             .import => |imp| {
                 // no need for resolveType, this is faster
-                if (imp.value != .string_lit) return self.fail("Expected a string", imp.value.tokenPos());
+                if (imp.value != .string_lit) return self.fail("Expected a string literal", imp.value.tokenPos(), .{});
                 try self.createScope(.module);
 
                 const file = std.fs.cwd().openFile(imp.value.string_lit.value, .{}) catch
-                    return self.fail("Could not open module", node.tokenPos());
+                    return self.fail("Could not open file at path '{}'", node.tokenPos(), .{imp.value.string_lit.value});
                 defer file.close();
-                const size = file.getEndPos() catch return self.fail("Could not determine file size", node.tokenPos());
+                const size = file.getEndPos() catch return self.fail("Could not determine file size", node.tokenPos(), .{});
                 const source = file.reader().readAllAlloc(self.allocator, size) catch
-                    return self.fail("Could not read file", node.tokenPos());
+                    return self.fail("Could not read file", node.tokenPos(), .{});
                 defer self.allocator.free(source);
                 const tree = try parser.parse(self.allocator, source, self.errors);
                 defer tree.deinit();
@@ -847,6 +919,7 @@ pub const Compiler = struct {
                     return self.fail(
                         "Breaks can only be used while inside a for or while loop",
                         br.token.start,
+                        .{},
                     );
 
                 const pos = try self.emitReturnPos(Instruction.genPtr(.jump, 0));
@@ -857,6 +930,7 @@ pub const Compiler = struct {
                     return self.fail(
                         "Continue can only be used while inside a for or while loop",
                         cont.token.start,
+                        .{},
                     );
                 try self.emit(Instruction.genPtr(.jump, self.scope.id.loop.start));
             },
@@ -864,8 +938,8 @@ pub const Compiler = struct {
                 const lhs_type = try self.resolveScalarType(range.left);
                 const rhs_type = try self.resolveScalarType(range.right);
 
-                if (lhs_type != .integer) return self.fail("Expected an integer type as range start", range.left.tokenPos());
-                if (rhs_type != .integer) return self.fail("Expected an integer type as range end", range.right.tokenPos());
+                if (lhs_type != .integer) return self.fail("Expected an integer but found type '{}'", range.left.tokenPos(), .{lhs_type});
+                if (rhs_type != .integer) return self.fail("Expected an integer but found type '{}'", range.right.tokenPos(), .{rhs_type});
 
                 try self.compile(range.left);
                 try self.compile(range.right);
@@ -874,7 +948,11 @@ pub const Compiler = struct {
             .@"enum" => |enm| {
                 for (enm.nodes) |n| {
                     if (n != .identifier)
-                        return self.fail("Found a non-identifier inside the Enum declaration", enm.token.start);
+                        return self.fail(
+                            "Found an identifier but found type '{}' inside the Enum declaration",
+                            enm.token.start,
+                            .{try self.resolveType(n)},
+                        );
 
                     try self.emit(Instruction.genString(try self.allocator.dupe(u8, n.identifier.value)));
                 }
@@ -886,7 +964,7 @@ pub const Compiler = struct {
                 try self.compile(sw.capture);
                 const capture_type = try self.resolveType(sw.capture);
                 if (capture_type != .integer and capture_type != .string)
-                    return self.fail("Switches are only allowed for integers, enums and strings", sw.capture.tokenPos());
+                    return self.fail("Switches are only allowed for integers, enums and strings. Found type '{}'", sw.capture.tokenPos(), .{capture_type});
 
                 for (sw.prongs) |p| {
                     try self.compile(p);
@@ -897,7 +975,7 @@ pub const Compiler = struct {
                 const prong_type = try self.resolveType(prong.left);
                 switch (prong_type) {
                     .integer, .string, .range => {},
-                    else => return self.fail("Unpermitted type in switch case", prong.left.tokenPos()),
+                    else => return self.fail("Unpermitted type '{}' in switch case", prong.left.tokenPos(), .{prong_type}),
                 }
 
                 // compile lhs of prong

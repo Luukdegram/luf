@@ -735,7 +735,7 @@ pub const Vm = struct {
     /// Appends an error message to `errors` and returns a `Vm.Error`
     fn fail(self: *Vm, comptime msg: []const u8) Error!void {
         //TODO implement a way to add location information
-        try self.errors.add("Runtime error: " ++ msg, 0, .err);
+        try self.errors.add("Runtime error: " ++ msg, 0, .err, .{});
         return Error.RuntimeError;
     }
 

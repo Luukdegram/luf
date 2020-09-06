@@ -112,7 +112,7 @@ pub const Token = struct {
     });
 
     /// Returns the string value of the token
-    pub fn string(token_type: comptime Token.TokenType) []const u8 {
+    pub fn fmtString(token_type: comptime Token.TokenType) []const u8 {
         return switch (token_type) {
             .illegal => "[illegal]",
             .eof => "[eof]",
@@ -154,8 +154,8 @@ pub const Token = struct {
             .comma => ",",
             .left_parenthesis => "(",
             .right_parenthesis => ")",
-            .left_brace => "{",
-            .right_brace => "}",
+            .left_brace => "{{", //escaped for fmt
+            .right_brace => "}}", //escaped for fmt
             .left_bracket => "[",
             .right_bracket => "]",
             .colon => ":",
