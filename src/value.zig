@@ -183,20 +183,36 @@ pub const Value = union(Type) {
                         var innerFunc: @TypeOf(val) = undefined;
 
                         fn call(_alloc: *Allocator, args: []*Value) !*Value {
-                            if (args_len == 0)
-                                return Value.fromZig(_alloc, innerFunc());
+                            if (args.len != args_len) return error.IncorrectArgumentCount;
 
-                            // is there any possibility to do this nicer?
-                            // seems like we can't do dynamic dispatch that easily right now
-                            const arg_1 = args[arg_index].toZig(Fn.args[arg_index].arg_type.?);
-                            arg_index += 1;
-                            if (args_len == 1)
-                                return Value.fromZig(_alloc, innerFunc(arg_1));
+                            const ArgsTuple = comptime blk: {
+                                var fields: [args_len]std.builtin.TypeInfo.StructField = undefined;
+                                for (fields) |*f, idx| {
+                                    var num_buf: [128]u8 = undefined;
+                                    f.* = .{
+                                        .name = std.fmt.bufPrint(&num_buf, "{}", .{idx}) catch unreachable,
+                                        .field_type = Fn.args[idx].arg_type.?,
+                                        .default_value = @as(?(Fn.args[idx].arg_type.?), null),
+                                        .is_comptime = false,
+                                    };
+                                }
+                                break :blk @Type(.{
+                                    .Struct = .{
+                                        .layout = .Auto,
+                                        .fields = &fields,
+                                        .decls = &[0]std.builtin.TypeInfo.Declaration{},
+                                        .is_tuple = true,
+                                    },
+                                });
+                            };
 
-                            const arg_2 = args[arg_index].toZig(Fn.args[arg_index].arg_type.?);
-                            arg_index += 1;
-                            if (args_len == 2)
-                                return Value.fromZig(_alloc, innerFunc(arg_1, arg_2));
+                            var tuple: ArgsTuple = undefined;
+                            comptime var i = 0;
+                            inline while (i < args_len) : (i += 1) {
+                                tuple[i] = args[i].toZig(Fn.args[i].arg_type.?);
+                            }
+
+                            return Value.fromZig(_alloc, @call(.{}, innerFunc, tuple));
                         }
                     };
                     // set innerFunc as we cannot access `val` from inside
