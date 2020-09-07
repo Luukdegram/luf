@@ -45,6 +45,9 @@ pub const Vm = struct {
     /// To be run instructions
     code: ?*ByteCode,
 
+    /// Libraries that are loaded into the VM
+    libs: std.StringHashMapUnmanaged(*Value),
+
     /// Possible errors that occur during runtime
     pub const Error = error{ OutOfMemory, RuntimeError } || BuiltinError;
 
@@ -71,6 +74,7 @@ pub const Vm = struct {
             .arena = std.heap.ArenaAllocator.init(allocator),
             .errors = Errors.init(allocator),
             .code = null,
+            .libs = std.StringHashMapUnmanaged(*Value){},
         };
     }
 
@@ -81,6 +85,7 @@ pub const Vm = struct {
         self.arena.deinit();
         self.call_stack.deinit();
         self.errors.deinit();
+        self.libs.deinit(self.allocator);
         self.* = undefined;
     }
 
@@ -98,6 +103,15 @@ pub const Vm = struct {
         self.code = code;
     }
 
+    /// Loads a Zig library into the VM
+    pub fn loadLib(self: *Vm, name: []const u8, lib: anytype) !void {
+        try self.libs.putNoClobber(
+            self.allocator,
+            name,
+            try Value.fromZig(&self.arena.allocator, lib),
+        );
+    }
+
     /// Calls a function from Luf using the given arguments
     /// Returns the value from the function back to Zig as `Value`
     pub fn callFunc(self: *Vm, func_name: []const u8, args: anytype) !*Value {
@@ -113,12 +127,12 @@ pub const Vm = struct {
             }
         }
         if (maybe_func == null) {
-            try self.fail("Function is undefined");
+            return error.UndefinedFunction;
         }
 
         const func = maybe_func.?.function;
         if (func.arg_len != args.len) {
-            try self.fail("Incorrect amount of arguments given");
+            return error.IncorrectArgumentLength;
         }
 
         try self.push(maybe_func.?);
@@ -272,7 +286,14 @@ pub const Vm = struct {
                     self.globals.items[inst.ptr.pos] = val;
                 },
                 .assign_local => self.stack[current_frame.sp + inst.ptr.pos] = self.pop().?,
-                .load_module => try self.push(&Value.Module),
+                .load_module => {
+                    const string = self.pop().?.unwrapAs(.string) orelse
+                        return self.fail("Expected a string");
+
+                    const mod = try self.newValue();
+                    mod.* = .{ .module = string };
+                    try self.push(mod);
+                },
                 .make_iter => try self.makeIterable(inst),
                 .iter_next => try self.execNextIter(),
                 .make_range => try self.makeRange(),
@@ -726,6 +747,15 @@ pub const Vm = struct {
 
                 return self.fail("Enum identifier does not exist");
             },
+            .module => |mod| {
+                const member = index.unwrapAs(.string) orelse return self.fail("Expected an identifier");
+
+                const value = self.libs.get(mod) orelse return self.fail("Library does not exist");
+
+                //const value = lib.get(index) orelse return self.fail("Library x does not have member y");
+
+                return self.push(value);
+            },
             else => return self.fail("Unsupported type"),
         }
     }
@@ -766,7 +796,8 @@ pub const Vm = struct {
         const arg_len = inst.ptr.pos;
         const val = self.stack[self.sp - (1 + arg_len)];
 
-        // if it's not a function call, we can expect it to be a builtin function
+        if (val.isType(.native)) return self.execNativeFuncCall();
+        
         if (val.* != .function) return;
 
         if (arg_len != val.function.arg_len) return self.fail("Mismatching argument length");
@@ -787,6 +818,20 @@ pub const Vm = struct {
         });
 
         self.sp = self.frame().sp + val.function.locals;
+    }
+
+    /// Executes a native Zig function call
+    fn execNativeFuncCall(self: *Vm) Error!void {
+        const func = self.pop().?.unwrapAs(.native) orelse return self.fail("Expected native Zig function");
+        var args = try self.arena.allocator.alloc(*Value, func.arg_len);
+        defer self.arena.allocator.free(args);
+
+        for (args) |*arg| {
+            arg.* = self.pop().?;
+        }
+
+        const result = func.func(&self.arena.allocator, args) catch return self.fail("Could not execute Zig function");
+        return self.push(result);
     }
 
     /// Compares switch' capture and the current prong.
@@ -1322,5 +1367,23 @@ test "Inner functions" {
     defer vm.deinit();
     try vm.compileAndRun(input);
     testing.expectEqual(@as(i64, 60), vm.peek().integer);
+    testing.expectEqual(@as(usize, 0), vm.sp);
+}
+
+fn testZigFromLuf(a: u32, b: u32) u32 {
+    return a + b;
+}
+
+test "Zig from Luf" {
+    const input =
+        \\const zig = import("zig")
+        \\const result = zig.sum(2, 5)
+        \\result
+    ;
+    var vm = Vm.init(testing.allocator);
+    try vm.loadLib("zig", testZigFromLuf);
+    defer vm.deinit();
+    try vm.compileAndRun(input);
+    testing.expectEqual(@as(i64, 7), vm.peek().integer);
     testing.expectEqual(@as(usize, 0), vm.sp);
 }

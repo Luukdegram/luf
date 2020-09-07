@@ -29,7 +29,7 @@ pub const Value = union(Type) {
     string: []const u8,
     _void,
     nil,
-    module,
+    module: []const u8,
     _return: *Value,
     function: LufFn,
     list: List,
@@ -108,6 +108,23 @@ pub const Value = union(Type) {
         return .{ .string = value };
     }
 
+    /// Converts a `Value` to a Zig type of `T`
+    pub fn toZig(self: *const Value, comptime T: type) T {
+        return switch (T) {
+            void => {},
+            bool => self.boolean,
+            []const u8 => self.string,
+            *Map, *const Map => self.map,
+            *Value, *const Value => self,
+            Value => self.*,
+            else => switch (@typeInfo(T)) {
+                .Int => @intCast(T, self.integer),
+                .Enum => @intToEnum(T, self.integer),
+                else => @compileError("TODO add support for type: " ++ @typeName(T)),
+            },
+        };
+    }
+
     /// Creates a Luf `Value` from a Zig value
     /// Memory is owned by caller and must be freed by caller
     pub fn fromZig(alloc: *std.mem.Allocator, val: anytype) !*Value {
@@ -155,7 +172,45 @@ pub const Value = union(Type) {
                 else => @compileError("Unsupported type: " ++ @typeName(val)),
             },
             else => switch (@typeInfo(@TypeOf(val))) {
-                .Fn => {},
+                .Fn => {
+                    const ret = try alloc.create(Value);
+                    const Fn = @typeInfo(@TypeOf(val)).Fn;
+
+                    comptime var arg_index: u2 = 0;
+                    const args_len = Fn.args.len;
+                    const Func = struct {
+                        // this is needed as `val` is not accessible from inner function
+                        var innerFunc: @TypeOf(val) = undefined;
+
+                        fn call(_alloc: *Allocator, args: []*Value) !*Value {
+                            if (args_len == 0)
+                                return Value.fromZig(_alloc, innerFunc());
+
+                            // is there any possibility to do this nicer?
+                            // seems like we can't do dynamic dispatch that easily right now
+                            const arg_1 = args[arg_index].toZig(Fn.args[arg_index].arg_type.?);
+                            arg_index += 1;
+                            if (args_len == 1)
+                                return Value.fromZig(_alloc, innerFunc(arg_1));
+
+                            const arg_2 = args[arg_index].toZig(Fn.args[arg_index].arg_type.?);
+                            arg_index += 1;
+                            if (args_len == 2)
+                                return Value.fromZig(_alloc, innerFunc(arg_1, arg_2));
+                        }
+                    };
+                    // set innerFunc as we cannot access `val` from inside
+                    Func.innerFunc = val;
+
+                    ret.* = .{
+                        .native = .{
+                            .func = Func.call,
+                            .arg_len = Fn.args.len,
+                        },
+                    };
+
+                    return ret;
+                },
                 .ComptimeInt, .Int => {
                     const ret = try alloc.create(Value);
                     ret.* = newInteger(val);
@@ -182,7 +237,7 @@ pub const Value = union(Type) {
                             return ret;
                         },
                     },
-                    else => {},
+                    else => @compileError("Unsupported type: " ++ @typeName(@TypeOf(val))),
                 },
                 .Null => return &Value.Nil,
                 else => @compileError("Unsupported type: " ++ @typeName(@TypeOf(val))),
@@ -194,7 +249,6 @@ pub const Value = union(Type) {
     pub var False = Value{ .boolean = false };
     pub var Nil: Value = .nil;
     pub var Void: Value = ._void;
-    pub var Module: Value = .module;
 
     /// Frees Value's memory
     pub fn deinit(self: Value, alloc: *Allocator) void {
