@@ -99,7 +99,10 @@ pub const Compiler = struct {
 
     /// Module with its global symbols
     const Module = struct {
+        /// symbols existing inside the module
         symbols: SymbolTable,
+        /// used to determine if module still requires codegen
+        compiled: bool,
     };
 
     /// Hashmap of `Symbol` where the key is the Symbol's name
@@ -386,6 +389,7 @@ pub const Compiler = struct {
     fn forwardDeclareImport(self: *Compiler, node: *const ast.Node.Import) !void {
         const file_name = node.value.string_lit.value;
         if (self.modules.contains(file_name)) return;
+        if (!std.mem.endsWith(u8, file_name, ".luf")) return;
 
         const file = std.fs.cwd().openFile(file_name, .{}) catch
             return self.fail("Cannot open file with path '{}'", node.value.tokenPos(), .{file_name});
@@ -405,7 +409,7 @@ pub const Compiler = struct {
         const module = try self.allocator.create(Module);
         errdefer self.allocator.destroy(module);
 
-        module.* = .{ .symbols = SymbolTable.init(self.allocator) };
+        module.* = .{ .symbols = SymbolTable.init(self.allocator), .compiled = false };
         errdefer module.symbols.deinit();
 
         for (tree.nodes) |n| {
@@ -603,11 +607,16 @@ pub const Compiler = struct {
                 if ((try self.resolveType(index.left)) == .module) {
                     const module_symol = self.resolveSymbol(self.scope, index.left.identifier.value).?;
                     const module_name = module_symol.node.declaration.value.import.value.string_lit.value;
-                    const module = self.modules.get(module_name).?;
-                    const func_name = index.index.string_lit.value;
-                    var func: Symbol = module.symbols.get(func_name).?;
+                    if (self.modules.get(module_name)) |module| {
+                        const func_name = index.index.string_lit.value;
+                        var func: Symbol = module.symbols.get(func_name).?;
 
-                    try self.emit(Instruction.genPtr(.load_global, func.index));
+                        try self.emit(Instruction.genPtr(.load_global, func.index));
+                    } else {
+                        try self.compile(index.left);
+                        try self.compile(index.index);
+                        try self.emit(Instruction.gen(.get_by_index));
+                    }
                 } else {
                     try self.compile(index.left);
                     try self.compile(index.index);
@@ -690,12 +699,22 @@ pub const Compiler = struct {
                             .{call.function.index.left.identifier.value},
                         );
 
-                        const mod = self.modules.get(symbol.node.declaration.value.import.value.string_lit.value).?;
+                        if (self.modules.get(symbol.node.declaration.value.import.value.string_lit.value)) |mod| {
+                            const decl_symbol: Symbol = mod.symbols.get(function_name) orelse
+                                return self.fail("Module does not contain function '{}'", call.function.tokenPos(), .{function_name});
 
-                        const decl_symbol: Symbol = mod.symbols.get(function_name) orelse
-                            return self.fail("Module does not contain function '{}'", call.function.tokenPos(), .{function_name});
+                            break :blk decl_symbol.node.declaration.value.func_lit;
+                        } else {
+                            // not a module, so expect a library
+                            for (call.arguments) |arg| {
+                                try self.compile(arg);
+                            }
 
-                        break :blk decl_symbol.node.declaration.value.func_lit;
+                            try self.compile(call.function);
+
+                            // actual function will be on top of stack, due to it being called by index
+                            return self.emit(Instruction.genPtr(.call, @intCast(u32, 0)));
+                        }
                     };
 
                     if (function_node.params.len != call.arguments.len)
@@ -890,37 +909,46 @@ pub const Compiler = struct {
             .import => |imp| {
                 // no need for resolveType, this is faster
                 if (imp.value != .string_lit) return self.fail("Expected a string literal", imp.value.tokenPos(), .{});
-                try self.createScope(.module);
+                const file_name = imp.value.string_lit.value;
+                if (std.mem.endsWith(u8, file_name, ".luf")) {
+                    // forward declaration would have defined it, so we can be sure it exists
+                    var mod: *Module = self.modules.get(file_name).?;
+                    if (mod.compiled) {
+                        try self.emit(Instruction.gen(.load_module));
+                        return;
+                    }
+                    try self.createScope(.module);
 
-                const file = std.fs.cwd().openFile(imp.value.string_lit.value, .{}) catch
-                    return self.fail("Could not open file at path '{}'", node.tokenPos(), .{imp.value.string_lit.value});
-                defer file.close();
-                const size = file.getEndPos() catch return self.fail("Could not determine file size", node.tokenPos(), .{});
-                const source = file.reader().readAllAlloc(self.allocator, size) catch
-                    return self.fail("Could not read file", node.tokenPos(), .{});
-                defer self.allocator.free(source);
-                const tree = try parser.parse(self.allocator, source, self.errors);
-                defer tree.deinit();
+                    const file = std.fs.cwd().openFile(file_name, .{}) catch
+                        return self.fail("Could not open file at path '{}'", node.tokenPos(), .{file_name});
+                    defer file.close();
+                    const size = file.getEndPos() catch return self.fail("Could not determine file size", node.tokenPos(), .{});
+                    const source = file.reader().readAllAlloc(self.allocator, size) catch
+                        return self.fail("Could not read file", node.tokenPos(), .{});
+                    defer self.allocator.free(source);
+                    const tree = try parser.parse(self.allocator, source, self.errors);
+                    defer tree.deinit();
 
-                const mod: *Module = self.modules.get(imp.value.string_lit.value).?;
-                for (mod.symbols.items()) |entry| {
-                    const symbol: Symbol = entry.value;
-                    _ = try self.scope.define(symbol.name, symbol.mutable, symbol.node, true, symbol.index);
+                    for (mod.symbols.items()) |entry| {
+                        const symbol: Symbol = entry.value;
+                        _ = try self.scope.define(symbol.name, symbol.mutable, symbol.node, true, symbol.index);
+                    }
+
+                    // we can't do it in the loop above because all symbols need to be defined first so we
+                    // can call functions from other functions
+                    for (self.scope.symbols.items()) |entry| {
+                        try self.compile(entry.value.node.declaration.value);
+                        try self.emit(Instruction.genPtr(.bind_global, entry.value.index));
+                    }
+
+                    for (tree.nodes) |n| {
+                        try self.compile(n);
+                    }
+                    mod.compiled = true;
+                    self.exitScope();
                 }
 
-                // we can't do it in the loop above because all symbols need to be defined first so we
-                // can call functions from other functions
-                for (self.scope.symbols.items()) |entry| {
-                    try self.compile(entry.value.node.declaration.value);
-                    try self.emit(Instruction.genPtr(.bind_global, entry.value.index));
-                }
-
-                for (tree.nodes) |n| {
-                    try self.compile(n);
-                }
-
-                self.exitScope();
-                //try self.compile(imp.value);
+                try self.compile(imp.value);
                 try self.emit(Instruction.gen(.load_module));
             },
             .@"break" => |br| {
