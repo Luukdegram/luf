@@ -750,9 +750,12 @@ pub const Vm = struct {
             .module => |mod| {
                 const member = index.unwrapAs(.string) orelse return self.fail("Expected an identifier");
 
-                const value = self.libs.get(mod) orelse return self.fail("Library does not exist");
+                const lib = self.libs.get(mod) orelse return self.fail("Library does not exist");
 
-                //const value = lib.get(index) orelse return self.fail("Library x does not have member y");
+                const value = if (!lib.isType(.map))
+                    lib
+                else
+                    lib.map.get(index) orelse return self.fail("Library x does not have member y");
 
                 return self.push(value);
             },
@@ -796,8 +799,8 @@ pub const Vm = struct {
         const arg_len = inst.ptr.pos;
         const val = self.stack[self.sp - (1 + arg_len)];
 
-        if (val.isType(.native)) return self.execNativeFuncCall();
-        
+        if (val.isType(.native) or val.isType(.module)) return self.execNativeFuncCall();
+
         if (val.* != .function) return;
 
         if (arg_len != val.function.arg_len) return self.fail("Mismatching argument length");
@@ -822,7 +825,13 @@ pub const Vm = struct {
 
     /// Executes a native Zig function call
     fn execNativeFuncCall(self: *Vm) Error!void {
-        const func = self.pop().?.unwrapAs(.native) orelse return self.fail("Expected native Zig function");
+        const value = self.pop().?;
+        const func = if (value.isType(.native)) value.native else blk: {
+            const mod = value.unwrapAs(.module) orelse return self.fail("Expected module");
+            const lib = self.libs.get(mod) orelse return self.fail("Library is not loaded");
+            break :blk lib.unwrapAs(.native) orelse return self.fail("Loaded library is not a function");
+        };
+
         var args = try self.arena.allocator.alloc(*Value, func.arg_len);
         defer self.arena.allocator.free(args);
 
@@ -1376,8 +1385,8 @@ fn testZigFromLuf(a: u32, b: u32) u32 {
 
 test "Zig from Luf" {
     const input =
-        \\const zig = import("zig")
-        \\const result = zig.sum(2, 5)
+        \\const sum = import("zig")
+        \\const result = sum(2, 5)
         \\result
     ;
     var vm = Vm.init(testing.allocator);

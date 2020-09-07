@@ -679,7 +679,7 @@ pub const Compiler = struct {
                     //if it's an identifier, we first do a lookup to retrieve it's declaration node
                     //then return the function declaration. else we return the function itself
                     //in the case of an anonymous function
-                    const function_node = if (call.function == .identifier) blk: {
+                    const function_node = if (call.function == .identifier and initial_function_type != .module) blk: {
                         const function = self.resolveSymbol(self.scope, call.function.identifier.value) orelse
                             return self.fail(
                             "Function '{}' is undefined",
@@ -690,16 +690,17 @@ pub const Compiler = struct {
                     } else if (initial_function_type != .module)
                         call.function.func_lit
                     else blk: {
-                        // we handle module functions here
-                        const function_name = call.function.index.index.string_lit.value;
-                        const symbol = self.resolveSymbol(self.scope, call.function.index.left.identifier.value) orelse
-                            return self.fail(
-                            "Identifier '{}' does not exist",
-                            call.function.index.left.tokenPos(),
-                            .{call.function.index.left.identifier.value},
-                        );
+                        if (call.function == .index) {
+                            // we handle module functions here
+                            const function_name = call.function.index.index.string_lit.value;
+                            const symbol = self.resolveSymbol(self.scope, call.function.index.left.identifier.value) orelse
+                                return self.fail(
+                                "Identifier '{}' does not exist",
+                                call.function.index.left.tokenPos(),
+                                .{call.function.index.left.identifier.value},
+                            );
 
-                        if (self.modules.get(symbol.node.declaration.value.import.value.string_lit.value)) |mod| {
+                            const mod = self.modules.get(symbol.node.declaration.value.import.value.string_lit.value).?;
                             const decl_symbol: Symbol = mod.symbols.get(function_name) orelse
                                 return self.fail("Module does not contain function '{}'", call.function.tokenPos(), .{function_name});
 
