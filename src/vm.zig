@@ -1305,3 +1305,22 @@ test "Luf function from Zig" {
     testing.expectEqualStrings("hello world", val2.string);
     testing.expectEqual(@as(usize, 0), vm.sp);
 }
+
+test "Inner functions" {
+    const input =
+        \\const add = fn(a: int, b: int) int {
+        \\  const plusTen = fn(a: int) int {
+        \\      return a + 10
+        \\  }
+        \\
+        \\  return plusTen(a + b)
+        \\}
+        \\const x = add(20, 30)
+    ;
+
+    var vm = Vm.init(testing.allocator);
+    defer vm.deinit();
+    try vm.compileAndRun(input);
+    testing.expectEqual(@as(i64, 60), vm.peek().integer);
+    testing.expectEqual(@as(usize, 0), vm.sp);
+}
