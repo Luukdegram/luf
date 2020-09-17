@@ -223,38 +223,27 @@ pub const Encoder = struct {
 
     /// Emits a single opcode.
     fn emitOp(writer: anytype, op: Opcode) @TypeOf(writer).Error!void {
-        var buffer: [1]u8 = undefined;
-        std.mem.writeIntLittle(u8, &buffer, @enumToInt(op));
-        return writer.writeAll(&buffer);
+        return writer.writeIntLittle(u8, @enumToInt(op));
     }
 
     /// Emits an opcode and a ptr it points to. This could be a constant, array length, etc
     fn emitPtr(writer: anytype, op: Opcode, ptr: u32) @TypeOf(writer).Error!void {
-        var buffer: [4]u8 = undefined;
-        std.mem.writeIntLittle(u32, &buffer, ptr);
-
         try emitOp(writer, op);
-        return writer.writeAll(&buffer);
+        return writer.writeIntLittle(u32, ptr);
     }
 
     /// Emits a load_integer opcode followed by the bytes representing the integer's value
     fn emitInteger(writer: anytype, value: u64) @TypeOf(writer).Error!void {
-        var buffer: [8]u8 = undefined;
-        std.mem.writeIntLittle(u64, &buffer, value);
-
         try emitOp(writer, .load_integer);
-        return writer.writeAll(&buffer);
+        return writer.writeIntLittle(u64, value);
     }
 
     /// Emits a load_string opcode followed the the length of the string encoded as u16.
     /// Finalized by writing the value of the string
     /// The max length of the string is 65536.
     fn emitString(writer: anytype, value: []const u8) @TypeOf(writer).Error!void {
-        var buffer: [2]u8 = undefined;
-        std.mem.writeIntLittle(u16, &buffer, @intCast(u16, value.len));
-
         try emitOp(writer, .load_string);
-        try writer.writeAll(&buffer);
+        try writer.writeIntLittle(u16, @intCast(u16, value.len));
         return writer.writeAll(value);
     }
 
@@ -270,26 +259,32 @@ pub const Encoder = struct {
     ) @TypeOf(writer).Error!void {
         try emitOp(writer, .load_func);
         const len: u8 = if (name) |n| @intCast(u8, n.len) else 0;
-        var buffer: [1]u8 = undefined;
-        std.mem.writeIntLittle(u8, &buffer, len);
+        try writer.writeIntLittle(u8, len);
 
-        try writer.writeAll(&buffer);
         if (name) |n| {
             try writer.writeAll(n);
         }
-        return writer.writeAll(std.mem.asBytes(&func));
+
+        try writer.writeIntLittle(u32, func.locals);
+        try writer.writeIntLittle(u8, func.arg_len);
+        try writer.writeIntLittle(u32, func.entry);
     }
 };
 
 /// Decoder for Luf's bytecode
 pub const Decoder = struct {
-    /// list of instructions build by the decoder
-    instructions: std.ArrayList(Instruction),
-
     /// Decodes a stream into a list of `Instruction`
     pub fn decode(reader: anytype, allocator: *std.mem.Allocator) ![]Instruction {
-        var decoder = Decoder{ .instructions = std.ArrayList(Instruction).init(allocator) };
-        errdefer decoder.instructions.deinit();
+        var instructions = std.ArrayList(Instruction).init(allocator);
+        errdefer {
+            for (instructions.items) |i| {
+                if (i == .string) allocator.free(i.string);
+                if (i == .function and i.function.name != null) allocator.free(i.function.name.?);
+            }
+            instructions.deinit();
+        }
+
+        var decoder = Decoder{};
 
         while (true) {
             const byte = reader.readByte() catch |err| switch (err) {
@@ -298,11 +293,9 @@ pub const Decoder = struct {
             };
 
             const op = @intToEnum(Opcode, byte);
-            const inst = try decoder.instructions.addOne();
-            errdefer allocator.destroy(inst);
-
+            const inst = try instructions.addOne();
             switch (op) {
-                .load_func => try decoder.loadFunc(reader, inst),
+                .load_func => try decoder.loadFunc(reader, inst, allocator),
                 .load_string => try decoder.loadString(reader, inst, allocator),
                 .load_integer => try decoder.loadInt(reader, inst),
                 .load_global,
@@ -321,20 +314,24 @@ pub const Decoder = struct {
             }
         }
 
-        return decoder.instructions.toOwnedSlice();
+        return instructions.toOwnedSlice();
     }
 
     /// Loads the current opcode into a fuction instruction
-    fn loadFunc(self: *Decoder, reader: anytype, inst: *Instruction) !void {
-        var name_buffer: [255]u8 = undefined;
+    fn loadFunc(self: *Decoder, reader: anytype, inst: *Instruction, allocator: *std.mem.Allocator) !void {
         const name_length = try reader.readIntLittle(u8);
-        if (name_length > 0)
-            if ((try reader.readAll(name_buffer[0..name_length])) < name_length)
+        const name = if (name_length > 0) blk: {
+            const string = try allocator.alloc(u8, name_length);
+            errdefer allocator.free(string);
+
+            if ((try reader.readAll(string)) < name_length)
                 return error.InvalidBytecode;
+            break :blk string;
+        } else null;
 
         inst.* = .{
             .function = .{
-                .name = if (name_length == 0) null else name_buffer[0..name_length],
+                .name = name,
                 .locals = try reader.readIntLittle(u32),
                 .arg_len = try reader.readIntLittle(u8),
                 .entry = try reader.readIntLittle(u32),
@@ -375,12 +372,13 @@ pub const Decoder = struct {
 
 test "Encoding and decoding of instructions" {
     const allocator = std.testing.allocator;
-    var buffer: [20]u8 = undefined;
+    var buffer: [34]u8 = undefined;
     const instructions = &[_]Instruction{
         .{ .op = .load_false },
         .{ .string = "Hi" },
         .{ .integer = 5 },
         .{ .ptr = .{ .op = .jump, .pos = 5 } },
+        .{ .function = .{ .name = "add", .locals = 2, .arg_len = 2, .entry = 1 } },
     };
     var stream = std.io.fixedBufferStream(&buffer);
     const code = try Encoder.encode(allocator, instructions);
@@ -391,8 +389,9 @@ test "Encoding and decoding of instructions" {
     const load_string = "\x01\x02\x00Hi";
     const load_int = "\x00\x05\x00\x00\x00\x00\x00\x00\x00";
     const load_ptr = "\x0F\x05\x00\x00\x00";
-    std.testing.expectEqualSlices(u8, load_false ++ load_string ++ load_int ++ load_ptr, code);
-    std.testing.expectEqualSlices(u8, load_false ++ load_string ++ load_int ++ load_ptr, stream.getWritten());
+    const load_fn = "\x02\x03add\x02\x00\x00\x00\x02\x01\x00\x00\x00";
+    std.testing.expectEqualSlices(u8, load_false ++ load_string ++ load_int ++ load_ptr ++ load_fn, code);
+    std.testing.expectEqualSlices(u8, load_false ++ load_string ++ load_int ++ load_ptr ++ load_fn, stream.getWritten());
 
     stream.reset();
     const decoded = try Decoder.decode(stream.reader(), allocator);
@@ -406,11 +405,17 @@ test "Encoding and decoding of instructions" {
             .ptr => std.testing.expectEqual(inst.ptr.pos, decoded[i].ptr.pos),
             .string => std.testing.expectEqualStrings(inst.string, decoded[i].string),
             .integer => std.testing.expectEqual(inst.integer, decoded[i].integer),
-            .function => std.testing.expectEqual(inst.function, decoded[i].function),
+            .function => |func| {
+                std.testing.expectEqualStrings(func.name.?, decoded[i].function.name.?);
+                std.testing.expectEqual(func.locals, decoded[i].function.locals);
+                std.testing.expectEqual(func.arg_len, decoded[i].function.arg_len);
+                std.testing.expectEqual(func.entry, decoded[i].function.entry);
+            },
         }
     }
 
     for (decoded) |inst| {
         if (inst == .string) allocator.free(inst.string);
+        if (inst == .function and inst.function.name != null) allocator.free(inst.function.name.?);
     }
 }
