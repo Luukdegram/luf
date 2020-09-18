@@ -1,12 +1,12 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-const Value = @import("value.zig").Value;
+const Value = @import("value.zig").OldValue;
 
 pub const GarbageCollector = struct {
     /// The allocator used to allocate and free memory of the stack
     gpa: *Allocator,
     /// The stack that contains each allocated Value, used to track and then free its memory
-    stack: std.AutoHashMap(Object.Handle, Object),
+    stack: std.AutoArrayHashMap(Object.Handle, Object),
     /// Counter to create new indices for Objects
     object_index: u32,
 
@@ -14,7 +14,7 @@ pub const GarbageCollector = struct {
     fn init(allocator: *Allocator) GarbageCollector {
         return .{
             .gpa = allocator,
-            .stack = std.AutoHashMap(Object.Handle, Object),
+            .stack = std.AutoArrayHashMap(Object.Handle, Object),
             .object_index = 0,
         };
     }
@@ -25,12 +25,28 @@ pub const GarbageCollector = struct {
         errdefer self.gpa.destroy(value);
 
         const handle = @intToEnum(Object.Handle, self.object_index);
-        try self.stack.put(handle, .{
+        const obj: Object = .{
             .value = value,
             .handle = handle,
-        });
+        };
+        try self.stack.put(handle, obj);
         self.object_index += 1;
-        return value;
+        return obj;
+    }
+
+    /// Marks all objects on stack that are referenced
+    pub fn mark(self: *GarbageCollector) void {
+        for (self.stack.items()) |entry| {
+            const object: Object = entry.value;
+            switch(object.value.*) {
+
+            }
+        }
+    }
+
+    /// Marks an Object by its handle
+    pub fn markObject(self: *GarbageCollector, handle: Object.Handle) void {
+        if (self.stack.get(handle)) |object| object.reference_count += 1;
     }
 };
 
@@ -41,6 +57,8 @@ pub const Object = struct {
     value: *Value,
     /// The unique id of the `Object`. Used by the gc to track it
     id: Handle,
+    /// Counter for each refernce it holds
+    reference_count: u32,
 
     /// Unique id for each `Object`
     pub const Handle = enum(u32) { _ };

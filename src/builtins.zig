@@ -1,5 +1,5 @@
 const std = @import("std");
-const Value = @import("value.zig").Value;
+const Value = @import("value.zig").OldValue;
 
 pub const BuiltinError = error{ OutOfMemory, UnsupportedType, MismatchingTypes };
 const BuiltinFn = Value.NativeFn;

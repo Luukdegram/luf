@@ -298,7 +298,7 @@ pub const Compiler = struct {
     }
 
     /// Returns a Luf `Type` based on the given node
-    fn resolveType(self: *Compiler, node: ast.Node) !Type {
+    fn resolveType(self: *Compiler, node: ast.Node) !Value.Type {
         if (node.getType()) |t| return t;
 
         return switch (node) {
@@ -321,7 +321,7 @@ pub const Compiler = struct {
     }
 
     /// Resolves the inner type of a node. i.e. this will return `Type.integer` for a list []int
-    fn resolveScalarType(self: *Compiler, node: ast.Node) Error!Type {
+    fn resolveScalarType(self: *Compiler, node: ast.Node) Error!Value.Type {
         if (node.getInnerType()) |i| return i;
         return switch (node) {
             .identifier => |id| {
@@ -554,10 +554,10 @@ pub const Compiler = struct {
                         return;
                     } else
                         return self.fail(
-                        "Identifier '{}' has already been declared",
-                        decl.token.start,
-                        .{decl.name.identifier.value},
-                    );
+                            "Identifier '{}' has already been declared",
+                            decl.token.start,
+                            .{decl.name.identifier.value},
+                        );
                 }
                 const symbol = (try self.defineSymbol(decl.name.identifier.value, decl.mutable, node, false)).?;
 
