@@ -1,6 +1,7 @@
 const std = @import("std");
 const ast = @import("ast.zig");
 const Allocator = std.mem.Allocator;
+const GarbageCollector = @import("gc.zig").GarbageCollector;
 
 /// Luf Value
 pub const Value = struct {
@@ -47,6 +48,28 @@ pub const Value = struct {
                 ._void => void,
             };
         }
+
+        /// Returns `Type` based on given struct
+        /// Compiler error when the type is not one within the scope of `Value`
+        pub fn fromType(comptime T: type) Type {
+            return switch (T) {
+                Integer => .integer,
+                Boolean => .boolean,
+                String => .string,
+                null => .nil,
+                ReturnValue => ._return,
+                Function => .function,
+                List => .list,
+                Map => .map,
+                Native => .native,
+                Module => .module,
+                Iterable => .iterable,
+                Range => .range,
+                Enum => ._enum,
+                void => ._void,
+                else => @compileError("Unsupported type: " ++ @typeName(T)),
+            };
+        }
     };
 
     /// Unwraps the `Value` into the actual Type
@@ -56,24 +79,212 @@ pub const Value = struct {
         return @fieldParentPtr(l_type.LufType(), "base", self);
     }
 
+    /// Casts the `Value` into type `T`
+    /// returns `null` if the value is not of type T
+    /// unwrap() is preferred, but cast() allows for type completion
+    pub fn cast(self: *Value, comptime T: type) ?*T {
+        if (std.meta.fieldInfo(T, "base").default_value) |dv| {
+            return self.unwrap(dv.l_type);
+        }
+
+        inline for (@typeInfo(Type).Enum.fields) |field| {
+            const l_type = @intToEnum(Type, field.value);
+            if (self.l_type == l_type) {
+                if (T == l_type.LufType()) {
+                    return @fieldParentPtr(T, "base", self);
+                }
+                return null;
+            }
+        }
+        unreachable;
+    }
+
     /// Returns true if the `Type` of the given `Value` is equal
     pub fn isType(self: *Value, tag: Type) bool {
         return self.l_type == tag;
     }
 
+    /// Returns the `Value` as a Zig type
+    /// TODO, make it an error when the Luf `Value` is not the corresponding type
+    pub fn toZig(self: *const Value, comptime T: type) T {
+        return switch (T) {
+            void => {},
+            bool => self.unwrap(.boolean).?.value,
+            []const u8 => self.unwrap(.string).?.value,
+            *Map, *const Map => self.unwrap(.map).?.value,
+            *Value, *const Value => self,
+            Value => self.*,
+            else => switch (@typeInfo(T)) {
+                .Int => @intCast(T, self.unwrap(.integer).?.value),
+                .Enum => @intToEnum(T, self.unwrap(.integer).?.value),
+                else => @compileError("TODO add support for type: " ++ @typeName(T)),
+            },
+        };
+    }
+
+    /// Creates a Luf `Value` from a Zig value
+    /// Memory is owned by caller and must be freed by caller
+    pub fn fromZig(gc: *GarbageCollector, val: anytype) !*Value {
+        switch (@TypeOf(val)) {
+            // todo have a global void value
+            void => return &Value{ .l_type = ._void, .next = null, .is_marked = false },
+            *Value => return val,
+            Value => {
+                const ret = gc.gpa.create(Value);
+                ret.* = val;
+                return val;
+            },
+            bool => return Boolean.create(gc, val),
+            []u8, []const u8 => return String.create(gc, val),
+            type => switch (@typeInfo(val)) {
+                .Struct => |info| {
+                    const ret = try gc.newValue(Map, .map);
+                    var map: Map = unwrap(.map).?;
+                    map.value = std.AutoHashMapUnmanaged(*const Value, *Value){};
+                    errdefer map.value.deinit(gc.gpa);
+
+                    comptime var decl_count = 0;
+                    inline for (info.decls) |decl| {
+                        if (decl.is_pub) decl_count += 1;
+                    }
+
+                    try map.value.ensureCapacity(gc.gpa, decl_count);
+
+                    inline for (indo.decls) |decl| {
+                        if (!decl.is_pub) continue;
+
+                        const key = try String.create(gc, decl.name);
+                        const value = try fromZig(gc, @field(val, decl.name));
+
+                        map.value.putAssumeCapacityNoClobber(key, value);
+                    }
+
+                    return ret;
+                },
+                else => @compileError("Unsupported type: " ++ @typeName(val)),
+            },
+            else => switch (@typeInfo(@TypeOf(val))) {
+                .Fn => {
+                    const Fn = @typeInfo(@TypeOf(val)).Fn;
+
+                    comptime var arg_index: u2 = 0;
+                    const args_len = Fn.args.len;
+                    const Func = struct {
+                        // this is needed as `val` is not accessible from inner function
+                        var innerFunc: @TypeOf(val) = undefined;
+
+                        fn call(_alloc: *Allocator, args: []*OldValue) !*OldValue {
+                            if (args.len != args_len) return error.IncorrectArgumentCount;
+
+                            const ArgsTuple = comptime blk: {
+                                var fields: [args_len]std.builtin.TypeInfo.StructField = undefined;
+                                for (fields) |*f, idx| {
+                                    var num_buf: [128]u8 = undefined;
+                                    f.* = .{
+                                        .name = std.fmt.bufPrint(&num_buf, "{}", .{idx}) catch unreachable,
+                                        .field_type = Fn.args[idx].arg_type.?,
+                                        .default_value = @as(?(Fn.args[idx].arg_type.?), null),
+                                        .is_comptime = false,
+                                    };
+                                }
+                                break :blk @Type(.{
+                                    .Struct = .{
+                                        .layout = .Auto,
+                                        .fields = &fields,
+                                        .decls = &[0]std.builtin.TypeInfo.Declaration{},
+                                        .is_tuple = true,
+                                    },
+                                });
+                            };
+
+                            var tuple: ArgsTuple = undefined;
+                            comptime var i = 0;
+                            inline while (i < args_len) : (i += 1) {
+                                tuple[i] = args[i].toZig(Fn.args[i].arg_type.?);
+                            }
+
+                            return OldValue.fromZig(_alloc, @call(.{}, innerFunc, tuple));
+                        }
+                    };
+                    // set innerFunc as we cannot access `val` from inside
+                    Func.innerFunc = val;
+
+                    const ret = try gc.newValue(Native);
+                    const native = ret.cast(Native).?;
+                    native.func = Func.call;
+                    native.arg_len = Fn.args.len;
+
+                    return ret;
+                },
+                .ComptimeInt, .Int => return Integer.create(gc, val),
+                .Pointer => |info| switch (@typeInfo(info.child)) {
+                    .Array => |array_info| switch (array_info.child) {
+                        u8 => return String.create(gc, val),
+                        else => {
+                            const ret = try gc.newValue(List);
+                            const list = ret.cast(List).?;
+                            list.value = std.ArrayListUnmanaged(*Value){};
+                            errdefer list.value.deinit(gc.gpa);
+
+                            try list.value.ensureCapacity(gc.gpa, array_info.len);
+                            for (list.value.items) |*item, i| {
+                                item.* = try fromZig(gc, val[i]);
+                            }
+
+                            return ret;
+                        },
+                    },
+                    else => @compileError("Unsupported type: " ++ @typeName(@TypeOf(val))),
+                },
+                .Null => return &OldValue.Nil,
+                else => @compileError("Unsupported type: " ++ @typeName(@TypeOf(val))),
+            },
+        }
+    }
+
     pub const Integer = struct {
         base: Value,
         value: i64,
+
+        /// Creates a new `Integer` using the given `val`. Returns
+        /// the pointer to its `Value`
+        pub fn create(gc: *GarbageCollector, val: i64) !*Value {
+            const value = try gc.newValue(Integer);
+            const int = value.cast(Integer).?;
+            int.value = val;
+
+            return &int.base;
+        }
     };
 
     pub const Boolean = struct {
         base: Value,
         value: bool,
+
+        /// Creates a new `Boolean` using the given `val`. Returns
+        /// the pointer to its `Value`
+        pub fn create(gc: *GarbageCollector, val: bool) !*Value {
+            const value = try gc.newValue(Integer);
+            const boolean = value.cast(Boolean).?;
+            boolean.value = val;
+
+            return &boolean.base;
+        }
     };
 
     pub const String = struct {
         base: Value,
         value: []const u8,
+
+        /// Creates a new `Integer` using the given `val`. Returns
+        /// the pointer to its `Value`
+        pub fn create(gc: *GarbageCollector, val: []const u8) !*Value {
+            const value = try gc.newValue(String);
+            const string = value.cast(String).?;
+            string.value = val;
+
+            return &string.base;
+        }
     };
 
     pub const Module = struct {
@@ -92,6 +303,25 @@ pub const Value = struct {
         arg_len: usize,
         locals: usize,
         entry: usize,
+
+        /// Creates a new `Integer` using the given `val`. Returns
+        /// the pointer to its `Value`
+        pub fn create(
+            gc: *GarbageCollector,
+            name: ?[]const u8,
+            locals: usize,
+            arg_len: usize,
+            entry_point: usize,
+        ) !*Value {
+            const value = try gc.newValue(Function);
+            const function = value.cast(Function).?;
+            function.arg_len = arg_len;
+            function.locals = locals;
+            function.name = name;
+            function.entry = entry_point;
+
+            return &function.base;
+        }
     };
 
     pub const List = struct {
