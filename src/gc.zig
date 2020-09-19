@@ -55,9 +55,10 @@ pub const GarbageCollector = struct {
 
     /// Frees the `stack` that still exist on exit
     pub fn deinit(self: *GarbageCollector) void {
-        if (self.stack) |stack| {
-            defer stack.destroy(self.gpa);
-            while (stack.next) |next| next.destroy(self.gpa);
+        while (self.stack) |next| {
+            const temp = next.next;
+            next.destroy(self.gpa);
+            self.stack = temp;
         }
         self.* = undefined;
     }

@@ -252,8 +252,8 @@ pub const Vm = struct {
                 .minus => try self.execNegation(),
                 .not => try self.execNot(),
                 .bitwise_not => try self.execBitwiseNot(),
-                .load_nil => {},
-                .load_void => {},
+                .load_nil => try self.push(&Value.Nil),
+                .load_void => try self.push(&Value.Nil),
                 .jump => current_frame.ip = inst.ptr.pos - 1,
                 .jump_false => {
                     const condition = self.pop().?;
@@ -427,16 +427,18 @@ pub const Vm = struct {
                 else => return self.fail("Unexpected operator"),
             }, left.unwrap(.integer).?.value, right.unwrap(.integer).?.value);
             const val = self.pop().?;
-            left.* = val.*;
-            //return self.push(&Value.Nil);
+
+            left.toInteger().value = val.toInteger().value;
+            return;
         }
         if (left.isType(.string)) {
             if (op != .assign_add) return self.fail("Unexpected operator on string, expected '+='");
 
             try self.execStringOp(.add, left.unwrap(.string).?.value, right.unwrap(.string).?.value);
             const val = self.pop().?;
-            left.* = val.*;
-            //return self.push(&Value.Nil);
+
+            try left.toString().copyFrom(self.gc.gpa, val.toString());
+            return;
         }
 
         return self.fail("Unexpected type, expected integer or string");
@@ -534,71 +536,64 @@ pub const Vm = struct {
 
     /// Analyzes the instruction and builds an array
     fn makeArray(self: *Vm, inst: byte_code.Instruction) Error!void {
-        // const len = inst.ptr.pos;
-        // var list = Value.List{};
-        // try list.resize(&self.arena.allocator, len);
-        // errdefer list.deinit(&self.arena.allocator);
+        const len = inst.ptr.pos;
 
-        // const res = try self.newValue();
-        // if (len == 0) {
-        //     res.* = .{ .list = list };
-        //     return self.push(res);
-        // }
+        const ret = try Value.List.create(self.gc, len);
+        var list = ret.toList().value;
 
-        // var list_type: Type = undefined;
-        // var i: usize = 1;
+        if (len == 0) {
+            return self.push(ret);
+        }
 
-        // while (i <= len) : ({
-        //     i += 1;
-        // }) {
-        //     const val = self.pop().?;
+        var list_type: Type = undefined;
+        var i: usize = 1;
 
-        //     if (i == 1)
-        //         list_type = val.lufType()
-        //     else if (!val.isType(list_type)) return self.fail("Mismatching types");
-        //     list.items[len - i] = val;
-        // }
+        while (i <= len) : ({
+            i += 1;
+        }) {
+            const val = self.pop().?;
 
-        // res.* = .{ .list = list };
-        // return self.push(res);
+            if (i == 1)
+                list_type = val.l_type
+            else if (!val.isType(list_type)) return self.fail("Mismatching types");
+            list.items[len - i] = val;
+        }
+
+        return self.push(ret);
     }
 
     /// Analyzes and creates a new map
     fn makeMap(self: *Vm, inst: byte_code.Instruction) Error!void {
-        // const len = inst.ptr.pos;
-        // var map = Value.Map{};
-        // errdefer map.deinit(&self.arena.allocator);
+        const len = inst.ptr.pos;
+        const ret = try Value.Map.create(self.gc, len);
+        var map = ret.toMap();
 
-        // const res = try self.newValue();
-        // if (len == 0) {
-        //     res.* = .{ .map = map };
-        //     return self.push(res);
-        // }
+        if (len == 0) {
+            return self.push(ret);
+        }
 
-        // try map.ensureCapacity(&self.arena.allocator, len);
+        var key_type: Type = undefined;
+        var value_type: Type = undefined;
+        var i: usize = 0;
 
-        // var key_type: Type = undefined;
-        // var value_type: Type = undefined;
-        // var i: usize = 0;
+        while (i < len) : ({
+            i += 1;
+        }) {
+            const value = self.pop().?;
+            const key = self.pop().?;
 
-        // while (i < len) : ({
-        //     i += 1;
-        // }) {
-        //     const value = self.pop().?;
-        //     const key = self.pop().?;
+            if (i == 0) {
+                key_type = key.l_type;
+                value_type = value.l_type;
+            } else {
+                if (!key.isType(key_type)) return self.fail("Mismatching types");
+                if (!value.isType(value_type)) return self.fail("Mismatching types");
+            }
 
-        //     if (i == 0) {
-        //         key_type = key.lufType();
-        //         value_type = value.lufType();
-        //     } else {
-        //         if (!key.isType(key_type)) return self.fail("Mismatching types");
-        //         if (!value.isType(value_type)) return self.fail("Mismatching types");
-        //     }
+            map.value.putAssumeCapacity(key, value);
+        }
 
-        //     map.putAssumeCapacity(key, value);
-        // }
-        // res.* = .{ .map = map };
-        // return self.push(res);
+        return self.push(ret);
     }
 
     /// Constructs a new enum `Value`
@@ -938,24 +933,24 @@ fn isTrue(value: *Value) bool {
 test "Integer arithmetic" {
     const test_cases = .{
         .{ .input = "1", .expected = 1 },
-        // .{ .input = "2", .expected = 2 },
-        // .{ .input = "1 + 1", .expected = 2 },
-        // .{ .input = "1 * 3", .expected = 3 },
-        // .{ .input = "1 - 3", .expected = -2 },
-        // .{ .input = "10 / 2", .expected = 5 },
-        // .{ .input = "10 % 2", .expected = 0 },
-        // .{ .input = "1 | 2", .expected = 3 },
-        // .{ .input = "2 ^ 4", .expected = 6 },
-        // .{ .input = "3 & 6", .expected = 2 },
-        // .{ .input = "-2", .expected = -2 },
-        // .{ .input = "1 << 2", .expected = 4 },
-        // .{ .input = "4 >> 2", .expected = 1 },
-        // .{ .input = "~1", .expected = -2 },
-        // .{ .input = "(5 + 10 * 2 + 15 / 3) * 2 + -10", .expected = 50 },
-        // .{ .input = "mut x = 0 x+= 1 x", .expected = 1 },
-        // .{ .input = "mut x = 2 x*= 2 x", .expected = 4 },
-        // .{ .input = "mut x = 10 x/= 2 x", .expected = 5 },
-        // .{ .input = "mut x = 1 x-= 1 x", .expected = 0 },
+        .{ .input = "2", .expected = 2 },
+        .{ .input = "1 + 1", .expected = 2 },
+        .{ .input = "1 * 3", .expected = 3 },
+        .{ .input = "1 - 3", .expected = -2 },
+        .{ .input = "10 / 2", .expected = 5 },
+        .{ .input = "10 % 2", .expected = 0 },
+        .{ .input = "1 | 2", .expected = 3 },
+        .{ .input = "2 ^ 4", .expected = 6 },
+        .{ .input = "3 & 6", .expected = 2 },
+        .{ .input = "-2", .expected = -2 },
+        .{ .input = "1 << 2", .expected = 4 },
+        .{ .input = "4 >> 2", .expected = 1 },
+        .{ .input = "~1", .expected = -2 },
+        .{ .input = "(5 + 10 * 2 + 15 / 3) * 2 + -10", .expected = 50 },
+        .{ .input = "mut x = 0 x+= 1 x", .expected = 1 },
+        .{ .input = "mut x = 2 x*= 2 x", .expected = 4 },
+        .{ .input = "mut x = 10 x/= 2 x", .expected = 5 },
+        .{ .input = "mut x = 1 x-= 1 x", .expected = 0 },
     };
 
     inline for (test_cases) |case| {
@@ -968,145 +963,145 @@ test "Integer arithmetic" {
     }
 }
 
-// test "Boolean" {
-//     const test_cases = .{
-//         .{ .input = "true", .expected = true },
-//         .{ .input = "false", .expected = false },
-//         .{ .input = "1 < 2", .expected = true },
-//         .{ .input = "1 > 2", .expected = false },
-//         .{ .input = "1 == 1", .expected = true },
-//         .{ .input = "1 != 1", .expected = false },
-//         .{ .input = "true != true", .expected = false },
-//         .{ .input = "!true", .expected = false },
-//         .{ .input = "true and true", .expected = true },
-//         .{ .input = "true and false", .expected = false },
-//         .{ .input = "false and false", .expected = false },
-//         .{ .input = "true or false", .expected = true },
-//         .{ .input = "true or true", .expected = true },
-//         .{ .input = "false or false", .expected = false },
-//     };
+test "Boolean" {
+    const test_cases = .{
+        .{ .input = "true", .expected = true },
+        .{ .input = "false", .expected = false },
+        .{ .input = "1 < 2", .expected = true },
+        .{ .input = "1 > 2", .expected = false },
+        .{ .input = "1 == 1", .expected = true },
+        .{ .input = "1 != 1", .expected = false },
+        .{ .input = "true != true", .expected = false },
+        .{ .input = "!true", .expected = false },
+        .{ .input = "true and true", .expected = true },
+        .{ .input = "true and false", .expected = false },
+        .{ .input = "false and false", .expected = false },
+        .{ .input = "true or false", .expected = true },
+        .{ .input = "true or true", .expected = true },
+        .{ .input = "false or false", .expected = false },
+    };
 
-//     inline for (test_cases) |case| {
-//         var vm = Vm.init(testing.allocator);
-//         defer vm.deinit();
-//         try vm.compileAndRun(case.input);
+    inline for (test_cases) |case| {
+        var vm = try Vm.init(testing.allocator);
+        defer vm.deinit();
+        try vm.compileAndRun(case.input);
 
-//         testing.expect(case.expected == vm.peek().boolean);
-//         testing.expectEqual(@as(usize, 0), vm.sp);
-//     }
-// }
+        testing.expect(case.expected == vm.peek().toBool().value);
+        testing.expectEqual(@as(usize, 0), vm.sp);
+    }
+}
 
-// test "Conditional" {
-//     const test_cases = .{
-//         .{ .input = "if (true) { 10 }", .expected = 10 },
-//         .{ .input = "if (true) { 10 } else { 20 }", .expected = 10 },
-//         .{ .input = "if (false) { 10 } else { 20 }", .expected = 20 },
-//         .{ .input = "if (1 < 2) { 10 }", .expected = 10 },
-//         .{ .input = "if (1 > 2) { 10 }", .expected = null },
-//         .{ .input = "if (1 > 2) { 10 } else if (2 > 3) { 20 } else { 5 }", .expected = 5 },
-//         .{ .input = "if (1 > 2) { 10 } else if (2 < 3) { 20 } else { 5 }", .expected = 20 },
-//     };
+test "Conditional" {
+    const test_cases = .{
+        .{ .input = "if (true) { 10 }", .expected = 10 },
+        .{ .input = "if (true) { 10 } else { 20 }", .expected = 10 },
+        .{ .input = "if (false) { 10 } else { 20 }", .expected = 20 },
+        .{ .input = "if (1 < 2) { 10 }", .expected = 10 },
+        .{ .input = "if (1 > 2) { 10 }", .expected = null },
+        .{ .input = "if (1 > 2) { 10 } else if (2 > 3) { 20 } else { 5 }", .expected = 5 },
+        .{ .input = "if (1 > 2) { 10 } else if (2 < 3) { 20 } else { 5 }", .expected = 20 },
+    };
 
-//     inline for (test_cases) |case| {
-//         var vm = Vm.init(testing.allocator);
-//         defer vm.deinit();
-//         try vm.compileAndRun(case.input);
+    inline for (test_cases) |case| {
+        var vm = try Vm.init(testing.allocator);
+        defer vm.deinit();
+        try vm.compileAndRun(case.input);
 
-//         if (@TypeOf(case.expected) == comptime_int) {
-//             testing.expect(case.expected == vm.peek().integer);
-//         } else {
-//             testing.expect(vm.peek().* == ._void);
-//         }
-//         testing.expectEqual(@as(usize, 0), vm.sp);
-//     }
-// }
+        if (@TypeOf(case.expected) == comptime_int) {
+            testing.expect(case.expected == vm.peek().toInteger().value);
+        } else {
+            testing.expect(vm.peek().l_type == .nil);
+        }
+        testing.expectEqual(@as(usize, 0), vm.sp);
+    }
+}
 
-// test "Declaration" {
-//     const test_cases = .{
-//         .{ .input = "const x = 1 x", .expected = 1 },
-//         .{ .input = "const x = 1 const y = 1 x + y", .expected = 2 },
-//         .{ .input = "mut x = 1 const y = x + x x + y", .expected = 3 },
-//     };
+test "Declaration" {
+    const test_cases = .{
+        .{ .input = "const x = 1 x", .expected = 1 },
+        .{ .input = "const x = 1 const y = 1 x + y", .expected = 2 },
+        .{ .input = "mut x = 1 const y = x + x x + y", .expected = 3 },
+    };
 
-//     inline for (test_cases) |case| {
-//         var vm = Vm.init(testing.allocator);
-//         defer vm.deinit();
-//         try vm.compileAndRun(case.input);
+    inline for (test_cases) |case| {
+        var vm = try Vm.init(testing.allocator);
+        defer vm.deinit();
+        try vm.compileAndRun(case.input);
 
-//         testing.expectEqual(@as(i64, case.expected), vm.peek().integer);
-//         testing.expectEqual(@as(usize, 0), vm.sp);
-//     }
-// }
+        testing.expectEqual(@as(i64, case.expected), vm.peek().toInteger().value);
+        testing.expectEqual(@as(usize, 0), vm.sp);
+    }
+}
 
-// test "Strings" {
-//     const test_cases = .{
-//         .{ .input = "\"foo\"", .expected = "foo" },
-//         .{ .input = "\"foo\" + \"bar\"", .expected = "foobar" },
-//         .{ .input = "const x = \"foo\" x+=\"bar\" x", .expected = "foobar" },
-//     };
+test "Strings" {
+    const test_cases = .{
+        //.{ .input = "\"foo\"", .expected = "foo" },
+        //.{ .input = "\"foo\" + \"bar\"", .expected = "foobar" },
+        .{ .input = "const x = \"foo\" x+=\"bar\" x", .expected = "foobar" },
+    };
 
-//     inline for (test_cases) |case| {
-//         var vm = Vm.init(testing.allocator);
-//         defer vm.deinit();
-//         try vm.compileAndRun(case.input);
+    inline for (test_cases) |case| {
+        var vm = try Vm.init(testing.allocator);
+        defer vm.deinit();
+        try vm.compileAndRun(case.input);
 
-//         testing.expectEqualStrings(case.expected, vm.peek().string);
-//         testing.expectEqual(@as(usize, 0), vm.sp);
-//     }
-// }
+        testing.expectEqualStrings(case.expected, vm.peek().toString().value);
+        testing.expectEqual(@as(usize, 0), vm.sp);
+    }
+}
 
-// test "Arrays" {
-//     const test_cases = .{
-//         .{ .input = "[]int{1, 2, 3}", .expected = &[_]i64{ 1, 2, 3 } },
-//         .{ .input = "[]int{}", .expected = &[_]i64{} },
-//         .{ .input = "[]int{1 + 1, 2 * 2, 6}", .expected = &[_]i64{ 2, 4, 6 } },
-//     };
+test "Arrays" {
+    const test_cases = .{
+        .{ .input = "[]int{1, 2, 3}", .expected = &[_]i64{ 1, 2, 3 } },
+        .{ .input = "[]int{}", .expected = &[_]i64{} },
+        .{ .input = "[]int{1 + 1, 2 * 2, 6}", .expected = &[_]i64{ 2, 4, 6 } },
+    };
 
-//     inline for (test_cases) |case| {
-//         var vm = Vm.init(testing.allocator);
-//         defer vm.deinit();
-//         try vm.compileAndRun(case.input);
+    inline for (test_cases) |case| {
+        var vm = try Vm.init(testing.allocator);
+        defer vm.deinit();
+        try vm.compileAndRun(case.input);
 
-//         const list = vm.peek().list;
-//         testing.expect(list.items.len == case.expected.len);
-//         inline for (case.expected) |int, i| {
-//             const items = list.items;
-//             testing.expectEqual(int, items[i].integer);
-//         }
-//         testing.expectEqual(@as(usize, 0), vm.sp);
-//     }
-// }
+        const list = vm.peek().toList();
+        testing.expect(list.value.items.len == case.expected.len);
+        inline for (case.expected) |int, i| {
+            const items = list.value.items;
+            testing.expectEqual(int, items[i].toInteger().value);
+        }
+        testing.expectEqual(@as(usize, 0), vm.sp);
+    }
+}
 
-// test "Maps" {
-//     const test_cases = .{
-//         .{ .input = "[]int:int{1:2, 2:1, 5:6}", .expected = &[_]i64{ 6, 1, 2 }, .keys = &[_]i64{ 5, 2, 1 } },
-//         .{ .input = "[]int:int{}", .expected = &[_]i64{}, .keys = &[_]i64{} },
-//         .{ .input = "[]string:int{\"foo\":1}", .expected = &[_]i64{1}, .keys = &[_][]const u8{"foo"} },
-//     };
+test "Maps" {
+    const test_cases = .{
+        .{ .input = "[]int:int{1:2, 2:1, 5:6}", .expected = &[_]i64{ 6, 1, 2 }, .keys = &[_]i64{ 5, 2, 1 } },
+        .{ .input = "[]int:int{}", .expected = &[_]i64{}, .keys = &[_]i64{} },
+        .{ .input = "[]string:int{\"foo\":1}", .expected = &[_]i64{1}, .keys = &[_][]const u8{"foo"} },
+    };
 
-//     inline for (test_cases) |case| {
-//         var vm = Vm.init(testing.allocator);
-//         defer vm.deinit();
-//         try vm.compileAndRun(case.input);
+    inline for (test_cases) |case| {
+        var vm = try Vm.init(testing.allocator);
+        defer vm.deinit();
+        try vm.compileAndRun(case.input);
 
-//         const map = vm.peek().map;
-//         testing.expect(map.items().len == case.expected.len);
-//         inline for (case.expected) |int, i| {
-//             const items = map.items();
-//             testing.expectEqual(int, items[i].value.integer);
-//         }
+        const map = vm.peek().toMap().value;
+        testing.expect(map.items().len == case.expected.len);
+        inline for (case.expected) |int, i| {
+            const items = map.items();
+            testing.expectEqual(int, items[i].value.toInteger().value);
+        }
 
-//         inline for (case.keys) |key, i| {
-//             const item = map.items()[i];
-//             if (@TypeOf(key) == i64) {
-//                 testing.expectEqual(key, item.key.integer);
-//             } else {
-//                 testing.expectEqualStrings(key, item.key.string);
-//             }
-//         }
-//         testing.expectEqual(@as(usize, 0), vm.sp);
-//     }
-// }
+        inline for (case.keys) |key, i| {
+            const item = map.items()[i];
+            if (@TypeOf(key) == i64) {
+                testing.expectEqual(key, item.key.toInteger().value);
+            } else {
+                testing.expectEqualStrings(key, item.key.toString().value);
+            }
+        }
+        testing.expectEqual(@as(usize, 0), vm.sp);
+    }
+}
 
 // test "Index" {
 //     const test_cases = .{

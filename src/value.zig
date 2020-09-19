@@ -8,9 +8,23 @@ pub const Value = struct {
     /// actual type of the `Value`
     l_type: Type,
     /// is marked by the gc?
-    is_marked: bool,
+    is_marked: bool = false,
     /// Next Value in the Linked List
-    next: ?*Value,
+    next: ?*Value = null,
+
+    /// Global True value, saves memory by having it as a globally available 'constant'
+    pub var True = &_true.base;
+    const _true = Boolean{ .base = .{ .l_type = .boolean }, .value = true };
+
+    /// Global False value, saves memory by having it as a globally available 'constant'
+    pub var False = &_false.base;
+    const _false = Boolean{ .base = .{ .l_type = .boolean }, .value = false };
+
+    /// Global void value, saves memory by having it as a globally available 'constant'
+    pub var Void = Value{ .l_type = ._void };
+
+    /// Global Nil value, saves memory by having it as a globally available 'constant'
+    pub var Nil = Value{ .l_type = .nil };
 
     /// Build in types supported by Luf
     pub const Type = enum {
@@ -290,7 +304,7 @@ pub const Value = struct {
     /// Frees all memory of the `Value`.
     /// NOTE, for lists/maps it only frees the list/map itself, not the values it contains
     pub fn destroy(self: *Value, gpa: *Allocator) void {
-        std.debug.print("Destroying object\n", .{});
+        //std.debug.print("Destroying object: {}\n", .{self.*});
         switch (self.l_type) {
             .integer => self.toInteger().destroy(gpa),
             .boolean => self.toBool().destroy(gpa),
@@ -335,8 +349,8 @@ pub const Value = struct {
         /// Creates a new `Boolean` using the given `val`. Returns
         /// the pointer to its `Value`
         pub fn create(gc: *GarbageCollector, val: bool) !*Value {
-            const value = try gc.newValue(Integer);
-            const boolean = value.cast(Boolean).?;
+            const value = try gc.newValue(Boolean);
+            const boolean = value.toBool();
             boolean.value = val;
 
             return &boolean.base;
@@ -355,10 +369,17 @@ pub const Value = struct {
         /// the pointer to its `Value`
         pub fn create(gc: *GarbageCollector, val: []const u8) !*Value {
             const value = try gc.newValue(String);
-            const string = value.cast(String).?;
+            const string = value.toString();
             string.value = try gc.gpa.dupe(u8, val);
-
             return &string.base;
+        }
+
+        /// Copies the value of `other` into `self`
+        /// Does this by first free`ing the current value, and then duplicating
+        /// the value of `other`. This does NOT free the value of the original `other`
+        pub fn copyFrom(self: *String, gpa: *Allocator, other: *String) !void {
+            gpa.free(self.value);
+            self.value = try gpa.dupe(u8, other.value);
         }
 
         pub fn destroy(self: *String, gpa: *Allocator) void {
@@ -424,7 +445,18 @@ pub const Value = struct {
 
     pub const List = struct {
         base: Value,
-        value: std.ArrayListUnmanaged(*Value),
+        value: ListType,
+
+        pub const ListType = std.ArrayListUnmanaged(*Value);
+
+        pub fn create(gc: *GarbageCollector, len: ?usize) !*Value {
+            const ret = try gc.newValue(List);
+            const self = ret.toList();
+            self.value = ListType{};
+
+            if (len) |n| try self.value.resize(gc.gpa, n);
+            return ret;
+        }
 
         pub fn destroy(self: *List, gpa: *Allocator) void {
             self.value.deinit(gpa);
@@ -434,7 +466,18 @@ pub const Value = struct {
 
     pub const Map = struct {
         base: Value,
-        value: std.ArrayHashMapUnmanaged(*Value, *Value, hash, eql, true),
+        value: MapType,
+
+        pub const MapType = std.ArrayHashMapUnmanaged(*Value, *Value, hash, eql, true);
+
+        pub fn create(gc: *GarbageCollector, len: ?usize) !*Value {
+            const ret = try gc.newValue(Map);
+            const self = ret.toMap();
+            self.value = MapType{};
+
+            if (len) |n| try self.value.ensureCapacity(gc.gpa, n);
+            return ret;
+        }
 
         pub fn destroy(self: *Map, gpa: *Allocator) void {
             self.value.deinit(gpa);
@@ -444,7 +487,7 @@ pub const Value = struct {
 
     pub const Native = struct {
         base: Value,
-        func: OldValue.NativeFn,
+        func: Value.NativeFn,
         arg_len: usize,
     };
 
@@ -614,6 +657,8 @@ pub const Value = struct {
             else => unreachable,
         };
     }
+
+    pub const NativeFn = fn (allocator: *std.mem.Allocator, args: []*Value) anyerror!*Value;
 };
 
 /// Value depending on its type
