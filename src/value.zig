@@ -56,7 +56,7 @@ pub const Value = struct {
                 Integer => .integer,
                 Boolean => .boolean,
                 String => .string,
-                null => .nil,
+                //null => .nil,
                 ReturnValue => ._return,
                 Function => .function,
                 List => .list,
@@ -99,8 +99,53 @@ pub const Value = struct {
         unreachable;
     }
 
+    /// Assures the type of `Value` is `String`
+    pub fn toString(self: *Value) *String {
+        return @fieldParentPtr(String, "base", self);
+    }
+
+    /// Assures the type of `Value` is `Integer`
+    pub fn toInteger(self: *Value) *Integer {
+        return @fieldParentPtr(Integer, "base", self);
+    }
+
+    /// Assures the type of `Value` is `Boolean`
+    pub fn toBool(self: *Value) *Boolean {
+        return @fieldParentPtr(Boolean, "base", self);
+    }
+
+    /// Assures the type of `Value` is `List`
+    pub fn toList(self: *Value) *List {
+        return @fieldParentPtr(List, "base", self);
+    }
+
+    /// Assures the type of `Value` is `Map`
+    pub fn toMap(self: *Value) *Map {
+        return @fieldParentPtr(Map, "base", self);
+    }
+
+    /// Assures the type of `Value` is `Function`
+    pub fn toFunction(self: *Value) *Function {
+        return @fieldParentPtr(Function, "base", self);
+    }
+
+    /// Assures the type of `Value` is `Native`
+    pub fn toNative(self: *Value) *Native {
+        return @fieldParentPtr(Native, "base", self);
+    }
+
+    /// Assures the type of `Value` is `Range`
+    pub fn toRange(self: *Value) *Range {
+        return @fieldParentPtr(Range, "base", self);
+    }
+
+    /// Assures the type of `Value` is `Enum`
+    pub fn toEnum(self: *Value) *Enum {
+        return @fieldParentPtr(Enum, "base", self);
+    }
+
     /// Returns true if the `Type` of the given `Value` is equal
-    pub fn isType(self: *Value, tag: Type) bool {
+    pub fn isType(self: *const Value, tag: Type) bool {
         return self.l_type == tag;
     }
 
@@ -242,6 +287,28 @@ pub const Value = struct {
         }
     }
 
+    /// Frees all memory of the `Value`.
+    /// NOTE, for lists/maps it only frees the list/map itself, not the values it contains
+    pub fn destroy(self: *Value, gpa: *Allocator) void {
+        std.debug.print("Destroying object\n", .{});
+        switch (self.l_type) {
+            .integer => self.toInteger().destroy(gpa),
+            .boolean => self.toBool().destroy(gpa),
+            .string => self.toString().destroy(gpa),
+            .nil => {},
+            ._return => {},
+            .function => self.toFunction().destroy(gpa),
+            .list => self.toList().destroy(gpa),
+            .map => self.toMap().destroy(gpa),
+            .native => unreachable,
+            .module => self.unwrap(.module).?.destroy(gpa),
+            .iterable => self.unwrap(.iterable).?.destroy(gpa),
+            .range => self.toRange().destroy(gpa),
+            ._enum => self.toEnum().destroy(gpa),
+            ._void => {},
+        }
+    }
+
     pub const Integer = struct {
         base: Value,
         value: i64,
@@ -254,6 +321,10 @@ pub const Value = struct {
             int.value = val;
 
             return &int.base;
+        }
+
+        pub fn destroy(self: *Integer, gpa: *Allocator) void {
+            gpa.destroy(self);
         }
     };
 
@@ -270,6 +341,10 @@ pub const Value = struct {
 
             return &boolean.base;
         }
+
+        pub fn destroy(self: *Boolean, gpa: *Allocator) void {
+            gpa.destroy(self);
+        }
     };
 
     pub const String = struct {
@@ -281,15 +356,33 @@ pub const Value = struct {
         pub fn create(gc: *GarbageCollector, val: []const u8) !*Value {
             const value = try gc.newValue(String);
             const string = value.cast(String).?;
-            string.value = val;
+            string.value = try gc.gpa.dupe(u8, val);
 
             return &string.base;
+        }
+
+        pub fn destroy(self: *String, gpa: *Allocator) void {
+            gpa.free(self.value);
+            gpa.destroy(self);
         }
     };
 
     pub const Module = struct {
         base: Value,
         value: []const u8,
+
+        pub fn create(gc: *GarbageCollector, val: []const u8) !*Value {
+            const value = try gc.newValue(String);
+            const string = value.cast(String).?;
+            string.value = try gc.gpa.dupe(u8, val);
+
+            return &string.base;
+        }
+
+        pub fn destroy(self: *Module, gpa: *Allocator) void {
+            gpa.free(self.value);
+            gpa.destroy(self);
+        }
     };
 
     pub const ReturnValue = struct {
@@ -322,16 +415,31 @@ pub const Value = struct {
 
             return &function.base;
         }
+
+        pub fn destroy(self: *Function, gpa: *Allocator) void {
+            if (self.name) |name| gpa.free(name);
+            gpa.destroy(self);
+        }
     };
 
     pub const List = struct {
         base: Value,
         value: std.ArrayListUnmanaged(*Value),
+
+        pub fn destroy(self: *List, gpa: *Allocator) void {
+            self.value.deinit(gpa);
+            gpa.destroy(self);
+        }
     };
 
     pub const Map = struct {
         base: Value,
-        value: std.HashMapUnmanaged(*const Value, *Value, hash, eq, true),
+        value: std.ArrayHashMapUnmanaged(*Value, *Value, hash, eql, true),
+
+        pub fn destroy(self: *Map, gpa: *Allocator) void {
+            self.value.deinit(gpa);
+            gpa.destroy(self);
+        }
     };
 
     pub const Native = struct {
@@ -344,18 +452,59 @@ pub const Value = struct {
         base: Value,
         start: i64,
         end: i64,
+
+        pub fn create(gc: *GarbageCollector, start: i64, end: i64) !*Value {
+            const ret = try gc.newValue(Enum);
+            const range = ret.toRange();
+            range.start = start;
+            range.end = end;
+
+            return ret;
+        }
+
+        pub fn destroy(self: *Range, gpa: *Allocator) void {
+            gpa.destroy(self);
+        }
     };
 
     pub const Enum = struct {
         base: Value,
         value: [][]const u8,
+
+        pub fn create(gc: *GarbageCollector, enums: [][]const u8) !*Value {
+            const ret = try gc.newValue(Enum);
+            const enm = ret.toEnum();
+            enm.value = enums;
+            return ret;
+        }
+
+        pub fn destroy(self: *Enum, gpa: *Allocator) void {
+            for (self.value) |val| {
+                gpa.free(val);
+            }
+            gpa.free(self.value);
+            gpa.destroy(self);
+        }
     };
 
     pub const Iterable = struct {
         base: Value,
         expose_index: bool,
         index: usize,
-        Value: *Value,
+        value: *Value,
+
+        pub fn create(gc: *GarbageCollector, expose: bool, index: usize, value: *Value) !*Value {
+            const ret = try gc.newValue(Iterable);
+            const it = ret.unwrap(.iterable).?;
+            it.expose_index = expose;
+            it.index = index;
+            it.value = value;
+            return ret;
+        }
+
+        pub fn destroy(self: *Iterable, gpa: *Allocator) void {
+            gpa.destroy(self);
+        }
 
         /// Sets `value` to the next `Value` of the iterator.
         /// This creates a copy of the actual value
@@ -388,34 +537,39 @@ pub const Value = struct {
         }
     };
 
-    fn hash(key: *const OldValue) u32 {
+    fn hash(key: *Value) u32 {
         const hashFn = std.hash.autoHash;
         var hasher = std.hash.Wyhash.init(0);
 
-        switch (key.*) {
-            .integer => |int| hashFn(&hasher, int),
-            .boolean => |boolean| hashFn(&hasher, boolean),
-            .string => |str| hasher.update(str),
-            .function => |func| {
+        switch (key.l_type) {
+            .integer => hashFn(&hasher, key.cast(Integer).?.value),
+            .boolean => hashFn(&hasher, key.cast(Boolean).?.value),
+            .string => hasher.update(key.cast(String).?.value),
+            .function => {
+                const func = key.cast(Function).?;
                 if (func.name) |name|
                     hasher.update(name);
                 hashFn(&hasher, func.arg_len);
                 hashFn(&hasher, func.locals);
                 hashFn(&hasher, func.entry);
             },
-            .list => |list| {
+            .list => {
+                const list = key.cast(List).?.value;
                 hashFn(&hasher, list.items.len);
                 hashFn(&hasher, list.items.ptr);
             },
-            .map => |map| {
+            .map => {
+                const map = key.cast(Map).?.value;
                 hashFn(&hasher, map.items().len);
                 hashFn(&hasher, map.items().ptr);
             },
-            .native => |native| {
+            .native => {
+                const native = key.cast(Native).?;
                 hashFn(&hasher, native.arg_len);
                 hashFn(&hasher, native.func);
             },
-            .range => |range| {
+            .range => {
+                const range = key.cast(Range).?;
                 hashFn(&hasher, range.start);
                 hashFn(&hasher, range.end);
             },
@@ -425,7 +579,7 @@ pub const Value = struct {
         return @truncate(u32, hasher.final());
     }
 
-    fn eql(a: *const Value, b: *const Value) bool {
+    fn eql(a: *Value, b: *Value) bool {
         return switch (a.l_type) {
             .integer => a.unwrap(.integer).?.value == b.unwrap(.integer).?.value,
             .boolean => a.unwrap(.boolean).?.value == b.unwrap(.boolean).?.value,
@@ -437,7 +591,7 @@ pub const Value = struct {
 
                 if (list_a.items.len != list_b.items.len) return false;
                 for (list_a.items) |item, i| {
-                    if (!item.eql(b_list.items[i])) return false;
+                    if (!item.eql(list_b.items[i])) return false;
                 }
                 return true;
             },
@@ -452,8 +606,8 @@ pub const Value = struct {
                 return true;
             },
             .range => {
-                const range_a: Value.Range = a.unwrap(.range).?;
-                const range_b: Value.Range = b.unwrap(.range).?;
+                const range_a = a.unwrap(.range).?;
+                const range_b = b.unwrap(.range).?;
 
                 return range_a.start == range_b.start and range_a.end == range_b.end;
             },
@@ -810,7 +964,7 @@ pub const OldValue = union(Value.Type) {
 
     pub const List = std.ArrayListUnmanaged(*OldValue);
     pub const Map = std.ArrayHashMapUnmanaged(*const OldValue, *OldValue, hash, eql, true);
-    pub const NativeFn = fn (allocator: *std.mem.Allocator, args: []*OldValue) anyerror!*OldValue;
+    pub const NativeFn = fn (allocator: *std.mem.Allocator, args: []*Value) anyerror!*Value;
     pub const LufFn = struct { name: ?[]const u8, arg_len: usize, locals: usize, entry: usize };
 
     /// Prints a `Value` to the given `writer`

@@ -8,15 +8,12 @@ pub const GarbageCollector = struct {
     /// The stack that contains each allocated Value, used to track and then free its memory
     /// `stack` is a linked list to other Values
     stack: ?*Value,
-    /// Counter to create new indices for Objects
-    object_index: u32,
 
     /// Initializes a new `GarbageCollector`, calling deinit() will ensure all memory is freed
     pub fn init(allocator: *Allocator) GarbageCollector {
         return .{
             .gpa = allocator,
-            .stack = std.AutoArrayHashMap(Object.Handle, Object),
-            .object_index = 0,
+            .stack = null,
         };
     }
 
@@ -46,7 +43,7 @@ pub const GarbageCollector = struct {
         if (self.stack == null) return;
 
         var prev: *Value = undefined;
-        while (self.stack.next) |*val| {
+        while (self.stack.?.next) |*val| {
             if (!val.is_marked) {
                 if (val.next) |next| prev.next = next;
                 val.destroy(self.gpa);
@@ -54,5 +51,14 @@ pub const GarbageCollector = struct {
             }
             prev = val;
         }
+    }
+
+    /// Frees the `stack` that still exist on exit
+    pub fn deinit(self: *GarbageCollector) void {
+        if (self.stack) |stack| {
+            defer stack.destroy(self.gpa);
+            while (stack.next) |next| next.destroy(self.gpa);
+        }
+        self.* = undefined;
     }
 };
