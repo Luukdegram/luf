@@ -722,7 +722,7 @@ pub const Vm = struct {
                 }
                 // We return null to the user so they have something to check against
                 // to see if a key exists or not.
-                //return self.push(&Value.Nil);
+                return self.push(&Value.Nil);
             },
             .string => {
                 const string = left.toString().value;
@@ -958,7 +958,7 @@ test "Integer arithmetic" {
         defer vm.deinit();
         try vm.compileAndRun(case.input);
 
-        testing.expect(case.expected == vm.peek().cast(Value.Integer).?.value);
+        testing.expect(case.expected == vm.peek().toInteger().value);
         testing.expectEqual(@as(usize, 0), vm.sp);
     }
 }
@@ -1035,8 +1035,8 @@ test "Declaration" {
 
 test "Strings" {
     const test_cases = .{
-        //.{ .input = "\"foo\"", .expected = "foo" },
-        //.{ .input = "\"foo\" + \"bar\"", .expected = "foobar" },
+        .{ .input = "\"foo\"", .expected = "foo" },
+        .{ .input = "\"foo\" + \"bar\"", .expected = "foobar" },
         .{ .input = "const x = \"foo\" x+=\"bar\" x", .expected = "foobar" },
     };
 
@@ -1103,32 +1103,32 @@ test "Maps" {
     }
 }
 
-// test "Index" {
-//     const test_cases = .{
-//         .{ .input = "[]int{1, 2, 3}[1]", .expected = 2 },
-//         .{ .input = "const list = []int{1, 2, 3} list[1] = 10 list[1]", .expected = 10 },
-//         .{ .input = "[]int:int{1: 5}[1]", .expected = 5 },
-//         .{ .input = "[]int:int{2: 5}[0]", .expected = &Value.Nil },
-//         .{ .input = "[]int:int{2: 5}[2] = 1", .expected = &Value.Nil },
-//         .{ .input = "const map = []int:int{2: 5} map[2] = 1 map[2]", .expected = 1 },
-//         .{ .input = "[]string:int{\"foo\": 15}[\"foo\"]", .expected = 15 },
-//         .{ .input = "\"hello\"[1]", .expected = "e" },
-//     };
+test "Index" {
+    const test_cases = .{
+        // .{ .input = "[]int{1, 2, 3}[1]", .expected = 2 },
+        // .{ .input = "const list = []int{1, 2, 3} list[1] = 10 list[1]", .expected = 10 },
+        // .{ .input = "[]int:int{1: 5}[1]", .expected = 5 },
+        // .{ .input = "[]int:int{2: 5}[0]", .expected = &Value.Nil },
+        // .{ .input = "[]int:int{2: 5}[2] = 1", .expected = &Value.Nil },
+        // .{ .input = "const map = []int:int{2: 5} map[2] = 1 map[2]", .expected = 1 },
+        // .{ .input = "[]string:int{\"foo\": 15}[\"foo\"]", .expected = 15 },
+        // .{ .input = "\"hello\"[1]", .expected = "e" },
+    };
 
-//     inline for (test_cases) |case| {
-//         var vm = Vm.init(testing.allocator);
-//         defer vm.deinit();
-//         try vm.compileAndRun(case.input);
+    inline for (test_cases) |case| {
+        var vm = try Vm.init(testing.allocator);
+        defer vm.deinit();
+        try vm.compileAndRun(case.input);
 
-//         if (@TypeOf(case.expected) == comptime_int)
-//             testing.expectEqual(@as(i64, case.expected), vm.peek().integer)
-//         else if (@TypeOf(case.expected) == *const [1:0]u8)
-//             testing.expectEqualStrings(case.expected, vm.peek().string)
-//         else
-//             testing.expectEqual(case.expected, vm.peek());
-//         testing.expectEqual(@as(usize, 0), vm.sp);
-//     }
-// }
+        if (@TypeOf(case.expected) == comptime_int)
+            testing.expectEqual(@as(i64, case.expected), vm.peek().toInteger().value)
+        else if (@TypeOf(case.expected) == *const [1:0]u8)
+            testing.expectEqualStrings(case.expected, vm.peek().toString().value)
+        else
+            testing.expectEqual(case.expected, vm.peek());
+        testing.expectEqual(@as(usize, 0), vm.sp);
+    }
+}
 
 // test "Basic function calls with no arguments" {
 //     const test_cases = .{

@@ -93,26 +93,6 @@ pub const Value = struct {
         return @fieldParentPtr(l_type.LufType(), "base", self);
     }
 
-    /// Casts the `Value` into type `T`
-    /// returns `null` if the value is not of type T
-    /// unwrap() is preferred, but cast() allows for type completion
-    pub fn cast(self: *Value, comptime T: type) ?*T {
-        if (std.meta.fieldInfo(T, "base").default_value) |dv| {
-            return self.unwrap(dv.l_type);
-        }
-
-        inline for (@typeInfo(Type).Enum.fields) |field| {
-            const l_type = @intToEnum(Type, field.value);
-            if (self.l_type == l_type) {
-                if (T == l_type.LufType()) {
-                    return @fieldParentPtr(T, "base", self);
-                }
-                return null;
-            }
-        }
-        unreachable;
-    }
-
     /// Assures the type of `Value` is `String`
     pub fn toString(self: *Value) *String {
         return @fieldParentPtr(String, "base", self);
@@ -269,7 +249,7 @@ pub const Value = struct {
                     Func.innerFunc = val;
 
                     const ret = try gc.newValue(Native);
-                    const native = ret.cast(Native).?;
+                    const native = ret.toNative();
                     native.func = Func.call;
                     native.arg_len = Fn.args.len;
 
@@ -280,12 +260,7 @@ pub const Value = struct {
                     .Array => |array_info| switch (array_info.child) {
                         u8 => return String.create(gc, val),
                         else => {
-                            const ret = try gc.newValue(List);
-                            const list = ret.cast(List).?;
-                            list.value = std.ArrayListUnmanaged(*Value){};
-                            errdefer list.value.deinit(gc.gpa);
-
-                            try list.value.ensureCapacity(gc.gpa, array_info.len);
+                            const ret = Value.List.create(gc, array_info.len);
                             for (list.value.items) |*item, i| {
                                 item.* = try fromZig(gc, val[i]);
                             }
@@ -304,7 +279,7 @@ pub const Value = struct {
     /// Frees all memory of the `Value`.
     /// NOTE, for lists/maps it only frees the list/map itself, not the values it contains
     pub fn destroy(self: *Value, gpa: *Allocator) void {
-        //std.debug.print("Destroying object: {}\n", .{self.*});
+        std.debug.print("Destroying object: {}\n", .{self.*});
         switch (self.l_type) {
             .integer => self.toInteger().destroy(gpa),
             .boolean => self.toBool().destroy(gpa),
@@ -331,7 +306,7 @@ pub const Value = struct {
         /// the pointer to its `Value`
         pub fn create(gc: *GarbageCollector, val: i64) !*Value {
             const value = try gc.newValue(Integer);
-            const int = value.cast(Integer).?;
+            const int = value.toInteger();
             int.value = val;
 
             return &int.base;
@@ -393,11 +368,11 @@ pub const Value = struct {
         value: []const u8,
 
         pub fn create(gc: *GarbageCollector, val: []const u8) !*Value {
-            const value = try gc.newValue(String);
-            const string = value.cast(String).?;
-            string.value = try gc.gpa.dupe(u8, val);
+            const value = try gc.newValue(Module);
+            const self = value.unwrap(.module).?;
+            self.value = try gc.gpa.dupe(u8, val);
 
-            return &string.base;
+            return &self.base;
         }
 
         pub fn destroy(self: *Module, gpa: *Allocator) void {
@@ -428,7 +403,7 @@ pub const Value = struct {
             entry_point: usize,
         ) !*Value {
             const value = try gc.newValue(Function);
-            const function = value.cast(Function).?;
+            const function = value.toFunction();
             function.arg_len = arg_len;
             function.locals = locals;
             function.name = name;
@@ -585,11 +560,11 @@ pub const Value = struct {
         var hasher = std.hash.Wyhash.init(0);
 
         switch (key.l_type) {
-            .integer => hashFn(&hasher, key.cast(Integer).?.value),
-            .boolean => hashFn(&hasher, key.cast(Boolean).?.value),
-            .string => hasher.update(key.cast(String).?.value),
+            .integer => hashFn(&hasher, key.toInteger().value),
+            .boolean => hashFn(&hasher, key.toBool().value),
+            .string => hasher.update(key.toString().value),
             .function => {
-                const func = key.cast(Function).?;
+                const func = key.toFunction();
                 if (func.name) |name|
                     hasher.update(name);
                 hashFn(&hasher, func.arg_len);
@@ -597,22 +572,22 @@ pub const Value = struct {
                 hashFn(&hasher, func.entry);
             },
             .list => {
-                const list = key.cast(List).?.value;
+                const list = key.toList().value;
                 hashFn(&hasher, list.items.len);
                 hashFn(&hasher, list.items.ptr);
             },
             .map => {
-                const map = key.cast(Map).?.value;
+                const map = key.toMap().value;
                 hashFn(&hasher, map.items().len);
                 hashFn(&hasher, map.items().ptr);
             },
             .native => {
-                const native = key.cast(Native).?;
+                const native = key.toNative();
                 hashFn(&hasher, native.arg_len);
                 hashFn(&hasher, native.func);
             },
             .range => {
-                const range = key.cast(Range).?;
+                const range = key.toRange();
                 hashFn(&hasher, range.start);
                 hashFn(&hasher, range.end);
             },
@@ -624,13 +599,13 @@ pub const Value = struct {
 
     fn eql(a: *Value, b: *Value) bool {
         return switch (a.l_type) {
-            .integer => a.unwrap(.integer).?.value == b.unwrap(.integer).?.value,
-            .boolean => a.unwrap(.boolean).?.value == b.unwrap(.boolean).?.value,
+            .integer => a.toInteger().value == b.toInteger().value,
+            .boolean => a.toBool().value == b.toBool().value,
             .nil => true,
-            .string => std.mem.eql(u8, a.unwrap(.string).?.value, b.unwrap(.string).?.value),
+            .string => std.mem.eql(u8, a.toString().value, b.toString().value),
             .list => {
-                const list_a = a.unwrap(.list).?.value;
-                const list_b = b.unwrap(.list).?.value;
+                const list_a = a.toList().value;
+                const list_b = b.toList().value;
 
                 if (list_a.items.len != list_b.items.len) return false;
                 for (list_a.items) |item, i| {
@@ -639,8 +614,8 @@ pub const Value = struct {
                 return true;
             },
             .map => {
-                const map_a = a.unwrap(.map).?.value;
-                const map_b = a.unwrap(.map).?.value;
+                const map_a = a.toMap().value;
+                const map_b = a.toMap().value;
 
                 if (map_a.items().len != map_b.items().len) return false;
                 for (map_a.items()) |entry, i| {
@@ -649,8 +624,8 @@ pub const Value = struct {
                 return true;
             },
             .range => {
-                const range_a = a.unwrap(.range).?;
-                const range_b = b.unwrap(.range).?;
+                const range_a = a.toRange();
+                const range_b = b.toRange();
 
                 return range_a.start == range_b.start and range_a.end == range_b.end;
             },
