@@ -800,9 +800,9 @@ pub const Vm = struct {
             list.items[@intCast(usize, integer)] = value;
             return;
         } else if (left.isType(.map)) {
-            const map = left.unwrap(.map).?.value;
+            var map = left.unwrap(.map).?.value;
             if (map.get(right)) |*val| {
-                val.* = value;
+                try map.put(self.gc.gpa, right, value);
                 return self.push(&Value.Nil);
             } else {
                 // replace with more descriptive Error
