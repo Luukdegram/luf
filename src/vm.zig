@@ -282,7 +282,7 @@ pub const Vm = struct {
 
                     _ = self.pop().?;
 
-                    //try self.push(&Value.Void);
+                    try self.push(&Value.Void);
                 },
                 .return_value => {
                     const rv = self.pop().?;
@@ -796,13 +796,14 @@ pub const Vm = struct {
             const integer = right.toInteger().value;
 
             if (integer < 0 or integer > list.items.len) return self.fail("Out of bounds");
-            list.items[@intCast(usize, integer)].* = value.*;
-            //return self.push(&Value.Nil);
+
+            list.items[@intCast(usize, integer)] = value;
+            return;
         } else if (left.isType(.map)) {
             const map = left.unwrap(.map).?.value;
-            if (map.get(right)) |val| {
-                val.* = value.*;
-                //return self.push(&Value.Nil);
+            if (map.get(right)) |*val| {
+                val.* = value;
+                return self.push(&Value.Nil);
             } else {
                 // replace with more descriptive Error
                 return self.fail("Value not found");
@@ -1105,14 +1106,14 @@ test "Maps" {
 
 test "Index" {
     const test_cases = .{
-        // .{ .input = "[]int{1, 2, 3}[1]", .expected = 2 },
-        // .{ .input = "const list = []int{1, 2, 3} list[1] = 10 list[1]", .expected = 10 },
-        // .{ .input = "[]int:int{1: 5}[1]", .expected = 5 },
-        // .{ .input = "[]int:int{2: 5}[0]", .expected = &Value.Nil },
-        // .{ .input = "[]int:int{2: 5}[2] = 1", .expected = &Value.Nil },
-        // .{ .input = "const map = []int:int{2: 5} map[2] = 1 map[2]", .expected = 1 },
-        // .{ .input = "[]string:int{\"foo\": 15}[\"foo\"]", .expected = 15 },
-        // .{ .input = "\"hello\"[1]", .expected = "e" },
+        .{ .input = "[]int{1, 2, 3}[1]", .expected = 2 },
+        .{ .input = "const list = []int{1, 2, 3} list[1] = 10 list[1]", .expected = 10 },
+        .{ .input = "[]int:int{1: 5}[1]", .expected = 5 },
+        .{ .input = "[]int:int{2: 5}[0]", .expected = &Value.Nil },
+        .{ .input = "[]int:int{2: 5}[2] = 1", .expected = &Value.Nil },
+        .{ .input = "const map = []int:int{2: 5} map[2] = 1 map[2]", .expected = 1 },
+        .{ .input = "[]string:int{\"foo\": 15}[\"foo\"]", .expected = 15 },
+        .{ .input = "\"hello\"[1]", .expected = "e" },
     };
 
     inline for (test_cases) |case| {
@@ -1124,75 +1125,78 @@ test "Index" {
             testing.expectEqual(@as(i64, case.expected), vm.peek().toInteger().value)
         else if (@TypeOf(case.expected) == *const [1:0]u8)
             testing.expectEqualStrings(case.expected, vm.peek().toString().value)
+        else {
+            std.debug.print("AEFGE: {}\n", .{vm.peek().*});
+            testing.expectEqual(case.expected, vm.peek());
+        }
+        testing.expectEqual(@as(usize, 0), vm.sp);
+    }
+}
+
+test "Basic function calls with no arguments" {
+    const test_cases = .{
+        .{ .input = "const x = fn() int { return 1 + 2 } x()", .expected = 3 },
+        .{ .input = "const x = fn() int { return 1 } const y = fn() int { return 5 } x() + y()", .expected = 6 },
+        .{ .input = "const x = fn() int { return 5 10 } x()", .expected = 5 },
+        .{ .input = "const x = fn() void { } x()", .expected = &Value.Void },
+    };
+
+    inline for (test_cases) |case| {
+        var vm = try Vm.init(testing.allocator);
+        defer vm.deinit();
+        try vm.compileAndRun(case.input);
+
+        if (@TypeOf(case.expected) == comptime_int)
+            testing.expectEqual(@as(i64, case.expected), vm.peek().toInteger().value)
+        else {
+            testing.expectEqual(case.expected, vm.peek());
+        }
+        testing.expectEqual(@as(usize, 0), vm.sp);
+    }
+}
+
+test "Globals vs Locals" {
+    const test_cases = .{
+        .{ .input = "const x = fn() int { const x = 5 return x } x()", .expected = 5 },
+        .{ .input = "const x = fn() int { const y = 1 const z = 2 return y + z } x()", .expected = 3 },
+    };
+
+    inline for (test_cases) |case, i| {
+        var vm = try Vm.init(testing.allocator);
+        defer vm.deinit();
+        if (i == 0) {
+            testing.expectError(compiler.Compiler.Error.CompilerError, vm.compileAndRun(case.input));
+            continue;
+        } else
+            try vm.compileAndRun(case.input);
+
+        if (@TypeOf(case.expected) == comptime_int)
+            testing.expectEqual(@as(i64, case.expected), vm.peek().toInteger().value)
         else
             testing.expectEqual(case.expected, vm.peek());
         testing.expectEqual(@as(usize, 0), vm.sp);
     }
 }
 
-// test "Basic function calls with no arguments" {
-//     const test_cases = .{
-//         .{ .input = "const x = fn() int { return 1 + 2 } x()", .expected = 3 },
-//         .{ .input = "const x = fn() int { return 1 } const y = fn() int { return 5 } x() + y()", .expected = 6 },
-//         .{ .input = "const x = fn() int { return 5 10 } x()", .expected = 5 },
-//         .{ .input = "const x = fn() void { } x()", .expected = &Value.Void },
-//     };
+test "Functions with arguments" {
+    const test_cases = .{
+        .{ .input = "const x = fn(x: int) int { return x } x(3)", .expected = 3 },
+        .{ .input = "const x = fn(a: int, b: int) int { return a + b } x(3,5)", .expected = 8 },
+        .{ .input = "const x = fn(a: int, b: int) int { const z = a + b return z } x(3,5)", .expected = 8 },
+    };
 
-//     inline for (test_cases) |case| {
-//         var vm = Vm.init(testing.allocator);
-//         defer vm.deinit();
-//         try vm.compileAndRun(case.input);
+    inline for (test_cases) |case| {
+        var vm = try Vm.init(testing.allocator);
+        defer vm.deinit();
+        try vm.compileAndRun(case.input);
 
-//         if (@TypeOf(case.expected) == comptime_int)
-//             testing.expectEqual(@as(i64, case.expected), vm.peek().integer)
-//         else
-//             testing.expectEqual(case.expected, vm.peek());
-//         testing.expectEqual(@as(usize, 0), vm.sp);
-//     }
-// }
-
-// test "Globals vs Locals" {
-//     const test_cases = .{
-//         .{ .input = "const x = fn() int { const x = 5 return x } x()", .expected = 5 },
-//         .{ .input = "const x = fn() int { const y = 1 const z = 2 return y + z } x()", .expected = 3 },
-//     };
-
-//     inline for (test_cases) |case, i| {
-//         var vm = Vm.init(testing.allocator);
-//         defer vm.deinit();
-//         if (i == 0) {
-//             testing.expectError(compiler.Compiler.Error.CompilerError, vm.compileAndRun(case.input));
-//             continue;
-//         } else
-//             try vm.compileAndRun(case.input);
-
-//         if (@TypeOf(case.expected) == comptime_int)
-//             testing.expectEqual(@as(i64, case.expected), vm.peek().integer)
-//         else
-//             testing.expectEqual(case.expected, vm.peek().*);
-//         testing.expectEqual(@as(usize, 0), vm.sp);
-//     }
-// }
-
-// test "Functions with arguments" {
-//     const test_cases = .{
-//         .{ .input = "const x = fn(x: int) int { return x } x(3)", .expected = 3 },
-//         .{ .input = "const x = fn(a: int, b: int) int { return a + b } x(3,5)", .expected = 8 },
-//         .{ .input = "const x = fn(a: int, b: int) int { const z = a + b return z } x(3,5)", .expected = 8 },
-//     };
-
-//     inline for (test_cases) |case| {
-//         var vm = Vm.init(testing.allocator);
-//         defer vm.deinit();
-//         try vm.compileAndRun(case.input);
-
-//         if (@TypeOf(case.expected) == comptime_int)
-//             testing.expectEqual(@as(i64, case.expected), vm.peek().integer)
-//         else
-//             testing.expectEqual(case.expected, vm.peek());
-//         testing.expectEqual(@as(usize, 0), vm.sp);
-//     }
-// }
+        if (@TypeOf(case.expected) == comptime_int)
+            testing.expectEqual(@as(i64, case.expected), vm.peek().toInteger().value)
+        else
+            testing.expectEqual(case.expected, vm.peek());
+        testing.expectEqual(@as(usize, 0), vm.sp);
+    }
+}
 
 // test "Builtins" {
 //     const test_cases = .{

@@ -70,7 +70,6 @@ pub const Value = struct {
                 Integer => .integer,
                 Boolean => .boolean,
                 String => .string,
-                //null => .nil,
                 ReturnValue => ._return,
                 Function => .function,
                 List => .list,
@@ -80,8 +79,7 @@ pub const Value = struct {
                 Iterable => .iterable,
                 Range => .range,
                 Enum => ._enum,
-                void => ._void,
-                else => @compileError("Unsupported type: " ++ @typeName(T)),
+                else => unreachable,
             };
         }
     };
@@ -148,14 +146,14 @@ pub const Value = struct {
     pub fn toZig(self: *const Value, comptime T: type) T {
         return switch (T) {
             void => {},
-            bool => self.unwrap(.boolean).?.value,
-            []const u8 => self.unwrap(.string).?.value,
-            *Map, *const Map => self.unwrap(.map).?.value,
+            bool => self.toBool().value,
+            []const u8 => self.toString().value,
+            *Map, *const Map => self.toMap().value,
             *Value, *const Value => self,
             Value => self.*,
             else => switch (@typeInfo(T)) {
-                .Int => @intCast(T, self.unwrap(.integer).?.value),
-                .Enum => @intToEnum(T, self.unwrap(.integer).?.value),
+                .Int => @intCast(T, self.toInteger().value),
+                .Enum => @intToEnum(T, self.toInteger().value),
                 else => @compileError("TODO add support for type: " ++ @typeName(T)),
             },
         };
@@ -242,7 +240,7 @@ pub const Value = struct {
                                 tuple[i] = args[i].toZig(Fn.args[i].arg_type.?);
                             }
 
-                            return OldValue.fromZig(_alloc, @call(.{}, innerFunc, tuple));
+                            return fromZig(_alloc, @call(.{}, innerFunc, tuple));
                         }
                     };
                     // set innerFunc as we cannot access `val` from inside
@@ -270,7 +268,7 @@ pub const Value = struct {
                     },
                     else => @compileError("Unsupported type: " ++ @typeName(@TypeOf(val))),
                 },
-                .Null => return &OldValue.Nil,
+                .Null => return &Nil,
                 else => @compileError("Unsupported type: " ++ @typeName(@TypeOf(val))),
             },
         }
@@ -284,17 +282,14 @@ pub const Value = struct {
             .integer => self.toInteger().destroy(gpa),
             .boolean => self.toBool().destroy(gpa),
             .string => self.toString().destroy(gpa),
-            .nil => {},
-            ._return => {},
             .function => self.toFunction().destroy(gpa),
             .list => self.toList().destroy(gpa),
             .map => self.toMap().destroy(gpa),
-            .native => unreachable,
             .module => self.unwrap(.module).?.destroy(gpa),
             .iterable => self.unwrap(.iterable).?.destroy(gpa),
             .range => self.toRange().destroy(gpa),
             ._enum => self.toEnum().destroy(gpa),
-            ._void => {},
+            else => unreachable,
         }
     }
 
@@ -406,7 +401,7 @@ pub const Value = struct {
             const function = value.toFunction();
             function.arg_len = arg_len;
             function.locals = locals;
-            function.name = name;
+            function.name = if (name) |n| try gc.gpa.dupe(u8, n) else null;
             function.entry = entry_point;
 
             return &function.base;
