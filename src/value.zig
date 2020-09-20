@@ -501,6 +501,7 @@ pub const Value = struct {
         }
 
         pub fn destroy(self: *Enum, gpa: *Allocator) void {
+            gpa.free(self.value);
             gpa.destroy(self);
         }
     };

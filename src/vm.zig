@@ -601,15 +601,16 @@ pub const Vm = struct {
     fn makeEnum(self: *Vm, inst: byte_code.Instruction) Error!void {
         const len = inst.ptr.pos;
 
-        var enums_values = try std.ArrayList([]const u8).initCapacity(&self.arena.allocator, @as(usize, len));
-        errdefer enums_values.deinit();
+        var enums_values = std.ArrayList([]const u8).init(self.allocator);
+        try enums_values.resize(len);
+        defer enums_values.deinit();
 
-        var i: usize = 0;
-        while (i < len) : (i += 1) {
+        var i: usize = len;
+        while (i > 0) : (i -= 1) {
             const string = self.pop().?.unwrap(.string) orelse return self.fail("Enum contains invalid field");
-            enums_values.appendAssumeCapacity(string.value);
+            enums_values.items[i - 1] = string.value;
         }
-
+        
         const enm = try Value.Enum.create(self.gc, enums_values.toOwnedSlice());
         return self.push(enm);
     }
@@ -1300,12 +1301,13 @@ test "Enum expression and comparison" {
         \\if (enum_value == x.another_value) {
         \\  5
         \\}
+        \\enum_value
     ;
     var vm = try Vm.init(testing.allocator);
     defer vm.deinit();
     try vm.compileAndRun(input);
 
-    testing.expectEqual(@as(i64, 5), vm.peek().toInteger().value);
+    testing.expectEqual(@as(i64, 1), vm.peek().toInteger().value);
     testing.expectEqual(@as(usize, 0), vm.sp);
 }
 
