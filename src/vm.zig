@@ -117,7 +117,7 @@ pub const Vm = struct {
         try self.libs.putNoClobber(
             self.allocator,
             name,
-            try Value.fromZig(&self.arena.allocator, lib),
+            try Value.fromZig(self.gc, lib),
         );
     }
 
@@ -129,9 +129,10 @@ pub const Vm = struct {
 
         var maybe_func: ?*Value = null;
         for (self.globals.items) |global, i| {
-            if (global.* == .function and global.function.name != null) {
-                if (std.mem.eql(u8, func_name, global.function.name.?)) {
+            if (global.l_type == .function and global.toFunction().name != null) {
+                if (std.mem.eql(u8, func_name, global.toFunction().name.?)) {
                     maybe_func = global;
+                    break;
                 }
             }
         }
@@ -139,14 +140,14 @@ pub const Vm = struct {
             return error.UndefinedFunction;
         }
 
-        const func = maybe_func.?.function;
+        const func = maybe_func.?.toFunction();
         if (func.arg_len != args.len) {
             return error.IncorrectArgumentLength;
         }
 
         try self.push(maybe_func.?);
         inline for (args) |arg, i| {
-            try self.push(try Value.fromZig(&self.arena.allocator, arg));
+            try self.push(try Value.fromZig(self.gc, arg));
         }
 
         // initial call stack for main
@@ -1358,29 +1359,29 @@ test "Import module" {
     testing.expectEqual(@as(usize, 0), vm.sp);
 }
 
-// test "Luf function from Zig" {
-//     const input =
-//         \\const add = fn(a: int, b: int) int {
-//         \\  return a + b
-//         \\}
-//         \\const concat = fn(a: string) string {
-//         \\  return a + " world"
-//         \\}
-//     ;
-//     var vm = try Vm.init(testing.allocator);
-//     defer vm.deinit();
-//     var code = try compiler.compile(testing.allocator, input, &vm.errors);
-//     defer code.deinit();
+test "Luf function from Zig" {
+    const input =
+        \\const add = fn(a: int, b: int) int {
+        \\  return a + b
+        \\}
+        \\const concat = fn(a: string) string {
+        \\  return a + " world"
+        \\}
+    ;
+    var vm = try Vm.init(testing.allocator);
+    defer vm.deinit();
+    var code = try compiler.compile(testing.allocator, input, &vm.errors);
+    defer code.deinit();
 
-//     vm.loadCode(&code);
-//     try vm.run();
-//     const val = try vm.callFunc("add", .{ 2, 5 });
-//     const val2 = try vm.callFunc("concat", .{"hello"});
+    vm.loadCode(&code);
+    try vm.run();
+    const val = try vm.callFunc("add", .{ 2, 5 });
+    const val2 = try vm.callFunc("concat", .{"hello"});
 
-//     testing.expectEqual(@as(i64, 7), val.toInteger().value);
-//     testing.expectEqualStrings("hello world", val2.toString().value);
-//     testing.expectEqual(@as(usize, 0), vm.sp);
-// }
+    testing.expectEqual(@as(i64, 7), val.toInteger().value);
+    testing.expectEqualStrings("hello world", val2.toString().value);
+    testing.expectEqual(@as(usize, 0), vm.sp);
+}
 
 test "Inner functions" {
     const input =
@@ -1401,20 +1402,20 @@ test "Inner functions" {
     testing.expectEqual(@as(usize, 0), vm.sp);
 }
 
-// fn testZigFromLuf(a: u32, b: u32) u32 {
-//     return a + b;
-// }
+fn testZigFromLuf(a: u32, b: u32) u32 {
+    return a + b;
+}
 
-// test "Zig from Luf" {
-//     const input =
-//         \\const sum = import("zig")
-//         \\const result = sum(2, 5)
-//         \\result
-//     ;
-//     var vm = Vm.init(testing.allocator);
-//     try vm.loadLib("zig", testZigFromLuf);
-//     defer vm.deinit();
-//     try vm.compileAndRun(input);
-//     testing.expectEqual(@as(i64, 7), vm.peek().integer);
-//     testing.expectEqual(@as(usize, 0), vm.sp);
-// }
+test "Zig from Luf" {
+    const input =
+        \\const sum = import("zig")
+        \\const result = sum(2, 5)
+        \\result
+    ;
+    var vm = try Vm.init(testing.allocator);
+    try vm.loadLib("zig", testZigFromLuf);
+    defer vm.deinit();
+    try vm.compileAndRun(input);
+    testing.expectEqual(@as(i64, 7), vm.peek().toInteger().value);
+    testing.expectEqual(@as(usize, 0), vm.sp);
+}

@@ -143,7 +143,7 @@ pub const Value = struct {
 
     /// Returns the `Value` as a Zig type
     /// TODO, make it an error when the Luf `Value` is not the corresponding type
-    pub fn toZig(self: *const Value, comptime T: type) T {
+    pub fn toZig(self: *Value, comptime T: type) T {
         return switch (T) {
             void => {},
             bool => self.toBool().value,
@@ -164,7 +164,7 @@ pub const Value = struct {
     pub fn fromZig(gc: *GarbageCollector, val: anytype) !*Value {
         switch (@TypeOf(val)) {
             // todo have a global void value
-            void => return &Value{ .l_type = ._void, .next = null, .is_marked = false },
+            void => return &Void,
             *Value => return val,
             Value => {
                 const ret = gc.gpa.create(Value);
@@ -210,7 +210,7 @@ pub const Value = struct {
                         // this is needed as `val` is not accessible from inner function
                         var innerFunc: @TypeOf(val) = undefined;
 
-                        fn call(_alloc: *Allocator, args: []*OldValue) !*OldValue {
+                        fn call(_gc: *GarbageCollector, args: []*Value) !*Value {
                             if (args.len != args_len) return error.IncorrectArgumentCount;
 
                             const ArgsTuple = comptime blk: {
@@ -240,7 +240,7 @@ pub const Value = struct {
                                 tuple[i] = args[i].toZig(Fn.args[i].arg_type.?);
                             }
 
-                            return fromZig(_alloc, @call(.{}, innerFunc, tuple));
+                            return fromZig(_gc, @call(.{}, innerFunc, tuple));
                         }
                     };
                     // set innerFunc as we cannot access `val` from inside
@@ -289,6 +289,7 @@ pub const Value = struct {
             .iterable => self.unwrap(.iterable).?.destroy(gpa),
             .range => self.toRange().destroy(gpa),
             ._enum => self.toEnum().destroy(gpa),
+            .native => self.toNative().destroy(gpa),
             else => unreachable,
         }
     }
@@ -459,6 +460,10 @@ pub const Value = struct {
         base: Value,
         func: Value.NativeFn,
         arg_len: usize,
+
+        pub fn destroy(self: *Native, gpa: *Allocator) void {
+            gpa.destroy(self);
+        }
     };
 
     pub const Range = struct {
