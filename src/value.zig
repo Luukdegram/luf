@@ -626,7 +626,7 @@ pub const Value = struct {
         };
     }
 
-    pub const NativeFn = fn (allocator: *std.mem.Allocator, args: []*Value) anyerror!*Value;
+    pub const NativeFn = fn (gc: *GarbageCollector, args: []*Value) anyerror!*Value;
 };
 
 /// Value depending on its type

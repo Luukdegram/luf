@@ -1,5 +1,6 @@
 const std = @import("std");
 const Value = @import("value.zig").Value;
+const Gc = @import("gc.zig").GarbageCollector;
 
 pub const BuiltinError = error{ OutOfMemory, UnsupportedType, MismatchingTypes };
 const BuiltinFn = Value.NativeFn;
@@ -16,7 +17,7 @@ var pop_func = Value.Native{ .base = .{ .l_type = .native, .is_marked = false, .
 
 /// Returns the length of the `Value`.
 /// Supports strings, arrays and maps.
-fn len(allocator: *std.mem.Allocator, args: []*Value) BuiltinError!*Value {
+fn len(gc: *Gc, args: []*Value) BuiltinError!*Value {
     std.debug.assert(args.len == 1);
     const arg = args[0];
     const length: i64 = switch (arg.l_type) {
@@ -25,31 +26,31 @@ fn len(allocator: *std.mem.Allocator, args: []*Value) BuiltinError!*Value {
         .map => @intCast(i64, arg.toMap().value.items().len),
         else => return BuiltinError.UnsupportedType,
     };
-    var integer = Value.Integer{ .value = length, .base = .{ .l_type = .integer, .next = null, .is_marked = false } };
-    return &integer.base;
+
+    return Value.Integer.create(gc, length);
 }
 
 /// Appends a new value to the list
-fn add(allocator: *std.mem.Allocator, args: []*Value) BuiltinError!*Value {
+fn add(gc: *Gc, args: []*Value) BuiltinError!*Value {
     std.debug.assert(args.len >= 2);
     return switch (args[0].l_type) {
         .list => {
-            var list = args[0].toList().value;
+            var list = args[0].toList();
             const val = args[args.len - 1];
-            if (list.items.len > 0) {
-                if (list.items[0].l_type != val.l_type) {
+            if (list.value.items.len > 0) {
+                if (list.value.items[0].l_type != val.l_type) {
                     return BuiltinError.MismatchingTypes;
                 }
             }
-            try list.append(allocator, val);
+            try list.value.append(gc.gpa, val);
             return args[0];
         },
         .map => {
-            var map = args[0].toMap().value;
+            var map = args[0].toMap();
             const key = args[args.len - 2];
             const val = args[args.len - 1];
-            if (map.items().len > 0) {
-                const entry = map.items()[0];
+            if (map.value.items().len > 0) {
+                const entry = map.value.items()[0];
                 if (entry.key.l_type != key.l_type) {
                     return BuiltinError.MismatchingTypes;
                 }
@@ -57,7 +58,7 @@ fn add(allocator: *std.mem.Allocator, args: []*Value) BuiltinError!*Value {
                     return BuiltinError.MismatchingTypes;
                 }
             }
-            try map.put(allocator, key, val);
+            try map.value.put(gc.gpa, key, val);
             return args[0];
         },
         else => BuiltinError.UnsupportedType,
@@ -66,7 +67,7 @@ fn add(allocator: *std.mem.Allocator, args: []*Value) BuiltinError!*Value {
 
 /// Pops the last value of a list and returns said value
 /// Assures the list as atleast 1 value
-fn pop(allocator: *std.mem.Allocator, args: []*Value) BuiltinError!*Value {
+fn pop(gc: *Gc, args: []*Value) BuiltinError!*Value {
     std.debug.assert(args.len == 1);
     return switch (args[0].l_type) {
         .list => {

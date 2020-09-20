@@ -699,14 +699,12 @@ pub const Vm = struct {
 
                             while (i <= builtin.arg_len) : (i += 1) args[i] = self.pop().?;
 
-                            //create a shallow copy
-                            //const res = try self.newValue();
-                            // res.* = (builtin.func(
-                            //     &self.arena.allocator,
-                            //     args,
-                            // ) catch return self.fail("Could not execute builtin function")).*;
+                            const res = builtin.func(
+                                self.gc,
+                                args,
+                            ) catch return self.fail("Could not execute builtin function");
 
-                            // return self.push(res);
+                            return self.push(res);
                         }
                     },
                     else => return self.fail("Expected string or integer on rhs"),
@@ -738,14 +736,12 @@ pub const Vm = struct {
                         if (_builtin.builtins.get(name)) |val| {
                             const builtin = val.unwrap(.native).?;
 
-                            //create a shallow copy
-                            // const res = try self.newValue();
-                            // res.* = (builtin.func(
-                            //     &self.arena.allocator,
-                            //     &[_]*Value{left},
-                            // ) catch return self.fail("Could not execute builtin function")).*;
+                            const res = builtin.func(
+                                self.gc,
+                                &[_]*Value{left},
+                            ) catch return self.fail("Could not execute builtin function");
 
-                            // return self.push(res);
+                            return self.push(res);
                         }
                     },
                     else => return self.fail("Expected string or integer on rhs"),
@@ -852,14 +848,14 @@ pub const Vm = struct {
             break :blk lib.unwrap(.native) orelse return self.fail("Loaded library is not a function");
         };
 
-        var args = try self.arena.allocator.alloc(*Value, func.arg_len);
-        defer self.arena.allocator.free(args);
+        var args = try self.allocator.alloc(*Value, func.arg_len);
+        defer self.allocator.free(args);
 
         for (args) |*arg| {
             arg.* = self.pop().?;
         }
 
-        const result = func.func(&self.arena.allocator, args) catch return self.fail("Could not execute Zig function");
+        const result = func.func(self.gc, args) catch return self.fail("Could not execute Zig function");
         return self.push(result);
     }
 
@@ -1193,23 +1189,23 @@ test "Functions with arguments" {
     }
 }
 
-// test "Builtins" {
-//     const test_cases = .{
-//         .{ .input = "\"Hello world\".len", .expected = 11 },
-//         .{ .input = "[]int{1,5,2}.len", .expected = 3 },
-//         .{ .input = "const x = []int{1} x.add(2) x.len", .expected = 2 },
-//         .{ .input = "const x = []int{1, 2} x.pop() x.len", .expected = 1 },
-//     };
+test "Builtins" {
+    const test_cases = .{
+        .{ .input = "\"Hello world\".len", .expected = 11 },
+        .{ .input = "[]int{1,5,2}.len", .expected = 3 },
+        .{ .input = "const x = []int{1} x.add(2) x.len", .expected = 2 },
+        .{ .input = "const x = []int{1, 2} x.pop() x.len", .expected = 1 },
+    };
 
-//     inline for (test_cases) |case| {
-//         var vm = Vm.init(testing.allocator);
-//         defer vm.deinit();
-//         try vm.compileAndRun(case.input);
+    inline for (test_cases) |case| {
+        var vm = try Vm.init(testing.allocator);
+        defer vm.deinit();
+        try vm.compileAndRun(case.input);
 
-//         testing.expectEqual(@as(i64, case.expected), vm.peek().integer);
-//         testing.expectEqual(@as(usize, 0), vm.sp);
-//     }
-// }
+        testing.expectEqual(@as(i64, case.expected), vm.peek().toInteger().value);
+        testing.expectEqual(@as(usize, 0), vm.sp);
+    }
+}
 
 test "While loop" {
     const test_cases = .{
