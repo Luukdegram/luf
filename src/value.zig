@@ -13,11 +13,11 @@ pub const Value = struct {
     next: ?*Value = null,
 
     /// Global True value, saves memory by having it as a globally available 'constant'
-    pub var True = &_true.base;
+    pub var True = _true.base;
     const _true = Boolean{ .base = .{ .l_type = .boolean }, .value = true };
 
     /// Global False value, saves memory by having it as a globally available 'constant'
-    pub var False = &_false.base;
+    pub var False = _false.base;
     const _false = Boolean{ .base = .{ .l_type = .boolean }, .value = false };
 
     /// Global void value, saves memory by having it as a globally available 'constant'
@@ -277,7 +277,7 @@ pub const Value = struct {
     /// Frees all memory of the `Value`.
     /// NOTE, for lists/maps it only frees the list/map itself, not the values it contains
     pub fn destroy(self: *Value, gpa: *Allocator) void {
-        std.debug.print("Destroying object: {}\n", .{self.*});
+        //std.debug.print("Destroying object: {}\n", .{self.*});
         switch (self.l_type) {
             .integer => self.toInteger().destroy(gpa),
             .boolean => self.toBool().destroy(gpa),
@@ -345,7 +345,7 @@ pub const Value = struct {
         }
 
         /// Copies the value of `other` into `self`
-        /// Does this by first free`ing the current value, and then duplicating
+        /// Does this by first free'ing the current value, and then duplicating
         /// the value of `other`. This does NOT free the value of the original `other`
         pub fn copyFrom(self: *String, gpa: *Allocator, other: *String) !void {
             gpa.free(self.value);
@@ -467,7 +467,7 @@ pub const Value = struct {
         end: i64,
 
         pub fn create(gc: *GarbageCollector, start: i64, end: i64) !*Value {
-            const ret = try gc.newValue(Enum);
+            const ret = try gc.newValue(Range);
             const range = ret.toRange();
             range.start = start;
             range.end = end;
@@ -492,10 +492,6 @@ pub const Value = struct {
         }
 
         pub fn destroy(self: *Enum, gpa: *Allocator) void {
-            for (self.value) |val| {
-                gpa.free(val);
-            }
-            gpa.free(self.value);
             gpa.destroy(self);
         }
     };
@@ -519,33 +515,35 @@ pub const Value = struct {
             gpa.destroy(self);
         }
 
-        /// Sets `value` to the next `Value` of the iterator.
+        /// Returns a new Value, returns null if end of iterator is reached
         /// This creates a copy of the actual value
-        pub fn next(self: *@This(), allocator: *Allocator, value: *Value) !void {
-            value.* = OldValue.Nil;
-            switch (self.value.*) {
-                .list => |list| {
-                    if (list.items.len == 0) return;
-                    if (list.items.len == self.index) return;
+        pub fn next(self: *@This(), gc: *GarbageCollector) !?*Value {
+            switch (self.value.l_type) {
+                .list => {
+                    const list = self.value.toList().value;
+                    if (list.items.len == 0) return null;
+                    if (list.items.len == self.index) return null;
 
                     defer self.index += 1;
-                    value.* = list.items[self.index].*;
+                    return list.items[self.index];
                 },
-                .string => |string| {
-                    if (string.len == 0) return;
-                    if (string.len == self.index) return;
+                .string => {
+                    const string = self.value.toString().value;
+                    if (string.len == 0) return null;
+                    if (string.len == self.index) return null;
 
                     defer self.index += 1;
-                    value.* = .{ .string = try allocator.dupe(u8, string[self.index .. self.index + 1]) };
+                    return String.create(gc, string[self.index .. self.index + 1]);
                 },
-                .range => |range| {
-                    if (range.start == range.end) return;
-                    if (self.index == range.end - range.start) return;
+                .range => {
+                    const range = self.value.toRange();
+                    if (range.start == range.end) return null;
+                    if (self.index == range.end - range.start) return null;
 
                     defer self.index += 1;
-                    value.* = .{ .integer = range.start + @intCast(i64, self.index) };
+                    return Integer.create(gc, range.start + @intCast(i64, self.index));
                 },
-                else => {},
+                else => unreachable,
             }
         }
     };

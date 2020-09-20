@@ -20,7 +20,6 @@ pub const GarbageCollector = struct {
     /// Inserts a new `Value` onto the stack and allocates `T` on the heap
     pub fn newValue(self: *GarbageCollector, comptime T: type) !*Value {
         const typed = try self.gpa.create(T);
-        errdefer self.gpa.destroy(typed);
 
         typed.base = Value{
             .l_type = Value.Type.fromType(T),

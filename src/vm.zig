@@ -253,7 +253,7 @@ pub const Vm = struct {
                 .not => try self.execNot(),
                 .bitwise_not => try self.execBitwiseNot(),
                 .load_nil => try self.push(&Value.Nil),
-                .load_void => try self.push(&Value.Nil),
+                .load_void => try self.push(&Value.Void),
                 .jump => current_frame.ip = inst.ptr.pos - 1,
                 .jump_false => {
                     const condition = self.pop().?;
@@ -429,7 +429,7 @@ pub const Vm = struct {
             const val = self.pop().?;
 
             left.toInteger().value = val.toInteger().value;
-            return;
+            return self.push(&Value.Void);
         }
         if (left.isType(.string)) {
             if (op != .assign_add) return self.fail("Unexpected operator on string, expected '+='");
@@ -438,7 +438,7 @@ pub const Vm = struct {
             const val = self.pop().?;
 
             try left.toString().copyFrom(self.gc.gpa, val.toString());
-            return;
+            return self.push(&Value.Void);
         }
 
         return self.fail("Unexpected type, expected integer or string");
@@ -640,28 +640,24 @@ pub const Vm = struct {
     fn execNextIter(self: *Vm) Error!void {
         const value = self.pop().?;
 
-        // var iterator: Value.Iterable = value.unwrap(.iterable).?;
-        // const next = try self.newValue();
-        // try iterator.next(&self.arena.allocator, next);
-        // if (!next.isType(.nil)) {
-        //     // push the iterator back on the stack
-        //     value.iterable = iterator;
-        //     try self.push(value);
+        var iterator: *Value.Iterable = value.unwrap(.iterable).?;
+        if (try iterator.next(self.gc)) |next| {
+            // push the iterator back on the stack
+            try self.push(value);
 
-        //     // push the index if it is exposed
-        //     if (iterator.expose_index) {
-        //         const index = try self.newValue();
-        //         index.* = .{ .integer = @intCast(i64, iterator.index - 1) };
-        //         try self.push(index);
-        //     }
-        //     // push the capture on the stack
-        //     try self.push(next);
+            // push the index if it is exposed
+            if (iterator.expose_index) {
+                const index = try Value.Integer.create(self.gc, @intCast(i64, iterator.index - 1));
+                try self.push(index);
+            }
+            // push the capture on the stack
+            try self.push(next);
 
-        //     // push true to continue
-        //     return self.push(&Value.True);
-        // } else {
-        //     return self.push(&Value.False);
-        // }
+            // push true to continue
+            return self.push(&Value.True);
+        } else {
+            return self.push(&Value.False);
+        }
     }
 
     /// Creates a range from 2 values
@@ -998,7 +994,7 @@ test "Conditional" {
         .{ .input = "if (true) { 10 } else { 20 }", .expected = 10 },
         .{ .input = "if (false) { 10 } else { 20 }", .expected = 20 },
         .{ .input = "if (1 < 2) { 10 }", .expected = 10 },
-        .{ .input = "if (1 > 2) { 10 }", .expected = null },
+        .{ .input = "if (1 > 2) { 10 }", .expected = &Value.Void },
         .{ .input = "if (1 > 2) { 10 } else if (2 > 3) { 20 } else { 5 }", .expected = 5 },
         .{ .input = "if (1 > 2) { 10 } else if (2 < 3) { 20 } else { 5 }", .expected = 20 },
     };
@@ -1011,7 +1007,7 @@ test "Conditional" {
         if (@TypeOf(case.expected) == comptime_int) {
             testing.expect(case.expected == vm.peek().toInteger().value);
         } else {
-            testing.expect(vm.peek().l_type == .nil);
+            testing.expectEqual(case.expected, vm.peek());
         }
         testing.expectEqual(@as(usize, 0), vm.sp);
     }
@@ -1126,7 +1122,6 @@ test "Index" {
         else if (@TypeOf(case.expected) == *const [1:0]u8)
             testing.expectEqualStrings(case.expected, vm.peek().toString().value)
         else {
-            std.debug.print("AEFGE: {}\n", .{vm.peek().*});
             testing.expectEqual(case.expected, vm.peek());
         }
         testing.expectEqual(@as(usize, 0), vm.sp);
@@ -1216,157 +1211,156 @@ test "Functions with arguments" {
 //     }
 // }
 
-// test "While loop" {
-//     const test_cases = .{
-//         .{ .input = "mut i = 0 while (i > 10) {i = 10} i", .expected = 0 },
-//         .{ .input = "mut i = 0 while (i < 10) {i = 10} i", .expected = 10 },
-//         .{ .input = "mut i = 0 while (i < 10) { if(i==5) { break } i = 5} i", .expected = 5 },
-//     };
+test "While loop" {
+    const test_cases = .{
+        .{ .input = "mut i = 0 while (i > 10) {i = 10} i", .expected = 0 },
+        .{ .input = "mut i = 0 while (i < 10) {i = 10} i", .expected = 10 },
+        .{ .input = "mut i = 0 while (i < 10) { if(i==5) { break } i = 5} i", .expected = 5 },
+    };
 
-//     inline for (test_cases) |case| {
-//         var vm = Vm.init(testing.allocator);
-//         defer vm.deinit();
-//         try vm.compileAndRun(case.input);
+    inline for (test_cases) |case| {
+        var vm = try Vm.init(testing.allocator);
+        defer vm.deinit();
+        try vm.compileAndRun(case.input);
 
-//         testing.expectEqual(@as(i64, case.expected), vm.peek().integer);
-//         testing.expectEqual(@as(usize, 0), vm.sp);
-//     }
-// }
+        testing.expectEqual(@as(i64, case.expected), vm.peek().toInteger().value);
+        testing.expectEqual(@as(usize, 0), vm.sp);
+    }
+}
 
-// test "Tail recursion" {
-//     const input =
-//         \\const func = fn(a: int) int {
-//         \\  if (a == 10) {
-//         \\      return a
-//         \\  }
-//         \\  return func(a + 1)
-//         \\}
-//         \\const f: int = func(2)
-//     ;
-//     var vm = Vm.init(testing.allocator);
-//     defer vm.deinit();
-//     try vm.compileAndRun(input);
+test "Tail recursion" {
+    const input =
+        \\const func = fn(a: int) int {
+        \\  if (a == 10) {
+        \\      return a
+        \\  }
+        \\  return func(a + 1)
+        \\}
+        \\const f: int = func(2)
+    ;
+    var vm = try Vm.init(testing.allocator);
+    defer vm.deinit();
+    try vm.compileAndRun(input);
 
-//     testing.expectEqual(@as(i64, 10), vm.peek().integer);
-//     testing.expectEqual(@as(usize, 0), vm.sp);
-// }
+    testing.expectEqual(@as(i64, 10), vm.peek().toInteger().value);
+    testing.expectEqual(@as(usize, 0), vm.sp);
+}
 
-// test "For loop" {
-//     const input =
-//         \\mut sum = 0
-//         \\for([]int{1, 3, 5, 7, 9}) |item, i| {
-//         \\  if (item == 3) {
-//         \\      continue
-//         \\  }
-//         \\  if (item == 7) {
-//         \\      break
-//         \\  }
-//         \\  sum += item + i
-//         \\}
-//         \\sum
-//     ;
-//     var vm = Vm.init(testing.allocator);
-//     defer vm.deinit();
-//     try vm.compileAndRun(input);
+test "For loop" {
+    const input =
+        \\mut sum = 0
+        \\for([]int{1, 3, 5, 7, 9}) |item, i| {
+        \\  if (item == 3) {
+        \\      continue
+        \\  }
+        \\  if (item == 7) {
+        \\      break
+        \\  }
+        \\  sum += item + i
+        \\}
+        \\sum
+    ;
+    var vm = try Vm.init(testing.allocator);
+    defer vm.deinit();
+    try vm.compileAndRun(input);
+    testing.expectEqual(@as(i64, 8), vm.peek().toInteger().value);
+    testing.expectEqual(@as(usize, 0), vm.sp);
+}
 
-//     testing.expectEqual(@as(i64, 8), vm.peek().integer);
-//     testing.expectEqual(@as(usize, 0), vm.sp);
-// }
+test "Range" {
+    const input =
+        \\mut sum = 0
+        \\for(1..100) |e, i| {
+        \\  if (e % 2 == 0) {
+        \\      continue
+        \\  }
+        \\  sum += e + i
+        \\}
+        \\sum
+    ;
+    var vm = try Vm.init(testing.allocator);
+    defer vm.deinit();
+    try vm.compileAndRun(input);
 
-// test "Range" {
-//     const input =
-//         \\mut sum = 0
-//         \\for(1..100) |e, i| {
-//         \\  if (e % 2 == 0) {
-//         \\      continue
-//         \\  }
-//         \\  sum += e + i
-//         \\}
-//         \\sum
-//     ;
-//     var vm = Vm.init(testing.allocator);
-//     defer vm.deinit();
-//     try vm.compileAndRun(input);
+    testing.expectEqual(@as(i64, 4950), vm.peek().toInteger().value);
+    testing.expectEqual(@as(usize, 0), vm.sp);
+}
 
-//     testing.expectEqual(@as(i64, 4950), vm.peek().integer);
-//     testing.expectEqual(@as(usize, 0), vm.sp);
-// }
+test "For loop - String" {
+    const input = "mut result = \"hello\" const w = \"world\" for(w)|c, i|{result+=c}result";
+    var vm = try Vm.init(testing.allocator);
+    defer vm.deinit();
+    try vm.compileAndRun(input);
 
-// test "For loop - String" {
-//     const input = "mut result = \"hello\" const w = \"world\" for(w)|c, i|{result+=c}result";
-//     var vm = Vm.init(testing.allocator);
-//     defer vm.deinit();
-//     try vm.compileAndRun(input);
+    testing.expectEqualStrings("helloworld", vm.peek().toString().value);
+    testing.expectEqual(@as(usize, 0), vm.sp);
+}
 
-//     testing.expectEqualStrings("helloworld", vm.peek().string);
-//     testing.expectEqual(@as(usize, 0), vm.sp);
-// }
+test "Enum expression and comparison" {
+    const input =
+        \\const x = enum{value, another_value}
+        \\const enum_value = x.another_value
+        \\if (enum_value == x.another_value) {
+        \\  5
+        \\}
+    ;
+    var vm = try Vm.init(testing.allocator);
+    defer vm.deinit();
+    try vm.compileAndRun(input);
 
-// test "Enum expression and comparison" {
-//     const input =
-//         \\const x = enum{value, another_value}
-//         \\const enum_value = x.another_value
-//         \\if (enum_value == x.another_value) {
-//         \\  5
-//         \\}
-//     ;
-//     var vm = Vm.init(testing.allocator);
-//     defer vm.deinit();
-//     try vm.compileAndRun(input);
+    testing.expectEqual(@as(i64, 5), vm.peek().toInteger().value);
+    testing.expectEqual(@as(usize, 0), vm.sp);
+}
 
-//     testing.expectEqual(@as(i64, 5), vm.peek().integer);
-//     testing.expectEqual(@as(usize, 0), vm.sp);
-// }
+test "Switch case" {
+    const input =
+        \\const range = 0..9
+        \\mut x = 0
+        \\switch(5) {
+        \\  4: x += 10,
+        \\  range: x += 30,
+        \\  5: x += 20
+        \\}
+        \\x
+    ;
+    var vm = try Vm.init(testing.allocator);
+    defer vm.deinit();
+    try vm.compileAndRun(input);
 
-// test "Switch case" {
-//     const input =
-//         \\const range = 0..9
-//         \\mut x = 0
-//         \\switch(5) {
-//         \\  4: x += 10,
-//         \\  range: x += 30,
-//         \\  5: x += 20
-//         \\}
-//         \\x
-//     ;
-//     var vm = Vm.init(testing.allocator);
-//     defer vm.deinit();
-//     try vm.compileAndRun(input);
+    testing.expectEqual(@as(i64, 50), vm.peek().toInteger().value);
+    testing.expectEqual(@as(usize, 0), vm.sp);
+}
 
-//     testing.expectEqual(@as(i64, 50), vm.peek().integer);
-//     testing.expectEqual(@as(usize, 0), vm.sp);
-// }
+test "Forward declared" {
+    const input =
+        \\ const x = add(2, 5)
+        \\ const add = fn(a: int, b: int) int {
+        \\      return sum(a + b)
+        \\ }
+        \\ const sum = fn(a: int) int {
+        \\      return a + 1
+        \\ }
+    ;
 
-// test "Forward declared" {
-//     const input =
-//         \\ const x = add(2, 5)
-//         \\ const add = fn(a: int, b: int) int {
-//         \\      return sum(a + b)
-//         \\ }
-//         \\ const sum = fn(a: int) int {
-//         \\      return a + 1
-//         \\ }
-//     ;
+    var vm = try Vm.init(testing.allocator);
+    defer vm.deinit();
+    try vm.compileAndRun(input);
+    testing.expectEqual(@as(i64, 8), vm.peek().toInteger().value);
+    testing.expectEqual(@as(usize, 0), vm.sp);
+}
 
-//     var vm = Vm.init(testing.allocator);
-//     defer vm.deinit();
-//     try vm.compileAndRun(input);
-//     testing.expectEqual(@as(i64, 8), vm.peek().integer);
-//     testing.expectEqual(@as(usize, 0), vm.sp);
-// }
+test "Import module" {
+    const input =
+        \\const imp = import("examples/to_import.luf")
+        \\const x = imp.add(10)
+    ;
 
-// test "Import module" {
-//     const input =
-//         \\const imp = import("examples/to_import.luf")
-//         \\const x = imp.add(10)
-//     ;
-
-//     var vm = Vm.init(testing.allocator);
-//     defer vm.deinit();
-//     try vm.compileAndRun(input);
-//     testing.expectEqual(@as(i64, 30), vm.peek().integer);
-//     testing.expectEqual(@as(usize, 0), vm.sp);
-// }
+    var vm = try Vm.init(testing.allocator);
+    defer vm.deinit();
+    try vm.compileAndRun(input);
+    testing.expectEqual(@as(i64, 30), vm.peek().toInteger().value);
+    testing.expectEqual(@as(usize, 0), vm.sp);
+}
 
 // test "Luf function from Zig" {
 //     const input =
@@ -1377,7 +1371,7 @@ test "Functions with arguments" {
 //         \\  return a + " world"
 //         \\}
 //     ;
-//     var vm = Vm.init(testing.allocator);
+//     var vm = try Vm.init(testing.allocator);
 //     defer vm.deinit();
 //     var code = try compiler.compile(testing.allocator, input, &vm.errors);
 //     defer code.deinit();
@@ -1387,29 +1381,29 @@ test "Functions with arguments" {
 //     const val = try vm.callFunc("add", .{ 2, 5 });
 //     const val2 = try vm.callFunc("concat", .{"hello"});
 
-//     testing.expectEqual(@as(i64, 7), val.integer);
-//     testing.expectEqualStrings("hello world", val2.string);
+//     testing.expectEqual(@as(i64, 7), val.toInteger().value);
+//     testing.expectEqualStrings("hello world", val2.toString().value);
 //     testing.expectEqual(@as(usize, 0), vm.sp);
 // }
 
-// test "Inner functions" {
-//     const input =
-//         \\const add = fn(a: int, b: int) int {
-//         \\  const plusTen = fn(a: int) int {
-//         \\      return a + 10
-//         \\  }
-//         \\
-//         \\  return plusTen(a + b)
-//         \\}
-//         \\const x = add(20, 30)
-//     ;
+test "Inner functions" {
+    const input =
+        \\const add = fn(a: int, b: int) int {
+        \\  const plusTen = fn(a: int) int {
+        \\      return a + 10
+        \\  }
+        \\
+        \\  return plusTen(a + b)
+        \\}
+        \\const x = add(20, 30)
+    ;
 
-//     var vm = Vm.init(testing.allocator);
-//     defer vm.deinit();
-//     try vm.compileAndRun(input);
-//     testing.expectEqual(@as(i64, 60), vm.peek().integer);
-//     testing.expectEqual(@as(usize, 0), vm.sp);
-// }
+    var vm = try Vm.init(testing.allocator);
+    defer vm.deinit();
+    try vm.compileAndRun(input);
+    testing.expectEqual(@as(i64, 60), vm.peek().toInteger().value);
+    testing.expectEqual(@as(usize, 0), vm.sp);
+}
 
 // fn testZigFromLuf(a: u32, b: u32) u32 {
 //     return a + b;
