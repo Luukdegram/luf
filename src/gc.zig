@@ -33,22 +33,44 @@ pub const GarbageCollector = struct {
     }
 
     /// Marks all objects on stack that are referenced
-    pub fn mark(self: *GarbageCollector, values: []*Value) void {
-        for (values) |val| val.is_marked = true;
+    pub fn mark(self: *GarbageCollector, val: *Value) void {
+        val.is_marked = true;
+        switch (val.l_type) {
+            .iterable => val.unwrap(.iterable).?.value.is_marked = true,
+            .list => {
+                for (val.toList().value.items) |item|
+                    item.is_marked = true;
+            },
+            .map => {
+                const map = val.toMap().value;
+                for (map.items()) |entry| {
+                    entry.key.is_marked = true;
+                    entry.value.is_marked = true;
+                }
+            },
+            ._return => val.unwrap(._return).?.value.is_marked = true,
+            else => {},
+        }
     }
 
     /// Destroys all values not marked by the garbage collector
-    pub fn sweep(self: *GarbageCollector) void {
+    pub fn sweep(self: *GarbageCollector, values: []const *Value) void {
         if (self.stack == null) return;
 
-        var prev: *Value = undefined;
-        while (self.stack.?.next) |*val| {
+        for (values) |val| self.mark(val);
+
+        var prev: ?*Value = null;
+        var next: ?*Value = self.stack;
+        while (next) |val| {
             if (!val.is_marked) {
-                if (val.next) |next| prev.next = next;
-                val.destroy(self.gpa);
-                continue;
+                const tmp = val;
+                next = val.next;
+                if (prev) |p| p.next = next else self.stack = next;
+                tmp.destroy(self.gpa);
+            } else {
+                val.is_marked = false;
+                prev = val;
             }
-            prev = val;
         }
     }
 

@@ -514,20 +514,15 @@ pub const Compiler = struct {
                 // compile the true pong and place the emitted opcodes on the stack
                 try self.compile(if_exp.true_pong);
 
-                // remove potential pop opcode as we continue the expression
-                if (self.instructions.lastIs(.pop)) self.removeLastInst();
-
                 // Add a jump to the stack and return its position
                 const jump_pos = try self.emitReturnPos(Instruction.genPtr(.jump, 0));
 
                 // Point the position of the false jump to the current position
                 self.instructions.replacePtr(false_pos, self.instructions.len());
 
-                if (if_exp.false_pong) |pong| {
-                    try self.compile(pong);
-
-                    if (self.instructions.lastIs(.pop)) self.removeLastInst();
-                } else
+                if (if_exp.false_pong) |pong|
+                    try self.compile(pong)
+                else
                     try self.emit(Instruction.gen(.load_void));
 
                 // set the true jump to the current stack position
@@ -644,12 +639,6 @@ pub const Compiler = struct {
                     function.token.start,
                     .{},
                 ));
-
-                // if the last instruction is a pop rather than some value
-                // replace it with a normal return statement
-                if (self.instructions.lastIs(.pop)) {
-                    self.instructions.replaceLastOp(.return_value);
-                }
 
                 // if no return_value found, emit a regular return instruction
                 if (!self.instructions.lastIs(.return_value)) try self.emit(Instruction.gen(.@"return"));
@@ -780,16 +769,13 @@ pub const Compiler = struct {
 
                 try self.compile(loop.block);
 
-                try self.emit(Instruction.gen(.pop));
+                const end = try self.emitReturnPos(Instruction.genPtr(.jump, self.scope.id.loop.start));
 
-                try self.emit(Instruction.genPtr(.jump, self.scope.id.loop.start));
-
-                const end = try self.emitReturnPos(Instruction.gen(.pop));
                 // jump to end
-                self.instructions.replacePtr(false_jump, end);
+                self.instructions.replacePtr(false_jump, end + 1);
 
                 for (self.scope.id.loop.breaks.items) |pos| {
-                    self.instructions.list.items[pos].ptr.pos = end;
+                    self.instructions.list.items[pos].ptr.pos = end + 1;
                 }
                 self.exitScope();
             },
@@ -1249,10 +1235,9 @@ test "Compile AST to bytecode" {
                 .load_true,
                 .jump_false,
                 .load_integer,
-                .pop,
                 .jump,
                 .pop,
-                .pop,
+                //.pop,
             },
         },
         .{
