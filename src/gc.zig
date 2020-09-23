@@ -32,7 +32,7 @@ pub const GarbageCollector = struct {
         return &typed.base;
     }
 
-    /// Marks all objects on stack that are referenced
+    /// Marks an object so it will not be sweeped by the gc.
     pub fn mark(self: *GarbageCollector, val: *Value) void {
         val.is_marked = true;
         switch (val.l_type) {
@@ -48,7 +48,6 @@ pub const GarbageCollector = struct {
                     entry.value.is_marked = true;
                 }
             },
-            ._return => val.unwrap(._return).?.value.is_marked = true,
             else => {},
         }
     }
@@ -62,11 +61,10 @@ pub const GarbageCollector = struct {
         var prev: ?*Value = null;
         var next: ?*Value = self.stack;
         while (next) |val| {
+            next = val.next;
             if (!val.is_marked) {
-                const tmp = val;
-                next = val.next;
                 if (prev) |p| p.next = next else self.stack = next;
-                tmp.destroy(self.gpa);
+                val.destroy(self.gpa);
             } else {
                 val.is_marked = false;
                 prev = val;

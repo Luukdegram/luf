@@ -23,8 +23,11 @@ pub const Vm = struct {
     sp: usize = 0,
 
     /// Stack has a max of 2048 Value's that it can hold
-    /// This is pre-allocated.
     stack: [2048]*Value = undefined,
+
+    /// List of locals, used for marking
+    locals: [128]*Value = undefined,
+    locals_count: usize = 0,
 
     /// Globals that live inside the VM
     /// Currently allows 65536 Values
@@ -299,14 +302,26 @@ pub const Vm = struct {
                     try self.push(rv);
                 },
                 .call => try self.execFunctionCall(inst, self.code.?.instructions[current_frame.ip + 1]),
-                .bind_local => self.stack[current_frame.sp + inst.ptr.pos] = self.pop(),
-                .load_local => try self.push(self.stack[current_frame.sp + inst.ptr.pos]),
+                .bind_local => {
+                    const val = self.pop();
+                    self.locals[inst.ptr.pos] = val;
+                    if (inst.ptr.pos > self.locals_count) self.locals_count = inst.ptr.pos;
+                    self.stack[current_frame.sp + inst.ptr.pos] = val;
+                },
+                .load_local => {
+                    try self.push(self.stack[current_frame.sp + inst.ptr.pos]);
+                },
                 .assign_global => {
                     const val = self.pop();
                     try self.globals.resize(inst.ptr.pos + 1);
                     self.globals.items[inst.ptr.pos] = val;
                 },
-                .assign_local => self.stack[current_frame.sp + inst.ptr.pos] = self.pop(),
+                .assign_local => {
+                    const val = self.pop();
+                    self.locals[inst.ptr.pos] = val;
+                    if (inst.ptr.pos > self.locals_count) self.locals_count = inst.ptr.pos;
+                    self.stack[current_frame.sp + inst.ptr.pos] = val;
+                },
                 .load_module => {
                     const string = self.pop().unwrap(.string) orelse
                         return self.fail("Expected a string");
@@ -321,7 +336,11 @@ pub const Vm = struct {
             }
 
             cycles += 1;
-            //if (cycles % 100 == 0) self.gc.sweep(self.stack[0..self.sp]);
+
+            if (cycles % 200 == 0) {
+                for (self.globals.items) |global| self.gc.mark(global);
+                self.gc.sweep(self.stack[0..self.sp]);
+            }
         }
 
         // only allow them to query through global functions
@@ -436,7 +455,7 @@ pub const Vm = struct {
             const val = self.pop();
 
             left.toInteger().value = val.toInteger().value;
-            return self.push(&Value.Void);
+            return self.push(left);
         }
         if (left.isType(.string)) {
             if (op != .assign_add) return self.fail("Unexpected operator on string, expected '+='");
@@ -445,7 +464,7 @@ pub const Vm = struct {
             const val = self.pop();
 
             try left.toString().copyFrom(self.gc.gpa, val.toString());
-            return self.push(&Value.Void);
+            return self.push(left);
         }
 
         return self.fail("Unexpected type, expected integer or string");
@@ -458,11 +477,11 @@ pub const Vm = struct {
         const left = self.pop();
 
         if (left.l_type == right.l_type and left.isType(.integer)) {
-            return self.execIntCmp(op, left.unwrap(.integer).?.value, right.unwrap(.integer).?.value);
+            return self.execIntCmp(op, left.toInteger().value, right.toInteger().value);
         }
 
         if (left.l_type == right.l_type and left.isType(.string)) {
-            return self.execStringCmp(op, left.unwrap(.string).?.value, right.unwrap(.string).?.value);
+            return self.execStringCmp(op, left.toString().value, right.toString().value);
         }
 
         const left_bool = left.unwrap(.boolean) orelse return self.fail("Expected boolean");
