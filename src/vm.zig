@@ -313,7 +313,8 @@ pub const Vm = struct {
                 },
                 .assign_global => {
                     const val = self.pop();
-                    try self.globals.resize(inst.ptr.pos + 1);
+                    if (inst.ptr.pos >= self.globals.items.len)
+                        try self.globals.resize(inst.ptr.pos + 1);
                     self.globals.items[inst.ptr.pos] = val;
                 },
                 .assign_local => {
@@ -361,10 +362,7 @@ pub const Vm = struct {
     /// Returns the `Value` from the `stack` and decreases the stack
     /// pointer by 1. Asserts the stack is not empty.
     fn pop(self: *Vm) *Value {
-        // TODO, fix this monstrousity. It should be an error!
-        // have to figure out the correct pops().
-        if (self.sp != 0)
-            self.sp -= 1;
+        self.sp -= 1;
         return self.stack[self.sp];
     }
 
@@ -455,7 +453,7 @@ pub const Vm = struct {
             const val = self.pop();
 
             left.toInteger().value = val.toInteger().value;
-            return self.push(left);
+            return self.push(&Value.Void);
         }
         if (left.isType(.string)) {
             if (op != .assign_add) return self.fail("Unexpected operator on string, expected '+='");
@@ -464,7 +462,7 @@ pub const Vm = struct {
             const val = self.pop();
 
             try left.toString().copyFrom(self.gc.gpa, val.toString());
-            return self.push(left);
+            return self.push(&Value.Void);
         }
 
         return self.fail("Unexpected type, expected integer or string");
@@ -817,12 +815,12 @@ pub const Vm = struct {
             if (integer < 0 or integer > list.items.len) return self.fail("Out of bounds");
 
             list.items[@intCast(usize, integer)] = value;
-            return;
+            return self.push(&Value.Void);
         } else if (left.isType(.map)) {
             var map = left.unwrap(.map).?.value;
             if (map.get(right)) |*val| {
                 try map.put(self.gc.gpa, right, value);
-                return self.push(&Value.Nil);
+                return self.push(&Value.Void);
             } else {
                 // replace with more descriptive Error
                 return self.fail("Value not found");
@@ -1127,12 +1125,12 @@ test "Index" {
     const test_cases = .{
         .{ .input = "[]int{1, 2, 3}[1]", .expected = 2 },
         .{ .input = "const list = []int{1, 2, 3} list[1] = 10 list[1]", .expected = 10 },
-        // .{ .input = "[]int:int{1: 5}[1]", .expected = 5 },
-        // .{ .input = "[]int:int{2: 5}[0]", .expected = &Value.Nil },
-        // .{ .input = "[]int:int{2: 5}[2] = 1", .expected = &Value.Nil },
-        // .{ .input = "const map = []int:int{2: 5} map[2] = 1 map[2]", .expected = 1 },
-        // .{ .input = "[]string:int{\"foo\": 15}[\"foo\"]", .expected = 15 },
-        // .{ .input = "\"hello\"[1]", .expected = "e" },
+        .{ .input = "[]int:int{1: 5}[1]", .expected = 5 },
+        .{ .input = "[]int:int{2: 5}[0]", .expected = &Value.Nil },
+        .{ .input = "[]int:int{2: 5}[2] = 1", .expected = &Value.Void },
+        .{ .input = "const map = []int:int{2: 5} map[2] = 1 map[2]", .expected = 1 },
+        .{ .input = "[]string:int{\"foo\": 15}[\"foo\"]", .expected = 15 },
+        .{ .input = "\"hello\"[1]", .expected = "e" },
     };
 
     inline for (test_cases) |case| {
@@ -1287,6 +1285,7 @@ test "For loop" {
     defer vm.deinit();
     try vm.compileAndRun(input);
     testing.expectEqual(@as(i64, 8), vm.peek().toInteger().value);
+    std.debug.print("Last: {}\n", .{vm.stack[0].toInteger()});
     testing.expectEqual(@as(usize, 0), vm.sp);
 }
 

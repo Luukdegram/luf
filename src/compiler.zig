@@ -520,9 +520,11 @@ pub const Compiler = struct {
                 // Point the position of the false jump to the current position
                 self.instructions.replacePtr(false_pos, self.instructions.len());
 
-                if (if_exp.false_pong) |pong|
-                    try self.compile(pong)
-                else
+                if (if_exp.false_pong) |pong| {
+                    try self.compile(pong);
+                    if (self.instructions.lastIs(.pop))
+                        self.removeLastInst();
+                } else
                     try self.emit(Instruction.gen(.load_void));
 
                 // set the true jump to the current stack position
@@ -839,6 +841,10 @@ pub const Compiler = struct {
                 for (self.scope.id.loop.breaks.items) |pos| {
                     self.instructions.list.items[pos].ptr.pos = end;
                 }
+
+                // if there's a break, ensure last value is popped
+                if (self.scope.id.loop.breaks.items.len > 0)
+                    try self.emit(Instruction.gen(.pop));
 
                 // point the end jump to last op
                 self.instructions.replacePtr(end_jump, end);
@@ -1236,8 +1242,6 @@ test "Compile AST to bytecode" {
                 .jump_false,
                 .load_integer,
                 .jump,
-                .pop,
-                //.pop,
             },
         },
         .{
@@ -1254,6 +1258,24 @@ test "Compile AST to bytecode" {
             .input = "const imp = import(\"examples/to_import.luf\") const x:int = imp.sum(2, 5)",
             .opcodes = &[_]Opcode{},
         },
+        .{
+            .input = "const list = []int{1, 2, 3} list[1] = 10 list[1]",
+            .opcodes = &[_]Opcode{ .load_integer, .load_integer, .load_integer, .make_array, .bind_global, .load_global, .load_integer, .load_integer, .set_by_index, .pop, .load_global, .load_integer, .get_by_index },
+        },
+        .{
+            .input = "mut i = 0 while (i > 10) {i = 10}",
+            .opcodes = &[_]Opcode{
+                .load_integer,
+                .bind_global,
+                .load_global,
+                .load_integer,
+                .greater_than,
+                .jump_false,
+                .load_integer,
+                .assign_global,
+                .jump,
+            },
+        },
     };
 
     inline for (test_cases) |case| {
@@ -1265,7 +1287,7 @@ test "Compile AST to bytecode" {
         };
         defer code.deinit();
 
-        for (case.opcodes) |op, i| {
+        inline for (case.opcodes) |op, i| {
             //std.debug.print("Instr: {}\n", .{code.instructions[i]});
             testing.expectEqual(op, code.instructions[i].getOp());
         }

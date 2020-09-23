@@ -132,6 +132,8 @@ pub const Parser = struct {
             .constant, .mutable => self.parseDeclaration(),
             .@"return" => self.parseReturn(),
             .@"switch" => self.parseSwitchStatement(),
+            .while_loop => self.parseWhile(),
+            .for_loop => self.parseFor(),
             else => self.parseExpressionStatement(),
         };
     }
@@ -208,8 +210,8 @@ pub const Parser = struct {
             .left_parenthesis => try self.parseGroupedExpression(),
             .function => try self.parseFunctionLiteral(true),
             .left_bracket => try self.parseDataStructure(false),
-            .while_loop => try self.parseWhile(),
-            .for_loop => try self.parseFor(),
+            //            .while_loop => try self.parseWhile(),
+            //.for_loop => try self.parseFor(),
             .nil => try self.parseNil(),
             .@"break" => try self.parseBreak(),
             .@"continue" => try self.parseContinue(),
@@ -1306,7 +1308,7 @@ test "While loop" {
 
     testing.expect(tree.nodes.len == 1);
 
-    const loop = tree.nodes[0].expression.value.while_loop;
+    const loop = tree.nodes[0].while_loop;
 
     testing.expect(loop.condition.infix.operator == .less_than);
     testing.expect(loop.block.block_statement.nodes.len == 1);
@@ -1358,7 +1360,7 @@ test "For loop" {
 
     testing.expect(tree.nodes.len == 1);
 
-    const loop = tree.nodes[0].expression.value.for_loop;
+    const loop = tree.nodes[0].for_loop;
 
     testing.expect(loop.index != null);
     testing.expectEqualStrings("x", loop.iter.identifier.value);
