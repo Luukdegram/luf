@@ -1285,7 +1285,6 @@ test "For loop" {
     defer vm.deinit();
     try vm.compileAndRun(input);
     testing.expectEqual(@as(i64, 8), vm.peek().toInteger().value);
-    std.debug.print("Last: {}\n", .{vm.stack[0].toInteger()});
     testing.expectEqual(@as(usize, 0), vm.sp);
 }
 
