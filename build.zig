@@ -22,4 +22,9 @@ pub fn build(b: *Builder) void {
     main_tests.setBuildMode(mode);
     const test_step = b.step("test", "Run library tests");
     test_step.dependOn(&main_tests.step);
+
+    const cli = b.addExecutable("luf", "src/cli/main.zig");
+    cli.setBuildMode(mode);
+    cli.addPackagePath("luf", "src/luf.zig");
+    cli.install();
 }
