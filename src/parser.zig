@@ -132,6 +132,10 @@ pub const Parser = struct {
             .constant, .mutable => self.parseDeclaration(),
             .@"return" => self.parseReturn(),
             .@"switch" => self.parseSwitchStatement(),
+            .while_loop => self.parseWhile(),
+            .for_loop => self.parseFor(),
+            .@"break" => self.parseBreak(),
+            .@"continue" => self.parseContinue(),
             else => self.parseExpressionStatement(),
         };
     }
@@ -208,11 +212,7 @@ pub const Parser = struct {
             .left_parenthesis => try self.parseGroupedExpression(),
             .function => try self.parseFunctionLiteral(true),
             .left_bracket => try self.parseDataStructure(false),
-            .while_loop => try self.parseWhile(),
-            .for_loop => try self.parseFor(),
             .nil => try self.parseNil(),
-            .@"break" => try self.parseBreak(),
-            .@"continue" => try self.parseContinue(),
             .@"enum" => try self.parseEnum(),
             else => return self.fail("Unexpected token", self.current_token.start, .{}),
         };
@@ -1265,7 +1265,7 @@ test "Array index" {
 }
 
 test "Map Literal" {
-    const Type = @import("value.zig").Type;
+    const Type = @import("value.zig").Value.Type;
     const input = "[]string:int{\"foo\": 1, \"bar\": 5}";
     const allocator = testing.allocator;
 
@@ -1306,7 +1306,7 @@ test "While loop" {
 
     testing.expect(tree.nodes.len == 1);
 
-    const loop = tree.nodes[0].expression.value.while_loop;
+    const loop = tree.nodes[0].while_loop;
 
     testing.expect(loop.condition.infix.operator == .less_than);
     testing.expect(loop.block.block_statement.nodes.len == 1);
@@ -1358,7 +1358,7 @@ test "For loop" {
 
     testing.expect(tree.nodes.len == 1);
 
-    const loop = tree.nodes[0].expression.value.for_loop;
+    const loop = tree.nodes[0].for_loop;
 
     testing.expect(loop.index != null);
     testing.expectEqualStrings("x", loop.iter.identifier.value);
@@ -1416,7 +1416,7 @@ test "Enum" {
 }
 
 test "Type definitions" {
-    const Type = @import("value.zig").Type;
+    const Type = @import("value.zig").Value.Type;
 
     const cases = [_][]const u8{
         "fn(x: int, y: int)void{}",

@@ -298,7 +298,7 @@ pub const Compiler = struct {
     }
 
     /// Returns a Luf `Type` based on the given node
-    fn resolveType(self: *Compiler, node: ast.Node) !Type {
+    fn resolveType(self: *Compiler, node: ast.Node) !Value.Type {
         if (node.getType()) |t| return t;
 
         return switch (node) {
@@ -321,7 +321,7 @@ pub const Compiler = struct {
     }
 
     /// Resolves the inner type of a node. i.e. this will return `Type.integer` for a list []int
-    fn resolveScalarType(self: *Compiler, node: ast.Node) Error!Type {
+    fn resolveScalarType(self: *Compiler, node: ast.Node) Error!Value.Type {
         if (node.getInnerType()) |i| return i;
         return switch (node) {
             .identifier => |id| {
@@ -514,9 +514,6 @@ pub const Compiler = struct {
                 // compile the true pong and place the emitted opcodes on the stack
                 try self.compile(if_exp.true_pong);
 
-                // remove potential pop opcode as we continue the expression
-                if (self.instructions.lastIs(.pop)) self.removeLastInst();
-
                 // Add a jump to the stack and return its position
                 const jump_pos = try self.emitReturnPos(Instruction.genPtr(.jump, 0));
 
@@ -525,8 +522,8 @@ pub const Compiler = struct {
 
                 if (if_exp.false_pong) |pong| {
                     try self.compile(pong);
-
-                    if (self.instructions.lastIs(.pop)) self.removeLastInst();
+                    if (self.instructions.lastIs(.pop))
+                        self.removeLastInst();
                 } else
                     try self.emit(Instruction.gen(.load_void));
 
@@ -554,10 +551,10 @@ pub const Compiler = struct {
                         return;
                     } else
                         return self.fail(
-                        "Identifier '{}' has already been declared",
-                        decl.token.start,
-                        .{decl.name.identifier.value},
-                    );
+                            "Identifier '{}' has already been declared",
+                            decl.token.start,
+                            .{decl.name.identifier.value},
+                        );
                 }
                 const symbol = (try self.defineSymbol(decl.name.identifier.value, decl.mutable, node, false)).?;
 
@@ -644,12 +641,6 @@ pub const Compiler = struct {
                     function.token.start,
                     .{},
                 ));
-
-                // if the last instruction is a pop rather than some value
-                // replace it with a normal return statement
-                if (self.instructions.lastIs(.pop)) {
-                    self.instructions.replaceLastOp(.return_value);
-                }
 
                 // if no return_value found, emit a regular return instruction
                 if (!self.instructions.lastIs(.return_value)) try self.emit(Instruction.gen(.@"return"));
@@ -780,16 +771,13 @@ pub const Compiler = struct {
 
                 try self.compile(loop.block);
 
-                try self.emit(Instruction.gen(.pop));
+                const end = try self.emitReturnPos(Instruction.genPtr(.jump, self.scope.id.loop.start));
 
-                try self.emit(Instruction.genPtr(.jump, self.scope.id.loop.start));
-
-                const end = try self.emitReturnPos(Instruction.gen(.pop));
                 // jump to end
-                self.instructions.replacePtr(false_jump, end);
+                self.instructions.replacePtr(false_jump, end + 1);
 
                 for (self.scope.id.loop.breaks.items) |pos| {
-                    self.instructions.list.items[pos].ptr.pos = end;
+                    self.instructions.list.items[pos].ptr.pos = end + 1;
                 }
                 self.exitScope();
             },
@@ -853,6 +841,10 @@ pub const Compiler = struct {
                 for (self.scope.id.loop.breaks.items) |pos| {
                     self.instructions.list.items[pos].ptr.pos = end;
                 }
+
+                // if there's a break, ensure last value is popped
+                if (self.scope.id.loop.breaks.items.len > 0)
+                    try self.emit(Instruction.gen(.pop));
 
                 // point the end jump to last op
                 self.instructions.replacePtr(end_jump, end);
@@ -1249,10 +1241,7 @@ test "Compile AST to bytecode" {
                 .load_true,
                 .jump_false,
                 .load_integer,
-                .pop,
                 .jump,
-                .pop,
-                .pop,
             },
         },
         .{
@@ -1269,6 +1258,24 @@ test "Compile AST to bytecode" {
             .input = "const imp = import(\"examples/to_import.luf\") const x:int = imp.sum(2, 5)",
             .opcodes = &[_]Opcode{},
         },
+        .{
+            .input = "const list = []int{1, 2, 3} list[1] = 10 list[1]",
+            .opcodes = &[_]Opcode{ .load_integer, .load_integer, .load_integer, .make_array, .bind_global, .load_global, .load_integer, .load_integer, .set_by_index, .pop, .load_global, .load_integer, .get_by_index },
+        },
+        .{
+            .input = "mut i = 0 while (i > 10) {i = 10}",
+            .opcodes = &[_]Opcode{
+                .load_integer,
+                .bind_global,
+                .load_global,
+                .load_integer,
+                .greater_than,
+                .jump_false,
+                .load_integer,
+                .assign_global,
+                .jump,
+            },
+        },
     };
 
     inline for (test_cases) |case| {
@@ -1280,7 +1287,7 @@ test "Compile AST to bytecode" {
         };
         defer code.deinit();
 
-        for (case.opcodes) |op, i| {
+        inline for (case.opcodes) |op, i| {
             //std.debug.print("Instr: {}\n", .{code.instructions[i]});
             testing.expectEqual(op, code.instructions[i].getOp());
         }

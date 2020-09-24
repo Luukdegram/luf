@@ -34,11 +34,11 @@ pub fn main() !void {
 
     const size = try file.getEndPos();
 
-    const source = try file.readAllAlloc(allocator, size, size);
+    const source = try file.readToEndAlloc(allocator, size);
     defer allocator.free(source);
 
     const writer = std.io.getStdErr().writer();
-    var vm = luf.Vm.init(allocator);
+    var vm = try luf.Vm.init(allocator);
     defer vm.deinit();
     vm.compileAndRun(source) catch |err| {
         try vm.errors.write(source, writer);
