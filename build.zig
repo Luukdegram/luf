@@ -20,7 +20,6 @@ pub fn build(b: *Builder) void {
 
     var main_tests = b.addTest("src/luf.zig");
     main_tests.setBuildMode(mode);
-    main_tests.setTarget(.{ .os_tag = .windows });
     const test_step = b.step("test", "Run library tests");
     test_step.dependOn(&main_tests.step);
 }
