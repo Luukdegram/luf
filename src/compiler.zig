@@ -574,7 +574,7 @@ pub const Compiler = struct {
                 try self.compile(pair.value);
             },
             .index => |index| {
-                if ((try self.resolveType(index.left)) == .module) {
+                if ((try self.resolveType(index.left)) == .module and index.left == .identifier) {
                     const module_symol = self.resolveSymbol(self.scope, index.left.identifier.value).?;
                     const module_name = module_symol.node.declaration.value.import.value.string_lit.value;
                     if (self.modules.get(module_name)) |module| {
@@ -654,7 +654,7 @@ pub const Compiler = struct {
                     } else if (initial_function_type != .module)
                         call.function.func_lit
                     else blk: {
-                        if (call.function == .index) {
+                        if (call.function == .index and call.function.index.left == .identifier) {
                             // we handle module functions here
                             const function_name = call.function.index.index.string_lit.value;
                             const symbol = self.resolveSymbol(self.scope, call.function.index.left.identifier.value) orelse
@@ -664,22 +664,28 @@ pub const Compiler = struct {
                                 .{call.function.index.left.identifier.value},
                             );
 
-                            const mod = self.modules.get(symbol.node.declaration.value.import.value.string_lit.value).?;
-                            const decl_symbol: Symbol = mod.symbols.get(function_name) orelse
-                                return self.fail("Module does not contain function '{}'", call.function.tokenPos(), .{function_name});
+                            const module_name = symbol.node.declaration.value.import.value.string_lit.value;
+                            if (self.modules.get(module_name)) |mod| {
+                                const decl_symbol: Symbol = mod.symbols.get(function_name) orelse
+                                    return self.fail("Module does not contain function '{}'", call.function.tokenPos(), .{function_name});
 
-                            break :blk decl_symbol.node.declaration.value.func_lit;
-                        } else {
-                            // not a module, so expect a library
-                            for (call.arguments) |arg| {
-                                try self.compile(arg);
+                                break :blk decl_symbol.node.declaration.value.func_lit;
+                            } else {
+                                // check if it's a luf source file or possible library
+                                if (std.mem.endsWith(u8, module_name, ".luf"))
+                                    return self.fail("Module '{}' does not exist", call.token.start, .{module_name});
                             }
-
-                            try self.compile(call.function);
-
-                            // actual function will be on top of stack, due to it being called by index
-                            return self.emit(Instruction.genPtr(.call, @intCast(u32, 0)));
                         }
+
+                        // not a module, so expect a library
+                        for (call.arguments) |arg| {
+                            try self.compile(arg);
+                        }
+
+                        try self.compile(call.function);
+
+                        // actual function will be on top of stack, due to it being called by index
+                        return self.emit(Instruction.genPtr(.call, 0));
                     };
 
                     if (function_node.params.len != call.arguments.len)

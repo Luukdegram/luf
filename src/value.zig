@@ -179,19 +179,18 @@ pub const Value = struct {
             []u8, []const u8 => return String.create(gc, val),
             type => switch (@typeInfo(val)) {
                 .Struct => |info| {
-                    const ret = try gc.newValue(Map, .map);
-                    var map: Map = unwrap(.map).?;
-                    map.value = std.AutoHashMapUnmanaged(*const Value, *Value){};
-                    errdefer map.value.deinit(gc.gpa);
-
                     comptime var decl_count = 0;
                     inline for (info.decls) |decl| {
                         if (decl.is_pub) decl_count += 1;
                     }
 
+                    const ret = try Map.create(gc, decl_count);
+                    const map = ret.toMap();
+                    errdefer ret.destroy(gc.gpa);
+
                     try map.value.ensureCapacity(gc.gpa, decl_count);
 
-                    inline for (indo.decls) |decl| {
+                    inline for (info.decls) |decl| {
                         if (!decl.is_pub) continue;
 
                         const key = try String.create(gc, decl.name);

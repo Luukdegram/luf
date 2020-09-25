@@ -68,11 +68,11 @@ pub const Vm = struct {
         sp: usize,
     };
 
-    /// Creates a new `Vm`
+    /// Creates a new `Vm` and adds Luf's standard library to the virtual machine
     pub fn init(allocator: *Allocator) !Vm {
         const gc = try allocator.create(Gc);
         gc.* = Gc.init(allocator);
-        return Vm{
+        var vm = Vm{
             .globals = std.ArrayList(*Value).init(allocator),
             .call_stack = CallStack.init(allocator),
             .allocator = allocator,
@@ -82,6 +82,10 @@ pub const Vm = struct {
             .libs = std.StringHashMapUnmanaged(*Value){},
             .gc = gc,
         };
+
+        try vm.libs.putNoClobber(allocator, "std", try Value.fromZig(gc, @import("std/std.zig")));
+
+        return vm;
     }
 
     /// Frees all memory allocated by the `Vm`.
@@ -775,7 +779,7 @@ pub const Vm = struct {
 
                 const lib = self.libs.get(mod) orelse return self.fail("Library does not exist");
 
-                const value = if (!lib.isType(.map))
+                const value: *Value = if (!lib.isType(.map))
                     lib
                 else
                     lib.toMap().value.get(index) orelse return self.fail("Library x does not have member y");
@@ -827,7 +831,8 @@ pub const Vm = struct {
 
         if (val.isType(.native) or val.isType(.module)) return self.execNativeFuncCall();
 
-        if (val.l_type != .function) return;
+        if (val.l_type != .function)
+            return self.fail("Unknown symbol for function call");
 
         if (arg_len != val.toFunction().arg_len) return self.fail("Mismatching argument length");
 
@@ -1433,5 +1438,17 @@ test "Zig from Luf" {
     defer vm.deinit();
     try vm.compileAndRun(input);
     testing.expectEqual(@as(i64, 7), vm.peek().toInteger().value);
+    testing.expectEqual(@as(usize, 0), vm.sp);
+}
+
+test "Luf std" {
+    const input =
+        \\const std = import("std")
+        \\std.math.log(10, 2)
+    ;
+    var vm = try Vm.init(testing.allocator);
+    defer vm.deinit();
+    try vm.compileAndRun(input);
+    testing.expectEqual(@as(i64, 3), vm.peek().toInteger().value);
     testing.expectEqual(@as(usize, 0), vm.sp);
 }

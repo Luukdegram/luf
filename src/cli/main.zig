@@ -21,8 +21,7 @@ pub fn main() !void {
     const file_path = if (args.len >= 3) args[2] else return log.err("Missing file path: 'luf {} <file_path>'\n", .{action});
 
     if (std.mem.eql(u8, action, "run")) {
-        try runner(gpa, file_path);
-        return;
+        return runner(gpa, file_path);
     }
 
     var i: usize = 0;
@@ -75,8 +74,7 @@ fn runner(gpa: *std.mem.Allocator, file_path: []const u8) !void {
     }
 
     var byte_code = luf.byte_code.ByteCode.decodeFromStream(gpa, file.reader()) catch |err| {
-        log.err("Could not decode bytecode: {}\n", .{@errorName(err)});
-        return err;
+        return log.err("Could not decode bytecode: {}\n", .{@errorName(err)});
     };
     defer byte_code.deinit();
 
@@ -92,7 +90,7 @@ fn builder(gpa: *std.mem.Allocator, file_path: []const u8, output_name: ?[]const
         return log.err("Expected file with luf extension: '.luf' in path '{}'\n", .{file_path});
 
     const file = std.fs.cwd().openFile(file_path, .{}) catch |err| {
-        return log.err("Could not open file with path '{}'\nError recieved: {}\n", .{ file_path, err });
+        return log.err("Could not open file with path '{}'\nError recieved: {}\n", .{ file_path, @errorName(err) });
     };
 
     const source = try file.readToEndAlloc(gpa, std.math.maxInt(u64));
@@ -101,7 +99,7 @@ fn builder(gpa: *std.mem.Allocator, file_path: []const u8, output_name: ?[]const
     var errors = luf.Errors.init(gpa);
     defer errors.deinit();
 
-    var byte_code = luf.compiler.compile(gpa, source, &errors) catch |err| {
+    var byte_code = luf.compiler.compile(gpa, source, &errors) catch |_| {
         return errors.write(source, std.io.getStdErr().writer());
     };
     defer byte_code.deinit();
@@ -117,10 +115,10 @@ fn builder(gpa: *std.mem.Allocator, file_path: []const u8, output_name: ?[]const
     defer if (output_name == null) gpa.free(final_output_name);
 
     const output_file = std.fs.cwd().createFile(final_output_name, .{}) catch |err| {
-        return log.err("Could not create output file '{}'\nError '{}'\n", .{ final_output_name, err });
+        return log.err("Could not create output file '{}'\nError '{}'\n", .{ final_output_name, @errorName(err) });
     };
 
     byte_code.encodeToStream(output_file.writer()) catch |err| {
-        return log.err("Could not write to output file '{}'\nError '{}'\n", .{ final_output_name, err });
+        return log.err("Could not write to output file '{}'\nError '{}'\n", .{ final_output_name, @errorName(err) });
     };
 }

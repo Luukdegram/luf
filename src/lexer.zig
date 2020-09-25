@@ -203,7 +203,6 @@ pub const Lexer = struct {
 
     /// Reads a string from the current character
     fn readString(self: *Lexer) void {
-        self.readChar(); // skip initial "
         while (self.char != '"' and self.char != 0)
             self.readChar();
     }
