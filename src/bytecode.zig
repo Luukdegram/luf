@@ -7,7 +7,6 @@ pub const Opcode = enum(u8) {
     load_integer = 0,
     load_string = 1,
     load_func = 2,
-    load_const = 3, //deprecated
     load_true = 4,
     load_false = 5,
     load_nil = 6,

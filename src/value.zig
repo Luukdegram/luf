@@ -89,53 +89,63 @@ pub const Value = struct {
     };
 
     /// Unwraps the `Value` into the actual Type
+    /// Returns null if Value is of different type
     pub fn unwrap(self: *Value, comptime l_type: Type) ?*l_type.LufType() {
         if (self.l_type != l_type) return null;
 
         return @fieldParentPtr(l_type.LufType(), "base", self);
     }
 
-    /// Assures the type of `Value` is `String`
+    /// Casts `Value` to `String`
+    /// User must ensure Value contains correct type
     pub fn toString(self: *Value) *String {
         return @fieldParentPtr(String, "base", self);
     }
 
-    /// Assures the type of `Value` is `Integer`
+    /// Casts `Value` to `Integer`
+    /// User must ensure Value contains correct type
     pub fn toInteger(self: *Value) *Integer {
         return @fieldParentPtr(Integer, "base", self);
     }
 
-    /// Assures the type of `Value` is `Boolean`
+    /// Casts `Value` to `Boolean`
+    /// User must ensure Value contains correct type
     pub fn toBool(self: *Value) *Boolean {
         return @fieldParentPtr(Boolean, "base", self);
     }
 
-    /// Assures the type of `Value` is `List`
+    /// Casts `Value` to `List`
+    /// User must ensure Value contains correct type
     pub fn toList(self: *Value) *List {
         return @fieldParentPtr(List, "base", self);
     }
 
-    /// Assures the type of `Value` is `Map`
+    /// Casts `Value` to `Map`
+    /// User must ensure Value contains correct type
     pub fn toMap(self: *Value) *Map {
         return @fieldParentPtr(Map, "base", self);
     }
 
-    /// Assures the type of `Value` is `Function`
+    /// Casts `Value` to `Native`
+    /// User must ensure Value contains correct type
     pub fn toFunction(self: *Value) *Function {
         return @fieldParentPtr(Function, "base", self);
     }
 
-    /// Assures the type of `Value` is `Native`
+    /// Casts `Value` to `Native`
+    /// User must ensure Value contains correct type
     pub fn toNative(self: *Value) *Native {
         return @fieldParentPtr(Native, "base", self);
     }
 
-    /// Assures the type of `Value` is `Range`
+    /// Casts `Value` to `Range`
+    /// User must ensure Value contains correct type
     pub fn toRange(self: *Value) *Range {
         return @fieldParentPtr(Range, "base", self);
     }
 
-    /// Assures the type of `Value` is `Enum`
+    /// Casts `Value` to `Enum`
+    /// User must ensure Value contains correct type
     pub fn toEnum(self: *Value) *Enum {
         return @fieldParentPtr(Enum, "base", self);
     }
@@ -146,18 +156,20 @@ pub const Value = struct {
     }
 
     /// Returns the `Value` as a Zig type
-    /// TODO, make it an error when the Luf `Value` is not the corresponding type
-    pub fn toZig(self: *Value, comptime T: type) T {
+    /// `error.InvalidType` is returned when `Value` cannot be coerced to the given
+    /// Zig type
+    pub fn toZig(self: *Value, comptime T: type) error{InvalidType}!T {
         return switch (T) {
             void => {},
-            bool => self.toBool().value,
-            []const u8 => self.toString().value,
-            *Map, *const Map => self.toMap().value,
+            bool => if (self.unwrap(.boolean)) |b| b.value else error.InvalidType,
+            []const u8 => if (self.unwrap(.string)) |s| s.value else error.InvalidType,
+            *Map, *const Map => if (self.unwrap(.map)) |map| map.value else error.InvalidType,
             *Value, *const Value => self,
             Value => self.*,
             else => switch (@typeInfo(T)) {
-                .Int => @intCast(T, self.toInteger().value),
-                .Enum => @intToEnum(T, self.toInteger().value),
+                .Null => if (self.unwrap(.nil)) |nil| null else error.InvalidType,
+                .Int => @intCast(T, if (self.unwrap(.integer)) |int| int.value else return error.InvalidType),
+                .Enum => @intToEnum(T, if (self.unwrap(.integer)) |int| int.value else return error.InvalidType),
                 else => @compileError("TODO add support for type: " ++ @typeName(T)),
             },
         };
@@ -240,7 +252,7 @@ pub const Value = struct {
                             var tuple: ArgsTuple = undefined;
                             comptime var i = 0;
                             inline while (i < args_len) : (i += 1) {
-                                tuple[i] = args[i].toZig(Fn.args[i].arg_type.?);
+                                tuple[i] = try args[i].toZig(Fn.args[i].arg_type.?);
                             }
 
                             return fromZig(_gc, @call(.{}, innerFunc, tuple));
@@ -280,7 +292,6 @@ pub const Value = struct {
     /// Frees all memory of the `Value`.
     /// NOTE, for lists/maps it only frees the list/map itself, not the values it contains
     pub fn destroy(self: *Value, gpa: *Allocator) void {
-        //std.debug.print("Destroying object: {}\n", .{self.*});
         switch (self.l_type) {
             .integer => self.toInteger().destroy(gpa),
             .boolean => self.toBool().destroy(gpa),

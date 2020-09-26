@@ -265,7 +265,7 @@ pub const Compiler = struct {
     fn defineSymbol(self: *Compiler, name: []const u8, mutable: bool, node: ast.Node, forward_declared: bool) !?Symbol {
         const index: ?u16 = if (self.scope.id == .global or self.scope.id == .module) self.gc else null;
         if (try self.scope.define(name, mutable, node, forward_declared, index)) |symbol| {
-            self.gc += 1;
+            if (index != null) self.gc += 1;
             return symbol;
         } else return null;
     }

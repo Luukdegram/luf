@@ -1,11 +1,12 @@
 const std = @import("std");
 const luf = @import("luf");
+const log = std.log.scoped(.luf_example);
 
 const example = @import("build_options").example;
 
 pub fn main() !void {
     if (example == null)
-        return std.debug.print(
+        return log.info(
             "No example was provided, use -Dexample=example_name to run an example",
             .{},
         );
@@ -28,7 +29,7 @@ pub fn main() !void {
     defer allocator.free(example_file);
 
     const file = std.fs.cwd().openFile(example_file, .{}) catch |_| {
-        return std.debug.print("Example does not exist", .{});
+        return log.err("Example does not exist", .{});
     };
     defer file.close();
 
