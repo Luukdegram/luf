@@ -1,0 +1,43 @@
+{
+    "name": "luf",
+    "displayName": "Luf",
+    "description": "Syntax highlighting for the Luf programming language",
+    "version": "0.1.1",
+    "publisher": "luukdegram",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/Luukdegram/luf",
+        "directory": "editors/vscode"
+    },
+    "bugs": {
+        "url": "https://github.com/Luukdegram/issues"
+    },
+    "engines": {
+        "vscode": "^1.22.0"
+    },
+    "categories": [
+        "Programming Languages"
+    ],
+    "contributes": {
+        "languages": [
+            {
+                "id": "luf",
+                "aliases": [
+                    "Luf"
+                ],
+                "extensions": [
+                    ".luf"
+                ],
+                "configuration": "./language-configuration.json"
+            }
+        ],
+        "grammars": [
+            {
+                "language": "luf",
+                "scopeName": "source.luf",
+                "path": "./luf.tmLanguage.json"
+            }
+        ]
+    },
+    "homepage": "https://github.com/Luukdegram/luf"
+}

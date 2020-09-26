@@ -1,0 +1,251 @@
+{
+    "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+    "name": "Luf",
+    "scopeName": "source.luf",
+    "fileTypes": [
+        "luf"
+    ],
+    "patterns": [
+        {
+            "include": "#comments"
+        },
+        {
+            "include": "#strings"
+        },
+        {
+            "include": "#keywords"
+        },
+        {
+            "include": "#operators"
+        },
+        {
+            "include": "#numbers"
+        },
+        {
+            "include": "#support"
+        },
+        {
+            "include": "#variables"
+        }
+    ],
+    "repository": {
+        "variables": {
+            "patterns": [
+                {
+                    "name": "meta.function.declaration.luf",
+                    "patterns": [
+                        {
+                            "match": "\\b(fn)\\s+([A-Z][a-zA-Z0-9]*)\\b",
+                            "captures": {
+                                "1": {
+                                    "name": "storage.type.function.luf"
+                                },
+                                "2": {
+                                    "name": "entity.name.type.luf"
+                                }
+                            }
+                        },
+                        {
+                            "match": "\\b(fn)\\s+([_a-zA-Z][_a-zA-Z0-9]*)\\b",
+                            "captures": {
+                                "1": {
+                                    "name": "storage.type.function.luf"
+                                },
+                                "2": {
+                                    "name": "entity.name.function.luf"
+                                }
+                            }
+                        },
+                        {
+                            "begin": "\\b(fn)\\s+@\"",
+                            "end": "\"",
+                            "name": "entity.name.function.luf",
+                            "beginCaptures": {
+                                "1": {
+                                    "name": "storage.type.function.luf"
+                                }
+                            },
+                            "patterns": [
+                                {
+                                    "include": "#stringcontent"
+                                }
+                            ]
+                        },
+                        {
+                            "name": "keyword.default.luf",
+                            "match": "\\b(const|mut|fn)\\b"
+                        }
+                    ]
+                },
+                {
+                    "name": "meta.function.call.luf",
+                    "patterns": [
+                        {
+                            "match": "([A-Z][a-zA-Z0-9]*)(?=\\s*\\()",
+                            "name": "entity.name.type.luf"
+                        },
+                        {
+                            "match": "([_a-zA-Z][_a-zA-Z0-9]*)(?=\\s*\\()",
+                            "name": "entity.name.function.luf"
+                        }
+                    ]
+                },
+                {
+                    "name": "meta.variable.luf",
+                    "patterns": [
+                        {
+                            "match": "\\b[_A-Z][_A-Z0-9]+\\b",
+                            "name": "variable.constant.luf"
+                        },
+                        {
+                            "match": "\\b[_a-zA-Z][_a-zA-Z0-9]*_t\\b",
+                            "name": "entity.name.type.luf"
+                        },
+                        {
+                            "match": "\\b[A-Z][a-zA-Z0-9]*\\b",
+                            "name": "entity.name.type.luf"
+                        },
+                        {
+                            "match": "\\b[_a-zA-Z][_a-zA-Z0-9]*\\b",
+                            "name": "variable.luf"
+                        },
+                        {
+                            "begin": "@\"",
+                            "end": "\"",
+                            "name": "variable.luf",
+                            "patterns": [
+                                {
+                                    "include": "#stringcontent"
+                                }
+                            ]
+                        }
+                    ]
+                }
+            ]
+        },
+        "keywords": {
+            "patterns": [
+                {
+                    "match": "\\b(while|for)\\b",
+                    "name": "keyword.control.repeat.luf"
+                },
+                {
+                    "name": "keyword.structure.luf",
+                    "match": "\\b(enum|import)\\b"
+                },
+                {
+                    "name": "keyword.control.flow.luf",
+                    "match": "\\b(break|return|continue)\\b"
+                },
+                {
+                    "name": "keyword.control.conditional.luf",
+                    "match": "\\b(if|else|switch)\\b"
+                },
+                {
+                    "name": "keyword.constant.default.luf",
+                    "match": "\\b(nil)\\b"
+                },
+                {
+                    "name": "keyword.constant.bool.luf",
+                    "match": "\\b(true|false)\\b"
+                },
+                {
+                    "name": "keyword.default.luf",
+                    "match": "\\b(and|or)\\b"
+                },
+                {
+                    "name": "keyword.type.luf",
+                    "match": "\\b(bool|void|int|string)\\b"
+                }
+            ]
+        },
+        "operators": {
+            "patterns": [
+                {
+                    "name": "keyword.operator.comparison.luf",
+                    "match": "(\\b(and|or)\\b)|(==|!=)"
+                },
+                {
+                    "name": "keyword.operator.arithmetic.luf",
+                    "match": "(-%?|\\+%?|\\*%?|/|%)=?"
+                },
+                {
+                    "name": "keyword.operator.bitwise.luf",
+                    "match": "(<<%?|>>|!|&|\\^|\\|)=?"
+                }
+            ]
+        },
+        "comments": {
+            "patterns": [
+                {
+                    "name": "comment.line.double-slash.luf",
+                    "begin": "//",
+                    "end": "$",
+                    "patterns": [
+                        {
+                            "include": "#commentContents"
+                        }
+                    ]
+                }
+            ]
+        },
+        "commentContents": {
+            "patterns": [
+                {
+                    "match": "\\b(TODO|FIXME|XXX|NOTE)\\b:?",
+                    "name": "keyword.todo.luf"
+                }
+            ]
+        },
+        "strings": {
+            "patterns": [
+                {
+                    "name": "string.quoted.double.luf",
+                    "begin": "\"",
+                    "end": "\"",
+                    "patterns": [
+                        {
+                            "include": "#stringcontent"
+                        }
+                    ]
+                }
+            ]
+        },
+        "stringcontent": {
+            "patterns": [
+                {
+                    "name": "constant.character.escape.lola",
+                    "match": "\\\\([nrt'\"\\\\]|(x[0-9a-fA-F]{2}))"
+                },
+                {
+                    "name": "invalid.illegal.unrecognized-string-escape.lola",
+                    "match": "\\\\."
+                }
+            ]
+        },
+        "numbers": {
+            "patterns": [
+                {
+                    "name": "constant.numeric.float.luf",
+                    "match": "\\b[0-9][0-9_]*(\\.[0-9][0-9_]*)?([eE][+-]?[0-9_]+)?\\b"
+                },
+                {
+                    "name": "constant.numeric.decimal.luf",
+                    "match": "\\b[0-9][0-9_]*\\b"
+                },
+                {
+                    "name": "constant.numeric.hexadecimal.luf",
+                    "match": "\\b0x[a-fA-F0-9_]+\\b"
+                },
+                {
+                    "name": "constant.numeric.octal.luf",
+                    "match": "\\b0o[0-7_]+\\b"
+                },
+                {
+                    "name": "constant.numeric.binary.luf",
+                    "match": "\\b0b[01_]+\\b"
+                }
+            ]
+        }
+    }
+}

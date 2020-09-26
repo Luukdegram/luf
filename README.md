@@ -35,6 +35,6 @@ zig build test
 
 ## Editor support
 
-As of yet, no editor support has been implemented, but VS Code will be the primary target as that is what I'm currently using. Other possible targets are Vim and Kakoune.
+Currently there's support for syntax highlighting for vscode, which can be found [here](editors/vscode).
 
 
