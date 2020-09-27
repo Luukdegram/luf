@@ -13,12 +13,10 @@ pub const Value = struct {
     next: ?*Value = null,
 
     /// Global True value, saves memory by having it as a globally available 'constant'
-    pub var True = _true.base;
-    const _true = Boolean{ .base = .{ .l_type = .boolean }, .value = true };
+    pub var True = Boolean{ .base = .{ .l_type = .boolean }, .value = true };
 
     /// Global False value, saves memory by having it as a globally available 'constant'
-    pub var False = _false.base;
-    const _false = Boolean{ .base = .{ .l_type = .boolean }, .value = false };
+    pub var False = Boolean{ .base = .{ .l_type = .boolean }, .value = false };
 
     /// Global void value, saves memory by having it as a globally available 'constant'
     pub var Void = Value{ .l_type = ._void };
@@ -36,7 +34,6 @@ pub const Value = struct {
         boolean,
         string,
         nil,
-        _return,
         function,
         list,
         map,
@@ -53,8 +50,7 @@ pub const Value = struct {
                 .integer => Integer,
                 .boolean => Boolean,
                 .string => String,
-                .nil => void,
-                ._return => ReturnValue,
+                .nil => @TypeOf(null),
                 .function => Function,
                 .list => List,
                 .map => Map,
@@ -74,7 +70,6 @@ pub const Value = struct {
                 Integer => .integer,
                 Boolean => .boolean,
                 String => .string,
-                ReturnValue => ._return,
                 Function => .function,
                 List => .list,
                 Map => .map,
@@ -150,6 +145,18 @@ pub const Value = struct {
         return @fieldParentPtr(Enum, "base", self);
     }
 
+    /// Casts `Value` to `Iterable`
+    /// User must ensure Value contains correct type
+    pub fn toIterable(self: *Value) *Iterable {
+        return @fieldParentPtr(Iterable, "base", self);
+    }
+
+    /// Casts `Value` to `Module`
+    /// User must ensure Value contains correct type
+    pub fn toModule(self: *Value) *Module {
+        return @fieldParentPtr(Module, "base", self);
+    }
+
     /// Returns true if the `Type` of the given `Value` is equal
     pub fn isType(self: *const Value, tag: Type) bool {
         return self.l_type == tag;
@@ -187,7 +194,7 @@ pub const Value = struct {
                 ret.* = val;
                 return val;
             },
-            bool => return Boolean.create(gc, val),
+            bool => return if (val) &Value.True.base else &Value.False.base,
             []u8, []const u8 => return String.create(gc, val),
             type => switch (@typeInfo(val)) {
                 .Struct => |info| {
@@ -261,20 +268,22 @@ pub const Value = struct {
                     // set innerFunc as we cannot access `val` from inside
                     Func.innerFunc = val;
 
-                    const ret = try gc.newValue(Native);
-                    const native = ret.toNative();
-                    native.func = Func.call;
-                    native.arg_len = Fn.args.len;
-
-                    return ret;
+                    return try gc.newValue(
+                        Native,
+                        .{
+                            .base = undefined,
+                            .func = Func.call,
+                            .arg_len = Fn.args.len,
+                        },
+                    );
                 },
-                .ComptimeInt, .Int => return Integer.create(gc, val),
+                .ComptimeInt, .Int => return Integer.create(gc, @intCast(i64, val)),
                 .Pointer => |info| switch (@typeInfo(info.child)) {
                     .Array => |array_info| switch (array_info.child) {
                         u8 => return String.create(gc, val),
                         else => {
-                            const ret = Value.List.create(gc, array_info.len);
-                            for (list.value.items) |*item, i| {
+                            const ret = try Value.List.create(gc, array_info.len);
+                            for (ret.toList().value.items) |*item, i| {
                                 item.* = try fromZig(gc, val[i]);
                             }
 
@@ -294,17 +303,16 @@ pub const Value = struct {
     pub fn destroy(self: *Value, gpa: *Allocator) void {
         switch (self.l_type) {
             .integer => self.toInteger().destroy(gpa),
-            .boolean => self.toBool().destroy(gpa),
             .string => self.toString().destroy(gpa),
             .function => self.toFunction().destroy(gpa),
             .list => self.toList().destroy(gpa),
             .map => self.toMap().destroy(gpa),
-            .module => self.unwrap(.module).?.destroy(gpa),
-            .iterable => self.unwrap(.iterable).?.destroy(gpa),
+            .module => self.toModule().destroy(gpa),
+            .iterable => self.toIterable().destroy(gpa),
             .range => self.toRange().destroy(gpa),
             ._enum => self.toEnum().destroy(gpa),
             .native => self.toNative().destroy(gpa),
-            else => unreachable,
+            else => {},
         }
     }
 
@@ -315,11 +323,13 @@ pub const Value = struct {
         /// Creates a new `Integer` using the given `val`. Returns
         /// the pointer to its `Value`
         pub fn create(gc: *GarbageCollector, val: i64) !*Value {
-            const value = try gc.newValue(Integer);
-            const int = value.toInteger();
-            int.value = val;
-
-            return &int.base;
+            return try gc.newValue(
+                Integer,
+                .{
+                    .base = undefined,
+                    .value = val,
+                },
+            );
         }
 
         pub fn destroy(self: *Integer, gpa: *Allocator) void {
@@ -330,20 +340,6 @@ pub const Value = struct {
     pub const Boolean = struct {
         base: Value,
         value: bool,
-
-        /// Creates a new `Boolean` using the given `val`. Returns
-        /// the pointer to its `Value`
-        pub fn create(gc: *GarbageCollector, val: bool) !*Value {
-            const value = try gc.newValue(Boolean);
-            const boolean = value.toBool();
-            boolean.value = val;
-
-            return &boolean.base;
-        }
-
-        pub fn destroy(self: *Boolean, gpa: *Allocator) void {
-            gpa.destroy(self);
-        }
     };
 
     pub const String = struct {
@@ -353,10 +349,13 @@ pub const Value = struct {
         /// Creates a new `Integer` using the given `val`. Returns
         /// the pointer to its `Value`
         pub fn create(gc: *GarbageCollector, val: []const u8) !*Value {
-            const value = try gc.newValue(String);
-            const string = value.toString();
-            string.value = try gc.gpa.dupe(u8, val);
-            return &string.base;
+            return try gc.newValue(
+                String,
+                .{
+                    .base = undefined,
+                    .value = try gc.gpa.dupe(u8, val),
+                },
+            );
         }
 
         /// Copies the value of `other` into `self`
@@ -378,11 +377,13 @@ pub const Value = struct {
         value: []const u8,
 
         pub fn create(gc: *GarbageCollector, val: []const u8) !*Value {
-            const value = try gc.newValue(Module);
-            const self = value.unwrap(.module).?;
-            self.value = try gc.gpa.dupe(u8, val);
-
-            return &self.base;
+            return try gc.newValue(
+                Module,
+                .{
+                    .base = undefined,
+                    .value = try gc.gpa.dupe(u8, val),
+                },
+            );
         }
 
         pub fn destroy(self: *Module, gpa: *Allocator) void {
@@ -412,14 +413,17 @@ pub const Value = struct {
             arg_len: usize,
             entry_point: usize,
         ) !*Value {
-            const value = try gc.newValue(Function);
-            const function = value.toFunction();
-            function.arg_len = arg_len;
-            function.locals = locals;
-            function.name = if (name) |n| try gc.gpa.dupe(u8, n) else null;
-            function.entry = entry_point;
-
-            return &function.base;
+            const n = if (name) |n| try gc.gpa.dupe(u8, n) else null;
+            return try gc.newValue(
+                Function,
+                .{
+                    .base = undefined,
+                    .arg_len = arg_len,
+                    .locals = locals,
+                    .name = n,
+                    .entry = entry_point,
+                },
+            );
         }
 
         pub fn destroy(self: *Function, gpa: *Allocator) void {
@@ -435,12 +439,13 @@ pub const Value = struct {
         pub const ListType = std.ArrayListUnmanaged(*Value);
 
         pub fn create(gc: *GarbageCollector, len: ?usize) !*Value {
-            const ret = try gc.newValue(List);
-            const self = ret.toList();
-            self.value = ListType{};
+            var self = List{
+                .base = undefined,
+                .value = ListType{},
+            };
 
             if (len) |n| try self.value.resize(gc.gpa, n);
-            return ret;
+            return try gc.newValue(List, self);
         }
 
         pub fn destroy(self: *List, gpa: *Allocator) void {
@@ -456,12 +461,13 @@ pub const Value = struct {
         pub const MapType = std.ArrayHashMapUnmanaged(*Value, *Value, hash, eql, true);
 
         pub fn create(gc: *GarbageCollector, len: ?usize) !*Value {
-            const ret = try gc.newValue(Map);
-            const self = ret.toMap();
-            self.value = MapType{};
+            var self = Map{
+                .base = undefined,
+                .value = MapType{},
+            };
 
             if (len) |n| try self.value.ensureCapacity(gc.gpa, n);
-            return ret;
+            return try gc.newValue(Map, self);
         }
 
         pub fn destroy(self: *Map, gpa: *Allocator) void {
@@ -486,12 +492,14 @@ pub const Value = struct {
         end: i64,
 
         pub fn create(gc: *GarbageCollector, start: i64, end: i64) !*Value {
-            const ret = try gc.newValue(Range);
-            const range = ret.toRange();
-            range.start = start;
-            range.end = end;
-
-            return ret;
+            return try gc.newValue(
+                Range,
+                .{
+                    .base = undefined,
+                    .start = start,
+                    .end = end,
+                },
+            );
         }
 
         pub fn destroy(self: *Range, gpa: *Allocator) void {
@@ -504,10 +512,10 @@ pub const Value = struct {
         value: [][]const u8,
 
         pub fn create(gc: *GarbageCollector, enums: [][]const u8) !*Value {
-            const ret = try gc.newValue(Enum);
-            const enm = ret.toEnum();
-            enm.value = enums;
-            return ret;
+            return try gc.newValue(
+                Enum,
+                .{ .base = undefined, .value = enums },
+            );
         }
 
         pub fn destroy(self: *Enum, gpa: *Allocator) void {
@@ -523,12 +531,15 @@ pub const Value = struct {
         value: *Value,
 
         pub fn create(gc: *GarbageCollector, expose: bool, index: usize, value: *Value) !*Value {
-            const ret = try gc.newValue(Iterable);
-            const it = ret.unwrap(.iterable).?;
-            it.expose_index = expose;
-            it.index = index;
-            it.value = value;
-            return ret;
+            return try gc.newValue(
+                Iterable,
+                .{
+                    .base = undefined,
+                    .expose_index = expose,
+                    .index = index,
+                    .value = value,
+                },
+            );
         }
 
         pub fn destroy(self: *Iterable, gpa: *Allocator) void {
