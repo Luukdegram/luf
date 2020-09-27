@@ -39,12 +39,7 @@ pub const GarbageCollector = struct {
         const typed = try self.gpa.create(T);
 
         typed.* = val;
-
-        typed.base = Value{
-            .l_type = Value.Type.fromType(T),
-            .next = self.stack,
-            .is_marked = false,
-        };
+        typed.base.next = self.stack;
 
         self.stack = &typed.base;
 
@@ -52,7 +47,11 @@ pub const GarbageCollector = struct {
         // direct access to the bytes being allocated, which will also allow tracking
         // of other allocations such as strings, lists, etc
         self.newly_allocated += @sizeOf(T);
-        if (self.newly_allocated >= self.trigger_size) self.markAndSweep();
+        if (self.newly_allocated >= self.trigger_size) {
+            //also mark currently created so it doesn't get sweeped instantly
+            typed.base.is_marked = true;
+            self.markAndSweep();
+        }
 
         return &typed.base;
     }
@@ -60,7 +59,7 @@ pub const GarbageCollector = struct {
     /// Marks an object so it will not be sweeped by the gc.
     pub fn mark(self: *GarbageCollector, val: *Value) void {
         if (val.is_marked) return;
-        std.debug.print("marked: {} {}\n", .{ @ptrToInt(val), val.l_type });
+        //std.debug.print("marked: {} {}\n", .{ @ptrToInt(val), val.l_type });
 
         val.is_marked = true;
         switch (val.l_type) {
@@ -90,7 +89,7 @@ pub const GarbageCollector = struct {
             } else {
                 val.is_marked = false;
                 prev = val;
-                std.debug.print("unmarking: {}\n", .{@ptrToInt(val)});
+                //std.debug.print("unmarking: {}\n", .{@ptrToInt(val)});
             }
         }
     }
@@ -98,9 +97,9 @@ pub const GarbageCollector = struct {
     /// Finds all referenced values in the vm, marks them and finally sweeps unreferenced values
     fn markAndSweep(self: *GarbageCollector) void {
         for (self.vm.globals.items) |global| self.mark(global);
-        for (self.vm.stack[0..self.vm.sp]) |stack| self.mark(stack);
+        for (self.vm.call_stack.items) |cs| if (cs.fp) |func| self.mark(func);
+        for (self.vm.locals.items) |local| self.mark(local);
 
-        std.debug.print("Sweep at sp: {}\n", .{self.vm.sp});
         //self.sweep();
         self.newly_allocated = 0;
     }

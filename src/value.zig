@@ -271,7 +271,7 @@ pub const Value = struct {
                     return try gc.newValue(
                         Native,
                         .{
-                            .base = undefined,
+                            .base = .{ .l_type = .native, .next = null, .is_marked = false },
                             .func = Func.call,
                             .arg_len = Fn.args.len,
                         },
@@ -326,7 +326,7 @@ pub const Value = struct {
             return try gc.newValue(
                 Integer,
                 .{
-                    .base = undefined,
+                    .base = .{ .l_type = .integer, .next = null, .is_marked = false },
                     .value = val,
                 },
             );
@@ -352,7 +352,7 @@ pub const Value = struct {
             return try gc.newValue(
                 String,
                 .{
-                    .base = undefined,
+                    .base = .{ .l_type = .string, .next = null, .is_marked = false },
                     .value = try gc.gpa.dupe(u8, val),
                 },
             );
@@ -380,7 +380,7 @@ pub const Value = struct {
             return try gc.newValue(
                 Module,
                 .{
-                    .base = undefined,
+                    .base = .{ .l_type = .module, .next = null, .is_marked = false },
                     .value = try gc.gpa.dupe(u8, val),
                 },
             );
@@ -417,7 +417,7 @@ pub const Value = struct {
             return try gc.newValue(
                 Function,
                 .{
-                    .base = undefined,
+                    .base = .{ .l_type = .function, .next = null, .is_marked = false },
                     .arg_len = arg_len,
                     .locals = locals,
                     .name = n,
@@ -440,11 +440,11 @@ pub const Value = struct {
 
         pub fn create(gc: *GarbageCollector, len: ?usize) !*Value {
             var self = List{
-                .base = undefined,
+                .base = .{ .l_type = .list, .next = null, .is_marked = false },
                 .value = ListType{},
             };
 
-            if (len) |n| try self.value.resize(gc.gpa, n);
+            if (len) |n| try self.value.ensureCapacity(gc.gpa, n);
             return try gc.newValue(List, self);
         }
 
@@ -462,7 +462,7 @@ pub const Value = struct {
 
         pub fn create(gc: *GarbageCollector, len: ?usize) !*Value {
             var self = Map{
-                .base = undefined,
+                .base = .{ .l_type = .map, .next = null, .is_marked = false },
                 .value = MapType{},
             };
 
@@ -495,7 +495,7 @@ pub const Value = struct {
             return try gc.newValue(
                 Range,
                 .{
-                    .base = undefined,
+                    .base = .{ .l_type = .range, .next = null, .is_marked = false },
                     .start = start,
                     .end = end,
                 },
@@ -514,7 +514,10 @@ pub const Value = struct {
         pub fn create(gc: *GarbageCollector, enums: [][]const u8) !*Value {
             return try gc.newValue(
                 Enum,
-                .{ .base = undefined, .value = enums },
+                .{
+                    .base = .{ .l_type = ._enum, .next = null, .is_marked = false },
+                    .value = enums,
+                },
             );
         }
 
@@ -534,7 +537,7 @@ pub const Value = struct {
             return try gc.newValue(
                 Iterable,
                 .{
-                    .base = undefined,
+                    .base = .{ .l_type = .iterable, .next = null, .is_marked = false },
                     .expose_index = expose,
                     .index = index,
                     .value = value,

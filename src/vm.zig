@@ -30,6 +30,8 @@ pub const Vm = struct {
     /// values but its functions
     globals: std.ArrayList(*Value),
 
+    locals: std.ArrayList(*Value),
+
     /// Call stack that contains the instruction and stack pointer, as well as the instructions
     /// to run the stack
     call_stack: CallStack,
@@ -60,11 +62,9 @@ pub const Vm = struct {
     /// Function `Frame` on the callstack
     const Frame = struct {
         /// Frame pointer which contains the actual function `Value`, which is used to check for tail recursion
-        fp: ?*const Value,
+        fp: ?*Value,
         /// `Instruction` pointer to the position of the function in the bytecode's instruction set
         ip: usize,
-        /// Stack pointer of the current scope. Used to load function locals onto the stack
-        sp: usize,
     };
 
     /// Creates a new `Vm` and adds Luf's standard library to the virtual machine
@@ -82,6 +82,7 @@ pub const Vm = struct {
             .code = null,
             .libs = std.StringArrayHashMapUnmanaged(*Value){},
             .gc = gc,
+            .locals = std.ArrayList(*Value).init(allocator),
         };
         gc.vm = vm;
 
@@ -98,6 +99,7 @@ pub const Vm = struct {
         self.errors.deinit();
         self.libs.deinit(self.allocator);
         self.gc.deinit();
+        self.locals.deinit();
         self.allocator.destroy(self.gc);
         self.allocator.destroy(self);
     }
@@ -129,16 +131,16 @@ pub const Vm = struct {
     /// Calls a function from Luf using the given arguments
     /// Returns the value from the function back to Zig as `Value`
     pub fn callFunc(self: *Vm, func_name: []const u8, args: anytype) !*Value {
+        std.debug.assert(self.sp == 0);
         if (self.code == null)
             return error.NoInstructions;
 
         var maybe_func: *Value = blk: {
             for (self.globals.items) |global, i| {
-                if (global.l_type == .function and global.toFunction().name != null) {
-                    if (std.mem.eql(u8, func_name, global.toFunction().name.?)) {
-                        break :blk global;
-                    }
-                }
+                if (global.l_type == .function and
+                    global.toFunction().name != null and
+                    std.mem.eql(u8, func_name, global.toFunction().name.?))
+                    break :blk global;
             }
             return error.UndefinedFunction;
         };
@@ -148,33 +150,27 @@ pub const Vm = struct {
             return error.IncorrectArgumentLength;
         }
 
-        try self.push(maybe_func);
         inline for (args) |arg, i| {
-            try self.push(try Value.fromZig(self.gc, arg));
+            if (i >= self.locals.items.len)
+                try self.locals.resize(i + 1);
+            self.locals.items[i] = (try Value.fromZig(self.gc, arg));
         }
 
         // initial call stack for main
         try self.call_stack.append(.{
             .fp = null,
             .ip = 0,
-            .sp = 0,
         });
 
         // function call stack
         try self.call_stack.append(.{
             .fp = maybe_func,
             .ip = func.entry,
-            .sp = self.sp - func.arg_len,
         });
-
-        self.sp = self.frame().sp + func.locals;
 
         try self.run();
 
-        // pop function itself from our stack
-        _ = self.pop();
-
-        return self.peek();
+        return self.pop();
     }
 
     /// Runs the given `ByteCode` on the Virtual Machine
@@ -185,7 +181,6 @@ pub const Vm = struct {
         if (self.call_stack.items.len == 0) {
             try self.call_stack.append(.{
                 .fp = null,
-                .sp = 0,
                 .ip = 0,
             });
         }
@@ -271,37 +266,28 @@ pub const Vm = struct {
                 .make_enum => try self.makeEnum(inst),
                 .get_by_index => try self.getIndexValue(),
                 .set_by_index => try self.setIndexValue(),
-                .@"return" => {
-                    const f = self.call_stack.pop();
-                    self.sp = f.sp;
-
-                    _ = self.pop();
-
-                    try self.push(&Value.Void);
-                },
-                .return_value => {
-                    const rv = self.pop();
-
-                    // remove the function frame from the call stack
-                    const f = self.call_stack.pop();
-                    self.sp = f.sp;
-
-                    _ = self.pop();
-
-                    // push the return value back to the stack
-                    try self.push(rv);
-                },
+                .@"return", .return_value => _ = self.call_stack.pop(),
                 .call => try self.execFunctionCall(inst, self.code.?.instructions[current_frame.ip + 1]),
-                .bind_local => self.stack[current_frame.sp + inst.ptr.pos] = self.pop(),
-                .load_local => try self.push(self.stack[current_frame.sp + inst.ptr.pos]),
-
+                .bind_local => {
+                    const val = self.pop();
+                    if (inst.ptr.pos >= self.locals.items.len)
+                        try self.locals.resize(inst.ptr.pos + 1);
+                    self.locals.items[inst.ptr.pos] = val;
+                    //self.stack[current_frame.sp + inst.ptr.pos] = val;
+                },
+                .load_local => try self.push(self.locals.items[inst.ptr.pos]),
                 .assign_global => {
                     const val = self.pop();
                     if (inst.ptr.pos >= self.globals.items.len)
                         try self.globals.resize(inst.ptr.pos + 1);
                     self.globals.items[inst.ptr.pos] = val;
                 },
-                .assign_local => self.stack[current_frame.sp + inst.ptr.pos] = self.pop(),
+                .assign_local => {
+                    const val = self.pop();
+                    if (inst.ptr.pos >= self.locals.items.len)
+                        try self.locals.resize(inst.ptr.pos + 1);
+                    self.locals.items[inst.ptr.pos] = val;
+                },
                 .load_module => {
                     const string = self.pop().unwrap(.string) orelse
                         return self.fail("Expected a string");
@@ -346,7 +332,7 @@ pub const Vm = struct {
 
     /// Returns the current `Frame` of the call stack
     /// Asserts the call stack is not empty
-    fn frame(self: *Vm) *Frame {
+    pub fn frame(self: *Vm) *Frame {
         return &self.call_stack.items[(self.call_stack.items.len - 1)];
     }
 
@@ -454,6 +440,7 @@ pub const Vm = struct {
             return self.execStringCmp(op, left.toString().value, right.toString().value);
         }
 
+        //std.debug.print("Left: {}\n Right: {}\n -----\n\n", .{ left, right });
         const left_bool = left.unwrap(.boolean) orelse return self.fail("Expected boolean");
         const right_bool = right.unwrap(.boolean) orelse return self.fail("Expected boolean");
 
@@ -531,7 +518,8 @@ pub const Vm = struct {
         const len = inst.ptr.pos;
 
         const ret = try Value.List.create(self.gc, len);
-        var list = ret.toList().value;
+        var list = ret.toList();
+        list.value.items.len = len;
 
         if (len == 0) {
             return self.push(ret);
@@ -548,7 +536,7 @@ pub const Vm = struct {
             if (i == 1)
                 list_type = val.l_type
             else if (!val.isType(list_type)) return self.fail("Mismatching types");
-            list.items[len - i] = val;
+            list.value.items[len - i] = val;
         }
 
         return self.push(ret);
@@ -806,9 +794,9 @@ pub const Vm = struct {
     /// `next` is required to detect if we can optimize tail recursion
     fn execFunctionCall(self: *Vm, inst: byte_code.Instruction, next: byte_code.Instruction) Error!void {
         const arg_len = inst.ptr.pos;
-        const val = self.stack[self.sp - (1 + arg_len)];
+        const val = self.pop();
 
-        if (val.isType(.native) or val.isType(.module)) return self.execNativeFuncCall();
+        if (val.isType(.native) or val.isType(.module)) return self.execNativeFuncCall(val);
 
         if (val.l_type != .function)
             return self.fail("Unknown symbol for function call");
@@ -817,28 +805,33 @@ pub const Vm = struct {
 
         var cur_frame = self.frame();
         if (cur_frame.fp == val and next.op == .return_value) {
-            var i: usize = 0;
-            while (i < arg_len) : (i += 1)
-                self.stack[cur_frame.sp + i] = self.stack[self.sp - arg_len + i];
-            cur_frame.ip = 0;
-            self.sp = cur_frame.sp + val.toFunction().locals;
-            std.debug.print("SP :{}\n", .{self.sp});
-
+            var i: usize = arg_len;
+            while (i > 0) : (i -= 1) {
+                if (i >= self.locals.items.len)
+                    try self.locals.resize(i);
+                self.locals.items[i - 1] = self.stack[self.sp - i];
+            }
+            cur_frame.ip = val.toFunction().entry;
             return;
         }
 
         try self.call_stack.append(.{
             .fp = val,
             .ip = val.toFunction().entry,
-            .sp = self.sp - arg_len,
         });
 
-        self.sp = self.frame().sp + val.toFunction().locals;
+        {
+            var i: usize = arg_len;
+            while (i > 0) : (i -= 1) {
+                if (i >= self.locals.items.len)
+                    try self.locals.resize(i);
+                self.locals.items[i - 1] = self.pop();
+            }
+        }
     }
 
     /// Executes a native Zig function call
-    fn execNativeFuncCall(self: *Vm) Error!void {
-        const value = self.pop();
+    fn execNativeFuncCall(self: *Vm, value: *Value) Error!void {
         const func = if (value.isType(.native)) value.toNative() else blk: {
             const mod = value.unwrap(.module) orelse return self.fail("Expected module");
             const lib = self.libs.get(mod.value) orelse return self.fail("Library is not loaded");
@@ -1046,7 +1039,7 @@ test "Arrays" {
         try vm.compileAndRun(case.input);
 
         const list = vm.peek().toList();
-        testing.expect(list.value.items.len == case.expected.len);
+        testing.expectEqual(case.expected.len, list.value.items.len);
         inline for (case.expected) |int, i| {
             const items = list.value.items;
             testing.expectEqual(int, items[i].toInteger().value);

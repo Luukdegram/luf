@@ -694,8 +694,6 @@ pub const Compiler = struct {
                             call.arguments.len,
                         });
 
-                    try self.compile(call.function);
-
                     for (call.arguments) |arg, i| {
                         const arg_type = try self.resolveType(arg);
                         const func_arg_type = try self.resolveType(function_node.params[i]);
@@ -708,6 +706,8 @@ pub const Compiler = struct {
                             );
                         try self.compile(arg);
                     }
+
+                    try self.compile(call.function);
 
                     try self.emit(Instruction.genPtr(.call, @intCast(u32, call.arguments.len)));
                 }
@@ -1199,8 +1199,8 @@ test "Compile AST to bytecode" {
                 .return_value,
                 .load_func,
                 .bind_global,
-                .load_global,
                 .load_integer,
+                .load_global,
                 .call,
                 .pop,
             },
