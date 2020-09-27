@@ -552,6 +552,7 @@ pub const Value = struct {
         /// Returns a new Value, returns null if end of iterator is reached
         /// This creates a copy of the actual value
         pub fn next(self: *@This(), gc: *GarbageCollector) !?*Value {
+            std.debug.print("it val: {}\n", .{self.value.l_type});
             switch (self.value.l_type) {
                 .list => {
                     const list = self.value.toList().value;
@@ -577,7 +578,7 @@ pub const Value = struct {
                     defer self.index += 1;
                     return Integer.create(gc, range.start + @intCast(i64, self.index));
                 },
-                else => unreachable,
+                else => return null,
             }
         }
     };

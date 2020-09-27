@@ -99,8 +99,9 @@ pub const GarbageCollector = struct {
         for (self.vm.globals.items) |global| self.mark(global);
         for (self.vm.call_stack.items) |cs| if (cs.fp) |func| self.mark(func);
         for (self.vm.locals.items) |local| self.mark(local);
-
-        //self.sweep();
+        for (self.vm.stack[0..self.vm.sp]) |stack| self.mark(stack);
+        
+        self.sweep();
         self.newly_allocated = 0;
     }
 

@@ -1252,7 +1252,8 @@ test "Range" {
     if (std.builtin.os.tag == .windows) return;
     const input =
         \\mut sum = 0
-        \\for(1..100) |e, i| {
+        \\const range = 1..100
+        \\for(range) |e, i| {
         \\  if (e % 2 == 0) {
         \\      continue
         \\  }
