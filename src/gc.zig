@@ -49,7 +49,7 @@ pub const GarbageCollector = struct {
         self.newly_allocated += @sizeOf(T);
         if (self.newly_allocated >= self.trigger_size) {
             //also mark currently created so it doesn't get sweeped instantly
-            typed.base.is_marked = true;
+            self.mark(&typed.base);
             self.markAndSweep();
         }
 
@@ -59,7 +59,6 @@ pub const GarbageCollector = struct {
     /// Marks an object so it will not be sweeped by the gc.
     pub fn mark(self: *GarbageCollector, val: *Value) void {
         if (val.is_marked) return;
-        //std.debug.print("marked: {} {}\n", .{ @ptrToInt(val), val.l_type });
 
         val.is_marked = true;
         switch (val.l_type) {
@@ -89,7 +88,6 @@ pub const GarbageCollector = struct {
             } else {
                 val.is_marked = false;
                 prev = val;
-                //std.debug.print("unmarking: {}\n", .{@ptrToInt(val)});
             }
         }
     }
@@ -100,7 +98,7 @@ pub const GarbageCollector = struct {
         for (self.vm.call_stack.items) |cs| if (cs.fp) |func| self.mark(func);
         for (self.vm.locals.items) |local| self.mark(local);
         for (self.vm.stack[0..self.vm.sp]) |stack| self.mark(stack);
-        
+
         self.sweep();
         self.newly_allocated = 0;
     }

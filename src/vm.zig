@@ -610,8 +610,6 @@ pub const Vm = struct {
             iterable,
         );
 
-        self.sp += 2;
-
         return self.push(value);
     }
 
@@ -621,16 +619,18 @@ pub const Vm = struct {
     fn execNextIter(self: *Vm) Error!void {
         const value = self.pop();
 
+        std.debug.print("it {}\n", .{value.l_type});
         var iterator = value.toIterable();
         if (try iterator.next(self.gc)) |next| {
             // push the iterator back on the stack
             try self.push(value);
 
             // push the index if it is exposed
-            if (iterator.expose_index) {
-                const index = try Value.Integer.create(self.gc, @intCast(i64, iterator.index - 1));
-                try self.push(index);
-            }
+            if (iterator.expose_index)
+                try self.push(
+                    try Value.Integer.create(self.gc, @intCast(i64, iterator.index - 1)),
+                );
+
             // push the capture on the stack
             try self.push(next);
 
@@ -1252,8 +1252,7 @@ test "Range" {
     if (std.builtin.os.tag == .windows) return;
     const input =
         \\mut sum = 0
-        \\const range = 1..100
-        \\for(range) |e, i| {
+        \\for(1..100) |e, i| {
         \\  if (e % 2 == 0) {
         \\      continue
         \\  }
