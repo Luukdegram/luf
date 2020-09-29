@@ -618,8 +618,10 @@ pub const Vm = struct {
     /// Finally, a true or false is pushed to determine if we should end the for loop
     fn execNextIter(self: *Vm) Error!void {
         const value = self.pop();
+        // we mark the iterator here, because it's currently not being referenced by anything
+        // until it is pushed back on the stack, this means it bould be sweeped when we call iterator.next()
+        self.gc.mark(value);
 
-        std.debug.print("it {}\n", .{value.l_type});
         var iterator = value.toIterable();
         if (try iterator.next(self.gc)) |next| {
             // push the iterator back on the stack
@@ -1225,7 +1227,22 @@ test "Tail recursion" {
     testing.expectEqual(@as(usize, 0), vm.sp);
 }
 
-test "For loop" {
+test "Basic For loop" {
+    const input =
+        \\mut sum = 0
+        \\for([]int{1, 3, 5, 7, 9}) |item| {
+        \\  sum += item
+        \\}
+        \\sum
+    ;
+    var vm = try Vm.init(testing.allocator);
+    defer vm.deinit();
+    try vm.compileAndRun(input);
+    testing.expectEqual(@as(i64, 25), vm.peek().toInteger().value);
+    testing.expectEqual(@as(usize, 0), vm.sp);
+}
+
+test "For loop continue + break" {
     const input =
         \\mut sum = 0
         \\for([]int{1, 3, 5, 7, 9}) |item, i| {
@@ -1249,7 +1266,7 @@ test "For loop" {
 test "Range" {
     // for some reason this only fails on windows,
     // disable for now
-    if (std.builtin.os.tag == .windows) return;
+    //if (std.builtin.os.tag == .windows) return;
     const input =
         \\mut sum = 0
         \\for(1..100) |e, i| {
@@ -1264,14 +1281,14 @@ test "Range" {
     defer vm.deinit();
     try vm.compileAndRun(input);
 
-    testing.expectEqual(@as(i64, 4950), vm.peek().toInteger().value);
+    testing.expectEqual(@as(i64, 2500), vm.peek().toInteger().value);
     testing.expectEqual(@as(usize, 0), vm.sp);
 }
 
 test "For loop - String" {
     // for some reason this only fails on windows,
     // disable for now
-    if (std.builtin.os.tag == .windows) return;
+    //if (std.builtin.os.tag == .windows) return;
     const input = "mut result = \"hello\" const w = \"world\" for(w)|c, i|{result+=c}result";
     var vm = try Vm.init(testing.allocator);
     defer vm.deinit();

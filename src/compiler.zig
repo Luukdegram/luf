@@ -806,25 +806,18 @@ pub const Compiler = struct {
                 try self.compile(loop.block);
 
                 // pop last value from block
-                try self.emit(Instruction.gen(.pop));
+                if (!self.instructions.lastIs(.pop))
+                    try self.emit(Instruction.gen(.pop));
 
                 // jump to start of loop to evaluate range
                 try self.emit(Instruction.genPtr(.jump, self.scope.id.loop.start));
 
-                // pop capture and index from stack
-                const end = try self.emitReturnPos(Instruction.gen(.pop));
-                //const end = @intCast(u32, self.instructions.list.items.len - 1);
-                if (loop.index) |_| {
-                    try self.emit(Instruction.gen(.pop));
-                }
+                const end = @intCast(u32, self.instructions.list.items.len);
 
                 for (self.scope.id.loop.breaks.items) |pos| {
                     self.instructions.list.items[pos].ptr.pos = end;
-                }
-
-                // if there's a break, ensure last value is popped
-                if (self.scope.id.loop.breaks.items.len > 0)
                     try self.emit(Instruction.gen(.pop));
+                }
 
                 // point the end jump to last op
                 self.instructions.replacePtr(end_jump, end);
