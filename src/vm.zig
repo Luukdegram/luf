@@ -627,14 +627,14 @@ pub const Vm = struct {
             // push the iterator back on the stack
             try self.push(value);
 
+            // push the capture on the stack
+            try self.push(next);
+
             // push the index if it is exposed
             if (iterator.expose_index)
                 try self.push(
                     try Value.Integer.create(self.gc, @intCast(i64, iterator.index - 1)),
                 );
-
-            // push the capture on the stack
-            try self.push(next);
 
             // push true to continue
             return self.push(&Value.True.base);
@@ -1281,7 +1281,7 @@ test "Range" {
     defer vm.deinit();
     try vm.compileAndRun(input);
 
-    testing.expectEqual(@as(i64, 2500), vm.peek().toInteger().value);
+    testing.expectEqual(@as(i64, 4950), vm.peek().toInteger().value);
     testing.expectEqual(@as(usize, 0), vm.sp);
 }
 

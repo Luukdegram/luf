@@ -783,14 +783,6 @@ pub const Compiler = struct {
                 // jump position if we reached the end of the iterator
                 const end_jump = try self.emitReturnPos(Instruction.genPtr(.jump_false, 0));
 
-                // parser already parses it as an identifier, no need to check here again
-                const capture = (try self.defineSymbol(loop.capture.identifier.value, false, loop.iter, false)) orelse return self.fail(
-                    "Capture identifier '{}' has already been declared",
-                    loop.token.start,
-                    .{loop.capture.identifier.value},
-                );
-                try self.emit(Instruction.genPtr(.assign_local, capture.index));
-
                 // as above, parser ensures it's an identifier
                 if (loop.index) |i| {
                     // loop is just a boolean, so create a new Node that represents the integer for the counter
@@ -802,6 +794,14 @@ pub const Compiler = struct {
 
                     try self.emit(Instruction.genPtr(.assign_local, symbol.index));
                 }
+
+                // parser already parses it as an identifier, no need to check here again
+                const capture = (try self.defineSymbol(loop.capture.identifier.value, false, loop.iter, false)) orelse return self.fail(
+                    "Capture identifier '{}' has already been declared",
+                    loop.token.start,
+                    .{loop.capture.identifier.value},
+                );
+                try self.emit(Instruction.genPtr(.assign_local, capture.index));
 
                 try self.compile(loop.block);
 
