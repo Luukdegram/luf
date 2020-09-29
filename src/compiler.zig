@@ -694,8 +694,6 @@ pub const Compiler = struct {
                             call.arguments.len,
                         });
 
-                    try self.compile(call.function);
-
                     for (call.arguments) |arg, i| {
                         const arg_type = try self.resolveType(arg);
                         const func_arg_type = try self.resolveType(function_node.params[i]);
@@ -708,6 +706,8 @@ pub const Compiler = struct {
                             );
                         try self.compile(arg);
                     }
+
+                    try self.compile(call.function);
 
                     try self.emit(Instruction.genPtr(.call, @intCast(u32, call.arguments.len)));
                 }
@@ -783,14 +783,6 @@ pub const Compiler = struct {
                 // jump position if we reached the end of the iterator
                 const end_jump = try self.emitReturnPos(Instruction.genPtr(.jump_false, 0));
 
-                // parser already parses it as an identifier, no need to check here again
-                const capture = (try self.defineSymbol(loop.capture.identifier.value, false, loop.iter, false)) orelse return self.fail(
-                    "Capture identifier '{}' has already been declared",
-                    loop.token.start,
-                    .{loop.capture.identifier.value},
-                );
-                try self.emit(Instruction.genPtr(.assign_local, capture.index));
-
                 // as above, parser ensures it's an identifier
                 if (loop.index) |i| {
                     // loop is just a boolean, so create a new Node that represents the integer for the counter
@@ -803,27 +795,29 @@ pub const Compiler = struct {
                     try self.emit(Instruction.genPtr(.assign_local, symbol.index));
                 }
 
+                // parser already parses it as an identifier, no need to check here again
+                const capture = (try self.defineSymbol(loop.capture.identifier.value, false, loop.iter, false)) orelse return self.fail(
+                    "Capture identifier '{}' has already been declared",
+                    loop.token.start,
+                    .{loop.capture.identifier.value},
+                );
+                try self.emit(Instruction.genPtr(.assign_local, capture.index));
+
                 try self.compile(loop.block);
 
                 // pop last value from block
-                try self.emit(Instruction.gen(.pop));
+                if (!self.instructions.lastIs(.pop))
+                    try self.emit(Instruction.gen(.pop));
 
                 // jump to start of loop to evaluate range
                 try self.emit(Instruction.genPtr(.jump, self.scope.id.loop.start));
 
-                // pop capture and index from stack
-                const end = try self.emitReturnPos(Instruction.gen(.pop));
-                if (loop.index) |_| {
-                    try self.emit(Instruction.gen(.pop));
-                }
+                const end = @intCast(u32, self.instructions.list.items.len);
 
                 for (self.scope.id.loop.breaks.items) |pos| {
                     self.instructions.list.items[pos].ptr.pos = end;
-                }
-
-                // if there's a break, ensure last value is popped
-                if (self.scope.id.loop.breaks.items.len > 0)
                     try self.emit(Instruction.gen(.pop));
+                }
 
                 // point the end jump to last op
                 self.instructions.replacePtr(end_jump, end);
@@ -1199,8 +1193,8 @@ test "Compile AST to bytecode" {
                 .return_value,
                 .load_func,
                 .bind_global,
-                .load_global,
                 .load_integer,
+                .load_global,
                 .call,
                 .pop,
             },
