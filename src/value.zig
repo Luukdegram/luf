@@ -511,7 +511,9 @@ pub const Value = struct {
         base: Value,
         value: [][]const u8,
 
+        /// Creates a new `Enum` value. Takes ownership of the memory of the slice
         pub fn create(gc: *GarbageCollector, enums: [][]const u8) !*Value {
+            for (enums) |*enm| enm.* = try gc.gpa.dupe(u8, enm.*);
             return try gc.newValue(
                 Enum,
                 .{
@@ -522,6 +524,7 @@ pub const Value = struct {
         }
 
         pub fn destroy(self: *Enum, gpa: *Allocator) void {
+            for (self.value) |enm| gpa.free(enm);
             gpa.free(self.value);
             gpa.destroy(self);
         }

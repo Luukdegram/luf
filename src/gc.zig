@@ -10,6 +10,13 @@ const root = @import("root");
 //! program will allow to set the byte size of the new allocations before
 //! the garbage collector is ran
 
+const default_gc_trigger_size = 1024 * 1024;
+
+const gc_trigger = if (@hasDecl(root, "gc_trigger_size"))
+    std.math.max(root.gc_trigger_size, default_gc_trigger_size)
+else
+    default_gc_trigger_size;
+
 pub const GarbageCollector = struct {
     /// The allocator used to allocate and free memory of the stack
     gpa: *Allocator,
@@ -22,7 +29,8 @@ pub const GarbageCollector = struct {
     /// Size of currently allocated stack
     newly_allocated: usize,
     /// Amount of bytes allowed before the garbage collector is triggered for sweeping
-    trigger_size: usize = if (@hasDecl(root, "gc_trigger_size")) root.gc_trigger_size else 512,
+    /// Default is 1MB. Can be changed by defining `gc_trigger_size` in root
+    trigger_size: usize = gc_trigger,
 
     /// Initializes a new `GarbageCollector`, calling deinit() will ensure all memory is freed
     pub fn init(allocator: *Allocator) GarbageCollector {
@@ -98,6 +106,7 @@ pub const GarbageCollector = struct {
         for (self.vm.call_stack.items) |cs| if (cs.fp) |func| self.mark(func);
         for (self.vm.locals.items) |local| self.mark(local);
         for (self.vm.stack[0..self.vm.sp]) |stack| self.mark(stack);
+        for (self.vm.libs.items()) |lib_entry| self.mark(lib_entry.value);
 
         self.sweep();
         self.newly_allocated = 0;

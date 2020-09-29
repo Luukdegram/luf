@@ -440,7 +440,6 @@ pub const Vm = struct {
             return self.execStringCmp(op, left.toString().value, right.toString().value);
         }
 
-        //std.debug.print("Left: {}\n Right: {}\n -----\n\n", .{ left, right });
         const left_bool = left.unwrap(.boolean) orelse return self.fail("Expected boolean");
         const right_bool = right.unwrap(.boolean) orelse return self.fail("Expected boolean");
 
