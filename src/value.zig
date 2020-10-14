@@ -244,6 +244,7 @@ pub const Value = struct {
                                         .field_type = Fn.args[idx].arg_type.?,
                                         .default_value = @as(?(Fn.args[idx].arg_type.?), null),
                                         .is_comptime = false,
+                                        .alignment = @alignOf(Fn.args[idx].arg_type.?),
                                     };
                                 }
                                 break :blk @Type(.{
