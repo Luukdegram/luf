@@ -13,12 +13,27 @@ pub const Inst = struct {
     tag: Tag,
     /// The position of the instruction within the source code
     pos: usize,
-    ///
-    inst_type: Type,
 
     pub const Tag = enum {
         add,
         assign,
+        int,
+        string,
+        sub,
+        mul,
+        div,
+        eql,
+        nql,
+        eql_lt,
+        eql_gt,
+        lt,
+        gt,
+        assign_add,
+        assign_sub,
+        assign_mul,
+        assign_div,
+        func,
+        call,
 
         pub fn Type(self: Tag) type {}
     };
@@ -41,6 +56,8 @@ pub const Inst = struct {
     pub const Decl = struct {
         base: Inst,
         name: []const u8,
+        is_pub: bool = false,
+        is_mut: bool = false,
         scope: enum {
             global,
             local,
@@ -52,7 +69,7 @@ pub const Inst = struct {
 
     pub const Int = struct {
         base: Inst,
-        value: i64,
+        value: u64,
     };
 
     pub const String = struct {
@@ -63,12 +80,95 @@ pub const Inst = struct {
     pub const List = struct {
         base: Inst,
         scalar_type: Type,
+        elements: []*Inst,
+    };
+
+    pub const Map = struct {
+        base: Inst,
+        key_type: Type,
+        val_type: Type,
+        pairs: []*Inst,
+    };
+
+    pub const Block = struct {
+        base: Inst,
+        instructions: []*Inst,
+    };
+
+    pub const Identifier = struct {
+        base: Inst,
+        decl: *Inst,
+    };
+
+    pub const Pair = struct {
+        base: Inst,
+        key: *Inst,
+        value: *Inst,
+    };
+
+    pub const Index = struct {
+        base: Inst,
+        lhs: *Inst,
+        rhs: *Inst,
+    };
+
+    pub const Function = struct {
+        base: Inst,
+        params: []*Inst,
+        block: *Inst,
+        locals: usize,
+        return_type: Type,
+    };
+
+    pub const Call = struct {
+        base: Inst,
+        args: []*Inst,
+        func: *Inst,
+    };
+
+    pub const Arg = struct {
+        base: Inst,
+        arg_type: Type,
+    };
+
+    pub const Return = struct {
+        base: Inst,
+        ret_type: Type = ._void,
+        value: ?*Inst,
+    };
+
+    pub const While = struct {
+        base: Inst,
+        condition: *Inst,
+        block: *Inst,
+    };
+
+    pub const Loop = struct {
+        base: Inst,
+        it_type: Type,
+        it: *Inst,
+        capture: *Inst,
+        index: ?*Inst,
+        block: *Inst,
+    };
+
+    pub const NoOp = struct {
+        base: Inst,
+    };
+
+    pub const Import = struct {
+        base: Inst,
+        name: []const u8,
+    };
+
+    pub const Break = struct {
+        base: Inst,
+        block: *Block,
     };
 };
 
 /// Module contains helper functions to generate IR
 /// and contains the final list of instructions.
-///
 pub const Module = struct {
     instructions: std.ArrayListUnmanaged(*Inst),
     arena: *Allocator,
@@ -87,6 +187,39 @@ pub const Module = struct {
 
         try self.instructions.append(self.arena, &inst.base);
 
+        return &inst.base;
+    }
+
+    /// Creates a new `Int` instruction
+    pub fn emitInt(self: *Module, pos: usize, value: u64) *Inst {
+        const inst = try self.arena.create(Inst.Int);
+        int.* = .{
+            .base = .{
+                .tag = .int,
+                .pos = pos,
+            },
+            .value = value,
+        };
+
+        try self.instructions.append(self.arena, &inst.base);
+
+        return &inst.base;
+    }
+
+    /// Creates a new `String` instruction. This duplicates the string value
+    /// and takes ownership of its memory. Caller must therefore free the original's
+    /// string's memory by themselves
+    pub fn emitString(self: *Module, pos: usize, value: []const u8) *Inst {
+        const inst = try self.arena.create(Inst.String);
+        inst.* = .{
+            .base = .{
+                .tag = .string,
+                .pos = pos,
+            },
+            .value = try self.arena.dupe(u8, value),
+        };
+
+        try self.instructions.append(self.arena, &inst.base);
         return &inst.base;
     }
 };
