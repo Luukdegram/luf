@@ -163,7 +163,48 @@ pub const Inst = struct {
 
     pub const Break = struct {
         base: Inst,
-        block: *Block,
+        block: *Inst,
+    };
+
+    pub const Range = struct {
+        base: Inst,
+        start: *Inst,
+        end: *Inst,
+    };
+
+    pub const Continue = struct {
+        base: Inst,
+        block: *Inst,
+    };
+
+    pub const Enum = struct {
+        base: Inst,
+        value: [][]const u8,
+    };
+
+    pub const Switch = struct {
+        base: Inst,
+        capture: *Inst,
+        cap_type: Type,
+        prongs: []*Inst,
+    };
+
+    pub const Branch = struct {
+        base: Inst,
+        branch_type: Type,
+        value: *Inst,
+    };
+
+    pub const Prefix = struct {
+        base: Inst,
+        rhs: *Inst,
+    };
+
+    pub const If = struct {
+        base: Inst,
+        condition: *Inst,
+        then_block: *Inst,
+        else_block: *Inst,
     };
 };
 
