@@ -50,11 +50,33 @@ pub const Inst = struct {
         @"return",
         negate,
         import,
+        int,
+        string,
+        mod,
+        @"and",
+        @"or",
+        bitwise_xor,
+        bitwise_or,
+        bitwise_and,
+        bitwise_not,
+        shift_left,
+        shift_right,
+        assign_add,
+        assign_sub,
+        assign_mul,
+        assign_div,
+        not,
+        block,
 
         /// Returns the type of that belongs to a `Tag`
         /// Can be used to cast to the correct Type from a `Tag`.
         pub fn Type(self: Tag) type {
             return switch (self.tag) {
+                .negate,
+                .@"return",
+                .bitwise_not,
+                .not,
+                => Single,
                 .add,
                 .sub,
                 .mul,
@@ -65,23 +87,34 @@ pub const Inst = struct {
                 .eql_gt,
                 .lt,
                 .gt,
-                => BinOp,
-                .negate, .@"return" => UnOp,
+                .@"while",
+                .range,
+                .mod,
+                .@"and",
+                .@"or",
+                .bitwise_xor,
+                .bitwise_or,
+                .bitwise_and,
+                .shift_left,
+                .shift_right,
+                .assign_add,
+                .assign_sub,
+                .assign_mul,
+                .assign_div,
+                => Double,
+                .condition => Triple,
                 .primitive => Primitive,
                 .func => Function,
                 .call => Call,
                 .@"for" => Loop,
-                .@"while" => While,
                 .@"switch" => Switch,
-                .condition => If,
-                .@"break" => Break,
-                .@"continue" => Continue,
-                .range => Range,
-                .list => List,
-                .map => Map,
+                .@"break", .@"continue" => NoOp,
+                .list, .map => DataStructure,
                 .decl => Decl,
                 .ident => Identifier,
-                .import => Import,
+                .int => Int,
+                .string, .import => String,
+                .block => Block,
             };
         }
     };
@@ -100,19 +133,6 @@ pub const Inst = struct {
     pub fn as(self: *Inst, comptime T: type) T {
         return @fieldParentPtr(T, "base", self);
     }
-
-    /// Binary operator instruction such as +, -, etc
-    pub const BinOp = struct {
-        base: Inst,
-        lhs: *Inst,
-        rhs: *Inst,
-    };
-
-    /// Unary operator instruction
-    pub const UnOp = struct {
-        base: Inst,
-        rhs: *Inst,
-    };
 
     /// Declaration which contains the name, position, scope and value
     pub const Decl = struct {
@@ -139,17 +159,9 @@ pub const Inst = struct {
         value: []const u8,
     };
 
-    pub const List = struct {
+    pub const DataStructure = struct {
         base: Inst,
-        scalar_type: Type,
         elements: []*Inst,
-    };
-
-    pub const Map = struct {
-        base: Inst,
-        key_type: Type,
-        val_type: Type,
-        pairs: []*Inst,
     };
 
     pub const Block = struct {
@@ -162,24 +174,11 @@ pub const Inst = struct {
         decl: *Decl,
     };
 
-    pub const Pair = struct {
-        base: Inst,
-        key: *Inst,
-        value: *Inst,
-    };
-
-    pub const Index = struct {
-        base: Inst,
-        lhs: *Inst,
-        rhs: *Inst,
-    };
-
     pub const Function = struct {
         base: Inst,
         params: []*Inst,
         block: *Inst,
         locals: usize,
-        return_type: Type,
     };
 
     pub const Call = struct {
@@ -188,26 +187,8 @@ pub const Inst = struct {
         func: *Inst,
     };
 
-    pub const Arg = struct {
-        base: Inst,
-        arg_type: Type,
-    };
-
-    pub const Return = struct {
-        base: Inst,
-        ret_type: Type = ._void,
-        value: ?*Inst,
-    };
-
-    pub const While = struct {
-        base: Inst,
-        condition: *Inst,
-        block: *Inst,
-    };
-
     pub const Loop = struct {
         base: Inst,
-        it_type: Type,
         it: *Inst,
         capture: *Inst,
         index: ?*Inst,
@@ -218,27 +199,6 @@ pub const Inst = struct {
         base: Inst,
     };
 
-    pub const Import = struct {
-        base: Inst,
-        name: []const u8,
-    };
-
-    pub const Break = struct {
-        base: Inst,
-        block: *Inst,
-    };
-
-    pub const Range = struct {
-        base: Inst,
-        start: *Inst,
-        end: *Inst,
-    };
-
-    pub const Continue = struct {
-        base: Inst,
-        block: *Inst,
-    };
-
     pub const Enum = struct {
         base: Inst,
         value: [][]const u8,
@@ -247,21 +207,7 @@ pub const Inst = struct {
     pub const Switch = struct {
         base: Inst,
         capture: *Inst,
-        cap_type: Type,
-        prongs: []*Inst,
-    };
-
-    pub const Branch = struct {
-        base: Inst,
-        branch_type: Type,
-        value: *Inst,
-    };
-
-    pub const If = struct {
-        base: Inst,
-        condition: *Inst,
-        then_block: *Inst,
-        else_block: *Inst,
+        branches: []*Inst,
     };
 
     pub const Primitive = struct {
@@ -288,32 +234,33 @@ pub const Inst = struct {
         index: *Inst,
         rhs: *Inst,
     };
+
+    pub const Single = struct {
+        base: Inst,
+        rhs: *Inst,
+    };
+
+    pub const Double = struct {
+        base: Inst,
+        lhs: *Inst,
+        rhs: *Inst,
+    };
+
+    pub const Triple = struct {
+        base: Inst,
+        lhs: *Inst,
+        index: *Inst,
+        rhs: *Inst,
+    };
 };
 
 /// Module contains helper functions to generate IR
-/// and contains the final list of instructions.
 pub const Module = struct {
-    instructions: std.ArrayListUnmanaged(*Inst),
-    arena: *Allocator,
-
-    /// Adds a binary operator instruction to the module and returns the newly created Instruction
-    pub fn emitBinOp(self: *Module, pos: usize, tag: Inst.Tag, lhs: *Inst, rhs: *Inst) *Inst {
-        const inst = try self.arena.create(Inst.BinOp);
-        inst.* = .{
-            .base = .{
-                .tag = tag,
-                .pos = pos,
-            },
-            .lhs = lhs,
-            .rhs = rhs,
-        };
-
-        return &inst.base;
-    }
+    gpa: *Allocator,
 
     /// Creates a new `Int` instruction
     pub fn emitInt(self: *Module, pos: usize, value: u64) *Inst {
-        const inst = try self.arena.create(Inst.Int);
+        const inst = try self.gpa.create(Inst.Int);
         int.* = .{
             .base = .{
                 .tag = .int,
@@ -328,51 +275,22 @@ pub const Module = struct {
     /// Creates a new `String` instruction. This duplicates the string value
     /// and takes ownership of its memory. Caller must therefore free the original's
     /// string's memory by themselves
-    pub fn emitString(self: *Module, pos: usize, value: []const u8) *Inst {
-        const inst = try self.arena.create(Inst.String);
-        inst.* = .{
-            .base = .{
-                .tag = .string,
-                .pos = pos,
-            },
-            .value = try self.arena.dupe(u8, value),
-        };
-
-        return &inst.base;
-    }
-
-    /// Creates a new `If` instruction and returns its base
-    pub fn emitCond(self: *Module, pos: usize, cond: *Inst, then_block: *Inst, else_block: *Inst) *Inst {
-        const inst = try self.arena.create(Inst.If);
-        inst.* = .{
-            .base = .{
-                .tag = .condition,
-                .pos = pos,
-            },
-            .condition = cond,
-            .then_block = then_block,
-            .else_block = else_block,
-        };
-
-        return &inst.base;
-    }
-
-    /// Creates a new `UnOp` instruction. Expects a prefix `tag` such as '-', or 'return x'
-    pub fn emitUnOp(self: *Module, pos: usize, tag: Inst.Tag, rhs: *Inst) *Inst {
-        const inst = try self.arena.create(Inst.UnOp);
+    pub fn emitString(self: *Module, tag: Inst.Tag, pos: usize, value: []const u8) *Inst {
+        const inst = try self.gpa.create(Inst.String);
         inst.* = .{
             .base = .{
                 .tag = tag,
                 .pos = pos,
             },
-            .rhs = rhs,
+            .value = try self.gpa.dupe(u8, value),
         };
+
         return &inst.base;
     }
 
     /// Creates a new `Block` instruction for the given inner instructions
     pub fn emitBlock(self: *Module, pos: usize, instructions: []*Inst) *Inst {
-        const inst = try self.arena.create(Inst.Block);
+        const inst = try self.gpa.create(Inst.Block);
         inst.* = .{
             .base = .{
                 .tag = .block,
@@ -385,7 +303,7 @@ pub const Module = struct {
 
     /// Creates a new `Primitive` with the given `value`
     pub fn emitPrimitive(self: *Module, pos: usize, value: Inst.Primitive.PrimType) *Inst {
-        const inst = try self.arena.create(Inst.Primitive);
+        const inst = try self.gpa.create(Inst.Primitive);
         inst.* = .{
             .base = .{
                 .tag = .primitive,
@@ -407,7 +325,7 @@ pub const Module = struct {
         is_mut: bool,
         value: *Inst,
     ) *Inst {
-        const inst = try self.arena.create(Inst.Decl);
+        const inst = try self.gpa.create(Inst.Decl);
         inst.* = .{
             .base = .{
                 .tag = .decl,
@@ -423,7 +341,7 @@ pub const Module = struct {
 
     /// Creates a new `Identifier` instruction
     pub fn emitIdent(self: *Module, pos: usize, decl: *Decl) *Inst {
-        const inst = try self.arena.create(Inst.Identifier);
+        const inst = try self.gpa.create(Inst.Identifier);
         inst.* = .{
             .base = .{
                 .tag = .ident,
@@ -435,44 +353,14 @@ pub const Module = struct {
     }
 
     /// Creates a new `List` instruction with `Type` `scalar_type`
-    pub fn emitList(self: *Module, pos: usize, scalar_type: Type, elements: []*Inst) *Inst {
-        const inst = try self.arena.create(Inst.List);
+    pub fn emitList(self: *Module, pos: usize, elements: []*Inst) *Inst {
+        const inst = try self.gpa.create(Inst.DataStructure);
         inst.* = .{
             .base = .{
                 .tag = .list,
                 .pos = pos,
             },
-            .scalar_type = scalar_type,
             .elements = elements,
-        };
-        return &inst.base;
-    }
-
-    /// Creates a new `Map` instruction where each pair has key type `key_type` and its value is of type `val_type`
-    pub fn emitMap(self: *Module, pos: usize, key_type: Type, val_type: Type, pairs: []*Inst) *Inst {
-        const inst = try self.arena.create(Inst.Map);
-        inst.* = .{
-            .base = .{
-                .tag = .map,
-                .pos = pos,
-            },
-            .key_type = key_type,
-            .val_type = val_type,
-            .pairs = pairs,
-        };
-        return &inst.base;
-    }
-
-    /// Creates a new `Index` instruction which is used to load a value from the `lhs`, defined by `rhs`
-    pub fn emitIndex(self: *Module, pos: usize, lhs: *Inst, rhs: *Inst) *Inst {
-        const inst = try self.arena.create(Inst.Index);
-        inst.* = .{
-            .base = .{
-                .tag = .index,
-                .pos = pos,
-            },
-            .lhs = lhs,
-            .rhs = rhs,
         };
         return &inst.base;
     }
@@ -483,10 +371,9 @@ pub const Module = struct {
         pos: usize,
         block: *Inst,
         locals: usize,
-        return_type: Type,
         params: []*Inst,
     ) *Inst {
-        const inst = try self.arena.create(Inst.Function);
+        const inst = try self.gpa.create(Inst.Function);
         inst.* = .{
             .base = .{
                 .tag = .func,
@@ -494,35 +381,7 @@ pub const Module = struct {
             },
             .block = block,
             .locals = locals,
-            .return_type = return_type,
             .params = params,
-        };
-        return &inst.base;
-    }
-
-    /// Creates a new function call instruction
-    pub fn emitCall(self: *Module, pos: usize, func: *Inst) *Inst {
-        const inst = try self.arena.create(Inst.Call);
-        inst.* = .{
-            .base = .{
-                .tag = .call,
-                .pos = pos,
-            },
-            .func = func,
-        };
-        return &inst.base;
-    }
-
-    /// Creates a new `While` instruction
-    pub fn emitWhile(self: *Module, pos: usize, block: *Inst, cond: *Inst) *Inst {
-        const inst = try self.arena.create(Inst.While);
-        inst.* = .{
-            .base = .{
-                .tag = .@"while",
-                .pos = pos,
-            },
-            .condition = cond,
-            .block = block,
         };
         return &inst.base;
     }
@@ -531,19 +390,17 @@ pub const Module = struct {
     pub fn emitFor(
         self: *Module,
         pos: usize,
-        it_type: Type,
         iterator: *Inst,
         capture: *Inst,
         index: ?*Inst,
         block: *Inst,
     ) *Inst {
-        const inst = try self.arena.create(Inst.Loop);
+        const inst = try self.gpa.create(Inst.Loop);
         inst.* = .{
             .base = .{
                 .tag = .@"for",
                 .pos = pos,
             },
-            .it_type = it_type,
             .it = iterator,
             .capture = capture,
             .index = index,
@@ -554,7 +411,7 @@ pub const Module = struct {
 
     /// Creates an assignment instruction
     pub fn emitAssign(self: *Module, pos: usize, decl: *Inst.Decl, rhs: *Inst) *Inst {
-        const inst = try self.arena.create(Inst.Assign);
+        const inst = try self.gpa.create(Inst.Assign);
         inst.* = .{
             .base = .{
                 .tag = .assign,
@@ -566,37 +423,9 @@ pub const Module = struct {
         return &inst.base;
     }
 
-    /// Creates a store instruction. Used to set the value of an element inside a map or list
-    pub fn emitStore(self: *Module, pos: usize, lhs: *Inst, index: *Inst, rhs: *Index) *Inst {
-        const inst = try self.arena.create(Inst.Store);
-        inst.* = .{
-            .base = .{
-                .tag = .store,
-                .pos = pos,
-            },
-            .lhs = lhs,
-            .index = index,
-            .rhs = rhs,
-        };
-        return &inst.base;
-    }
-
-    /// Creates a new Import instruction
-    pub fn emitImport(self: *Module, pos: usize, name: []const u8) *Inst {
-        const inst = try self.arena.create(Inst.Import);
-        inst.* = .{
-            .base = .{
-                .tag = .import,
-                .pos = pos,
-            },
-            .name = try self.arena.dupe(u8, name),
-        };
-        return &inst.base;
-    }
-
     /// Creates a `NoOp` instruction, used for control flow such as continue and break
     pub fn emitNoOp(self: *Module, pos: usize, tag: Inst.Tag) *Inst {
-        const inst = try self.arena.create(Inst.NoOp);
+        const inst = try self.gpa.create(Inst.NoOp);
         inst.* = .{
             .base = .{
                 .tag = tag,
@@ -606,29 +435,74 @@ pub const Module = struct {
         return &inst.base;
     }
 
-    /// Creates a `Range` instruction
-    pub fn emitRange(self: *Module, pos: usize, start: *Inst, end: *Inst) *Inst {
-        const inst = try self.arena.create(Inst.Range);
-        int.* = .{
-            .base = .{
-                .tag = .range,
-                .pos = pos,
-            },
-            .start = start,
-            .end = end,
-        };
-        return &inst.base;
-    }
-
     /// Constructs a new `Enum` instruction
     pub fn emitEnum(self: *Module, pos: usize, nodes: []*Inst) *Inst {
-        const inst = try self.arena.create(Inst.Enum);
+        const inst = try self.gpa.create(Inst.Enum);
         inst.* = .{
             .base = .{
                 .tag = .@"enum",
                 .pos = pos,
             },
             .value = nodes,
+        };
+        return &inst.base;
+    }
+
+    /// Creates a `Switch` instruction
+    pub fn emitSwitcH(self: *Module, pos: usize, capture: *Inst, branches: []*Inst) *Inst {
+        const inst = try self.gpa.create(Inst.Switch);
+        inst.* = .{
+            .base = .{
+                .tag = .@"switch",
+                .pos = pos,
+            },
+            .capture = capture,
+            .branches = branches,
+        };
+        return &inst.base;
+    }
+
+    /// Emits a `Single` instruction, that contains the tag and a rhs `Inst`
+    /// Used for unary operations such as a negate or 'return x'
+    pub fn emitSingle(self: *Module, pos: usize, tag: Inst.Tag, rhs: *Inst) *Inst {
+        const inst = try self.gpa.create(Inst.Single);
+        inst.* = .{
+            .base = .{
+                .tag = tag,
+                .pos = pos,
+            },
+            .rhs = rhs,
+        };
+        return &inst.base;
+    }
+
+    /// Emits a `Double` instruction, that contains the `Tag`, lhs and rhs `Inst`
+    /// Used to set a lhs value, or retrieve a value from a list or map
+    pub fn emitDouble(self: *Module, pos: usize, tag: Inst.Tag, lhs: *Inst, rhs: *Inst) *Inst {
+        const inst = try self.gpa.create(Inst.Double);
+        inst.* = .{
+            .base = .{
+                .tag = tag,
+                .pos = pos,
+            },
+            .lhs = lhs,
+            .rhs = rhs,
+        };
+        return &inst.base;
+    }
+
+    /// Emits a `Triple` instruction, that contains the `Tag`, lhs, index and a rhs `Inst`
+    /// Used for setting the value of an element inside a list or map
+    pub fn emitTriple(self: *Module, pos: usize, tag: Inst.Tag, lhs: *Inst, index: *Inst, rhs: *Inst) *Inst {
+        const inst = try self.gpa.create(Inst.Single);
+        inst.* = .{
+            .base = .{
+                .tag = tag,
+                .pos = pos,
+            },
+            .lhs = lhs,
+            .index = index,
+            .rhs = rhs,
         };
         return &inst.base;
     }

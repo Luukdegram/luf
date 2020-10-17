@@ -457,7 +457,6 @@ pub const Compiler = struct {
                     .bitwise_xor => .bitwise_xor,
                     .bitwise_or => .bitwise_or,
                     .bitwise_and => .bitwise_and,
-                    .not => .bitwise_not,
                     .shift_left => .shift_left,
                     .shift_right => .shift_right,
                     .assign_add => .assign_add,
