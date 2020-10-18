@@ -73,7 +73,7 @@ pub const Inst = struct {
         /// Returns the type of that belongs to a `Tag`
         /// Can be used to cast to the correct Type from a `Tag`.
         pub fn Type(self: Tag) type {
-            return switch (self.tag) {
+            return switch (self) {
                 .negate,
                 .@"return",
                 .bitwise_not,
@@ -107,6 +107,7 @@ pub const Inst = struct {
                 .pair,
                 .load,
                 .branch,
+                .assign,
                 => Double,
                 .store => Triple,
                 .condition => Condition,
@@ -118,7 +119,6 @@ pub const Inst = struct {
                 .@"break", .@"continue", .type_def => NoOp,
                 .list, .map => DataStructure,
                 .decl => Decl,
-                .ident => Identifier,
                 .int => Int,
                 .string, .import, .comment, .arg => String,
                 .block => Block,
@@ -138,7 +138,7 @@ pub const Inst = struct {
     /// Casts `Inst` into `T`
     /// Caller must ensure tags are matching, if unsure
     /// use castTag()
-    pub fn as(self: *Inst, comptime T: type) T {
+    pub fn as(self: *Inst, comptime T: type) *T {
         return @fieldParentPtr(T, "base", self);
     }
 
@@ -319,7 +319,7 @@ pub const Module = struct {
                 .tag = .block,
                 .pos = pos,
             },
-            .instructions = instructions,
+            .instructions = try self.gpa.dupe(*Inst, instructions),
         };
         return &inst.base;
     }
@@ -355,7 +355,7 @@ pub const Module = struct {
                 .pos = pos,
             },
             .scope = scope,
-            .name = name,
+            .name = try self.gpa.dupe(u8, name),
             .is_mut = is_mut,
             .is_pub = is_pub,
             .index = index,
@@ -372,7 +372,7 @@ pub const Module = struct {
                 .tag = tag,
                 .pos = pos,
             },
-            .elements = elements,
+            .elements = try self.gpa.dupe(*Inst, elements),
         };
         return &inst.base;
     }
@@ -453,7 +453,7 @@ pub const Module = struct {
                 .tag = .@"enum",
                 .pos = pos,
             },
-            .value = nodes,
+            .value = try self.gpa.dupe(*Inst, nodes),
         };
         return &inst.base;
     }
@@ -467,7 +467,7 @@ pub const Module = struct {
                 .pos = pos,
             },
             .capture = capture,
-            .branches = branches,
+            .branches = try self.gpa.dupe(*Inst, branches),
         };
         return &inst.base;
     }
@@ -541,7 +541,7 @@ pub const Module = struct {
                 .tag = .call,
                 .pos = pos,
             },
-            .args = args,
+            .args = try self.gpa.dupe(*Inst, args),
             .func = func,
         };
         return &inst.base;

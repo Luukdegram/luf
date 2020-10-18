@@ -27,8 +27,14 @@ pub fn compile(
         .id = .global,
         .allocator = allocator,
     };
-    defer root_scope.symbols.deinit(allocator);
+    defer {
+        for (root_scope.symbols.items()) |entry| {
+            allocator.destroy(entry.value);
+        }
+        root_scope.symbols.deinit(allocator);
+    }
     var arena = std.heap.ArenaAllocator.init(allocator);
+    errdefer arena.deinit();
 
     var module = lir.Module{ .gpa = &arena.allocator };
 
@@ -158,12 +164,12 @@ pub const Compiler = struct {
         /// Defines a new symbol and saves it in the symbol table
         /// Returns an error if Symbol already exists
         fn define(self: *Scope, name: []const u8, mutable: bool, node: ast.Node, forward_declared: bool, index: ?u16) !?*Symbol {
+            if (self.symbols.contains(name)) return null;
+
             const new_index = index orelse @intCast(u16, self.symbols.items().len);
 
-            const symbol = try self.symbols.getOrPut(self.allocator, name);
-            if (symbol.found_existing) return null;
-
-            symbol.entry.value.* = .{
+            const symbol = try self.allocator.create(Symbol);
+            symbol.* = .{
                 .name = name,
                 .mutable = mutable,
                 .index = new_index,
@@ -173,7 +179,8 @@ pub const Compiler = struct {
                 .decl = undefined,
             };
 
-            return symbol.entry.value;
+            try self.symbols.putNoClobber(self.allocator, name, symbol);
+            return symbol;
         }
 
         /// Retrieves a `Symbol` from the Scopes symbol table, returns null if not found
@@ -183,6 +190,9 @@ pub const Compiler = struct {
 
         /// Cleans up the memory of the `Scope`
         fn deinit(self: *Scope) void {
+            for (self.symbols.items()) |entry| {
+                self.allocator.destroy(entry.value);
+            }
             self.symbols.deinit(self.allocator);
             self.allocator.destroy(self);
         }
@@ -213,7 +223,7 @@ pub const Compiler = struct {
 
     /// Sets the current `Scope` to its parent's scope and cleans up the closing scope's memory
     fn exitScope(self: *Compiler) void {
-        std.debug.assert(self.scope.id != .global); // can't escape the global scope
+        if (self.scope.id == .global) return; // can't escape the global scope
         if (self.scope.parent) |parent| {
             const old = self.scope;
             self.scope = parent;
@@ -448,7 +458,7 @@ pub const Compiler = struct {
 
         for (block.nodes) |node| list.appendAssumeCapacity(try self.resolveInst(node));
 
-        return self.ir.emitBlock(block.token.start, list.toOwnedSlice());
+        return self.ir.emitBlock(block.token.start, list.items);
     }
 
     /// Compiles an `ast.Node.Infix` node into a `lir.Inst.Double`
@@ -545,6 +555,7 @@ pub const Compiler = struct {
                     .{decl.name.identifier.value},
                 );
         }
+
         const symbol = (try self.defineSymbol(decl.name.identifier.value, decl.mutable, node, false)).?;
 
         const decl_value = try self.resolveInst(decl.value);
@@ -577,6 +588,7 @@ pub const Compiler = struct {
         const inner_type = try self.resolveScalarType(ds.type_def_key);
 
         var elements = try std.ArrayList(*lir.Inst).initCapacity(self.allocator, ds.value.?.len);
+        defer elements.deinit();
 
         // ds.value will only be null if it's specified as a type rather than an expression
         for (ds.value.?) |element, i| {
@@ -594,7 +606,7 @@ pub const Compiler = struct {
         return self.ir.emitList(
             if (ds.d_type == .array) .list else .map,
             ds.token.start,
-            elements.toOwnedSlice(),
+            elements.items,
         );
     }
 
@@ -664,7 +676,7 @@ pub const Compiler = struct {
                 args.appendAssumeCapacity(try self.resolveInst(arg));
             }
             const func = try self.resolveInst(call.function);
-            return self.ir.emitCall(call.token.start, func, args.toOwnedSlice());
+            return self.ir.emitCall(call.token.start, func, args.items);
         }
         //if it's an identifier, we first do a lookup to retrieve it's declaration node
         //then return the function declaration. else we return the function itself
@@ -710,7 +722,7 @@ pub const Compiler = struct {
 
             const func = try self.resolveInst(call.function);
 
-            return self.ir.emitCall(call.token.start, func, args.toOwnedSlice());
+            return self.ir.emitCall(call.token.start, func, args.items);
         };
 
         if (function_node.params.len != call.arguments.len)
@@ -734,7 +746,7 @@ pub const Compiler = struct {
 
         const func = try self.resolveInst(call.function);
 
-        return self.ir.emitCall(call.token.start, func, args.toOwnedSlice());
+        return self.ir.emitCall(call.token.start, func, args.items);
     }
 
     /// Compiles an `ast.Node.ReturnStatement` into a `lir.Inst.Single`
@@ -940,7 +952,7 @@ pub const Compiler = struct {
             list.appendAssumeCapacity(try self.ir.emitString(.string, n.tokenPos(), n.identifier.value));
         }
 
-        return self.ir.emitEnum(enm.token.start, list.toOwnedSlice());
+        return self.ir.emitEnum(enm.token.start, list.items);
     }
 
     /// Compiles an `ast.Node.SwitchLiteral` into a `lir.Inst.Switch`
@@ -959,7 +971,7 @@ pub const Compiler = struct {
             prongs.appendAssumeCapacity(try self.resolveInst(p));
         }
 
-        return self.ir.emitSwitch(sw.token.start, capture, prongs.toOwnedSlice());
+        return self.ir.emitSwitch(sw.token.start, capture, prongs.items);
     }
 
     /// Compiles an `ast.Node.SwitchProng` into a `lir.Inst.Double`
@@ -985,6 +997,125 @@ pub const Compiler = struct {
     }
 };
 
-comptime {
-    std.meta.refAllDecls(@This());
+/// Tests if given input results in the expected instructions
+fn testInput(input: []const u8, expected: []const lir.Inst.Tag) !void {
+    const alloc = testing.allocator;
+
+    var err = errors.Errors.init(alloc);
+    defer err.deinit();
+
+    var result = try compile(alloc, input, &err);
+    defer result.deinit();
+
+    testing.expectEqual(expected.len, result.instructions.len);
+    for (result.instructions) |inst, i| {
+        testing.expectEqual(expected[i], inst.tag);
+    }
+}
+
+test "Arithmetic" {
+    const test_cases = .{
+        .{
+            .input = "1 + 2",
+            .tags = &[_]lir.Inst.Tag{.add},
+        },
+        .{
+            .input = "3 - 1",
+            .tags = &[_]lir.Inst.Tag{.sub},
+        },
+        .{
+            .input = "1 * 2",
+            .tags = &[_]lir.Inst.Tag{.mul},
+        },
+        .{
+            .input = "2 / 2",
+            .tags = &[_]lir.Inst.Tag{.div},
+        },
+        .{
+            .input = "1 + 2 * 2",
+            .tags = &[_]lir.Inst.Tag{.add},
+        },
+        .{
+            .input = "5 * 2 / 5 - 8",
+            .tags = &[_]lir.Inst.Tag{.sub},
+        },
+        .{
+            .input = "1 < 2",
+            .tags = &[_]lir.Inst.Tag{.lt},
+        },
+        .{
+            .input = "2 > 1",
+            .tags = &[_]lir.Inst.Tag{.gt},
+        },
+        .{
+            .input = "1 == 2",
+            .tags = &[_]lir.Inst.Tag{.eql},
+        },
+        .{
+            .input = "1 != 2",
+            .tags = &[_]lir.Inst.Tag{.nql},
+        },
+        .{
+            .input = "true == false",
+            .tags = &[_]lir.Inst.Tag{.eql},
+        },
+        .{
+            .input = "-1",
+            .tags = &[_]lir.Inst.Tag{.negate},
+        },
+    };
+
+    inline for (test_cases) |case| {
+        try testInput(case.input, case.tags);
+    }
+}
+
+test "Conditional" {
+    const test_cases = .{
+        .{
+            .input = "if (true) { 5 } 10",
+            .tags = &[_]lir.Inst.Tag{ .condition, .int },
+        },
+        .{
+            .input = "if (true) { 5 } else { 7 } 10",
+            .tags = &[_]lir.Inst.Tag{ .condition, .int },
+        },
+    };
+
+    inline for (test_cases) |case| {
+        try testInput(case.input, case.tags);
+    }
+}
+
+test "Declaration" {
+    const input = "const x = \"foo\"";
+
+    const alloc = testing.allocator;
+    var err = errors.Errors.init(alloc);
+    defer err.deinit();
+
+    var result = try compile(alloc, input, &err);
+    defer result.deinit();
+
+    var inst = result.instructions[0];
+
+    testing.expectEqual(lir.Inst.Tag.decl, inst.tag);
+
+    const decl = inst.as(lir.Inst.Decl);
+    testing.expectEqualStrings("x", decl.name);
+    testing.expectEqual(lir.Inst.Tag.string, decl.value.tag);
+    testing.expectEqualStrings("foo", decl.value.as(lir.Inst.String).value);
+}
+
+test "Lists" {
+    const test_cases = .{
+        .{
+            .input = "const x = []int{1, 2, 3}",
+            .tags = &[_]lir.Inst.Tag{.decl},
+        },
+    };
+
+    inline for (test_cases) |case| {
+        try testInput(case.input, case.tags);
+    }
 }
