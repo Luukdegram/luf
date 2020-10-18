@@ -1,9 +1,9 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
-pub const _value = @import("value.zig");
-pub const Type = _value.Type;
-pub const Value = _value.Value;
+comptime {
+    std.meta.refAllDecls(@This());
+}
 
 ///! This file contains Luf's typed intermediate representation
 ///! This pass is used by codegen to construct other output such as WASM,
@@ -50,8 +50,6 @@ pub const Inst = struct {
         @"return",
         negate,
         import,
-        int,
-        string,
         mod,
         @"and",
         @"or",
@@ -61,12 +59,14 @@ pub const Inst = struct {
         bitwise_not,
         shift_left,
         shift_right,
-        assign_add,
-        assign_sub,
-        assign_mul,
-        assign_div,
         not,
         block,
+        comment,
+        store,
+        pair,
+        load,
+        type_def,
+        branch,
 
         /// Returns the type of that belongs to a `Tag`
         /// Can be used to cast to the correct Type from a `Tag`.
@@ -101,19 +101,23 @@ pub const Inst = struct {
                 .assign_sub,
                 .assign_mul,
                 .assign_div,
+                .pair,
+                .load,
+                .branch,
                 => Double,
-                .condition => Triple,
+                .store => Triple,
+                .condition => Condition,
                 .primitive => Primitive,
                 .func => Function,
                 .call => Call,
                 .@"for" => Loop,
                 .@"switch" => Switch,
-                .@"break", .@"continue" => NoOp,
+                .@"break", .@"continue", .type_def => NoOp,
                 .list, .map => DataStructure,
                 .decl => Decl,
                 .ident => Identifier,
                 .int => Int,
-                .string, .import => String,
+                .string, .import, .comment => String,
                 .block => Block,
             };
         }
@@ -176,9 +180,9 @@ pub const Inst = struct {
 
     pub const Function = struct {
         base: Inst,
-        params: []*Inst,
         block: *Inst,
         locals: usize,
+        params: usize,
     };
 
     pub const Call = struct {
@@ -190,9 +194,8 @@ pub const Inst = struct {
     pub const Loop = struct {
         base: Inst,
         it: *Inst,
-        capture: *Inst,
-        index: ?*Inst,
         block: *Inst,
+        has_index: bool,
     };
 
     pub const NoOp = struct {
@@ -201,7 +204,7 @@ pub const Inst = struct {
 
     pub const Enum = struct {
         base: Inst,
-        value: [][]const u8,
+        value: []*Inst,
     };
 
     pub const Switch = struct {
@@ -228,13 +231,6 @@ pub const Inst = struct {
         rhs: *Inst,
     };
 
-    pub const Store = struct {
-        base: Inst,
-        lhs: *Inst,
-        index: *Inst,
-        rhs: *Inst,
-    };
-
     pub const Single = struct {
         base: Inst,
         rhs: *Inst,
@@ -252,10 +248,37 @@ pub const Inst = struct {
         index: *Inst,
         rhs: *Inst,
     };
+
+    pub const Condition = struct {
+        base: Inst,
+        cond: *Inst,
+        then_block: *Inst,
+        else_block: ?*Inst,
+    };
+};
+
+pub const Instructions = std.ArrayListUnmanaged(*Inst);
+
+/// Final compilation unit. Contains a list of all IR instructions
+pub const CompileUnit = struct {
+    /// the final instructions list
+    instructions: []const *Inst,
+    /// The allocator used to create the instructions
+    gpa: *Allocator,
+    /// state used to free all instructions at once
+    state: std.heap.ArenaAllocator.State,
+
+    /// Frees memory of generated instructions
+    pub fn deinit(self: *CompileUnit) void {
+        self.state.promote(self.gpa).deinit();
+        self.gpa.free(self.instructions);
+        self.* = undefined;
+    }
 };
 
 /// Module contains helper functions to generate IR
 pub const Module = struct {
+    /// Allocator to create new instructions
     gpa: *Allocator,
 
     /// Creates a new `Int` instruction
@@ -353,11 +376,11 @@ pub const Module = struct {
     }
 
     /// Creates a new `List` instruction with `Type` `scalar_type`
-    pub fn emitList(self: *Module, pos: usize, elements: []*Inst) *Inst {
+    pub fn emitList(self: *Module, tag: *Inst.Tag, pos: usize, elements: []*Inst) *Inst {
         const inst = try self.gpa.create(Inst.DataStructure);
         inst.* = .{
             .base = .{
-                .tag = .list,
+                .tag = tag,
                 .pos = pos,
             },
             .elements = elements,
@@ -371,7 +394,7 @@ pub const Module = struct {
         pos: usize,
         block: *Inst,
         locals: usize,
-        params: []*Inst,
+        params: usize,
     ) *Inst {
         const inst = try self.gpa.create(Inst.Function);
         inst.* = .{
@@ -391,9 +414,8 @@ pub const Module = struct {
         self: *Module,
         pos: usize,
         iterator: *Inst,
-        capture: *Inst,
-        index: ?*Inst,
         block: *Inst,
+        has_index: bool,
     ) *Inst {
         const inst = try self.gpa.create(Inst.Loop);
         inst.* = .{
@@ -402,9 +424,8 @@ pub const Module = struct {
                 .pos = pos,
             },
             .it = iterator,
-            .capture = capture,
-            .index = index,
             .block = block,
+            .has_index = has_index,
         };
         return &inst.base;
     }
@@ -449,7 +470,7 @@ pub const Module = struct {
     }
 
     /// Creates a `Switch` instruction
-    pub fn emitSwitcH(self: *Module, pos: usize, capture: *Inst, branches: []*Inst) *Inst {
+    pub fn emitSwitch(self: *Module, pos: usize, capture: *Inst, branches: []*Inst) *Inst {
         const inst = try self.gpa.create(Inst.Switch);
         inst.* = .{
             .base = .{
@@ -503,6 +524,36 @@ pub const Module = struct {
             .lhs = lhs,
             .index = index,
             .rhs = rhs,
+        };
+        return &inst.base;
+    }
+
+    /// Emits a `Condition` instruction, used for if expressions
+    pub fn emitCond(self: *Module, pos: usize, cond: *Inst, then_block: *Inst, else_block: ?*Inst) *Inst {
+        const inst = try self.gpa.create(Inst.Condition);
+        inst.* = .{
+            .base = .{
+                .tag = .condition,
+                .pos = pos,
+            },
+            .cond = cond,
+            .then_block = then_block,
+            .else_block = else_block,
+        };
+
+        return &inst.base;
+    }
+
+    /// Emites a `Call` instruction which calls a function
+    pub fn emitCall(self: *Module, pos: usize, func: *Inst, args: []*Inst) *Inst {
+        const inst = try self.gpa.create(Inst.Call);
+        inst.* = .{
+            .base = .{
+                .tag = .call,
+                .pos = pos,
+            },
+            .args = args,
+            .func = func,
         };
         return &inst.base;
     }
