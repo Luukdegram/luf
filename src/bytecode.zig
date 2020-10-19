@@ -115,7 +115,6 @@ pub const Instructions = struct {
             .shift_right,
             .@"and",
             .@"or",
-            .assign,
             .eql_lt,
             .eql_gt,
             .mod,
@@ -127,6 +126,9 @@ pub const Instructions = struct {
             .ident => try self.emitIdent(inst.as(lir.Inst.Single)),
             .decl => try self.emitDecl(inst.as(lir.Inst.Decl)),
             .@"return" => try self.emitRet(inst.as(lir.Inst.Single)),
+            .assign => try self.emitAssign(inst.as(lir.Inst.Double)),
+            .store => try self.emitStore(inst.as(lir.Inst.Triple)),
+            .load => try self.emitLoad(inst.as(lir.Inst.Double)),
             .func => {},
             .call => {},
             .@"for" => {},
@@ -142,9 +144,7 @@ pub const Instructions = struct {
             .import => {},
             .block => {},
             .comment => {},
-            .store => {},
             .pair => {},
-            .load => {},
             .type_def => {},
             .branch => {},
         }
@@ -293,6 +293,34 @@ pub const Instructions = struct {
     fn emitRet(self: *Instructions, single: *lir.Inst.Single) !void {
         try self.gen(single.rhs);
         try self.emit(.return_value);
+    }
+
+    /// Generates bytecode to reassign a global or local variable
+    fn emitAssign(self: *Instructions, double: *lir.Inst.Double) !void {
+        const decl = double.lhs.as(lir.Inst.Decl);
+        try self.gen(double.rhs);
+        try self.emitPtr(
+            if (decl.scope == .global) .assign_global else .assign_local,
+            decl.index,
+        );
+    }
+
+    /// Emits bytecode to assign a value to an element inside a map or list
+    /// lhs is the list, index is the index to retrieve the element from the list
+    /// and finally, rhs is the new value to assign to the element.
+    fn emitStore(self: *Instructions, triple: *lir.Inst.Triple) !void {
+        try self.gen(triple.lhs);
+        try self.gen(triple.index);
+        try self.gen(triple.rhs);
+        try self.emit(.set_by_index);
+    }
+
+    /// Emits bytecode to retrieve an element from a map or list
+    /// where lhs is the list and rhs is an index
+    fn emitLoad(self: *Instructions, double: *lir.Inst.Double) !void {
+        try self.gen(double.lhs);
+        try self.gen(double.rhs);
+        try self.emit(.get_by_index);
     }
 
     /// Creates a `ByteCode` object from the current instructions
@@ -699,6 +727,23 @@ test "IR to Bytecode - Arithmetic" {
         .{
             .input = "!true",
             .opcodes = &[_]Opcode{ .load_true, .not, .pop },
+        },
+    };
+
+    inline for (test_cases) |case| {
+        try testInput(case.input, case.opcodes);
+    }
+}
+
+test "IR to Bytecode - Declaration" {
+    const test_cases = .{
+        .{
+            .input = "const x = 5",
+            .opcodes = &[_]Opcode{ .load_integer, .bind_global },
+        },
+        .{
+            .input = "const x = \"foo\"",
+            .opcodes = &[_]Opcode{ .load_string, .bind_global },
         },
     };
 
