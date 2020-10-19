@@ -68,7 +68,6 @@ pub const Inst = struct {
         load,
         type_def,
         branch,
-        arg,
 
         /// Returns the type of that belongs to a `Tag`
         /// Can be used to cast to the correct Type from a `Tag`.
@@ -120,7 +119,7 @@ pub const Inst = struct {
                 .list, .map => DataStructure,
                 .decl => Decl,
                 .int => Int,
-                .string, .import, .comment, .arg => String,
+                .string, .import, .comment => String,
                 .block => Block,
                 .@"enum" => Enum,
             };
@@ -150,7 +149,7 @@ pub const Inst = struct {
         is_mut: bool = false,
         scope: Scope,
         /// position within the global or local scope
-        index: usize,
+        index: u32,
         value: *Inst,
 
         pub const Scope = enum { global, local };
@@ -342,7 +341,7 @@ pub const Module = struct {
         self: *Module,
         pos: usize,
         name: []const u8,
-        index: usize,
+        index: u32,
         scope: Inst.Decl.Scope,
         is_pub: bool,
         is_mut: bool,

@@ -448,7 +448,7 @@ pub const Compiler = struct {
             .switch_prong => |prong| self.comileProng(prong),
             .comment => |cmt| self.ir.emitString(.comment, node.tokenPos(), cmt.value),
             .type_def => |td| self.compileTypeDef(td),
-            .func_arg => |arg| self.ir.emitString(.arg, node.tokenPos(), arg.value),
+            else => unreachable,
         };
     }
 
@@ -1178,6 +1178,10 @@ test "Assign" {
         .{
             .input = "mut x = 5 x = 6",
             .tags = &[_]lir.Inst.Tag{ .decl, .assign },
+        },
+        .{
+            .input = "mut x = 5 x += 6 x",
+            .tags = &[_]lir.Inst.Tag{ .decl, .assign_add, .ident },
         },
     };
 

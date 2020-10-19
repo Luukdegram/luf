@@ -1,5 +1,6 @@
 const std = @import("std");
 const testing = std.testing;
+const lir = @import("ir.zig");
 
 /// Opcode for the virtual machine
 pub const Opcode = enum(u8) {
@@ -71,54 +72,235 @@ pub const Opcode = enum(u8) {
 /// Utility struct with helper functions to make it easier
 /// to manage instructions
 pub const Instructions = struct {
-    list: std.ArrayList(Instruction),
+    list: std.ArrayListUnmanaged(Instruction),
+    gpa: *std.mem.Allocator,
+
+    pub const Error = error{OutOfMemory};
 
     /// Creates a new instance of `Instructions`
-    pub fn init(allocator: *std.mem.Allocator) Instructions {
-        return .{ .list = std.ArrayList(Instruction).init(allocator) };
+    pub fn init(gpa: *std.mem.Allocator) Instructions {
+        return .{ .list = std.ArrayListUnmanaged(Instruction){}, .gpa = gpa };
+    }
+
+    /// Creates a new instance of `Instructions` aswell as codegen bytecode instructions from Luf's IR
+    pub fn fromCu(gpa: *std.mem.Allocator, cu: lir.CompileUnit) !ByteCode {
+        var instructions = init(gpa);
+
+        for (cu.instructions) |inst| {
+            try instructions.gen(inst);
+        }
+
+        return instructions.final();
+    }
+
+    /// Generates and appends instructions based on the given IR instruction
+    fn gen(self: *Instructions, inst: *lir.Inst) Error!void {
+        switch (inst.tag) {
+            .add,
+            .sub,
+            .mul,
+            .div,
+            .eql,
+            .nql,
+            .lt,
+            .gt,
+            .assign_add,
+            .assign_sub,
+            .assign_mul,
+            .assign_div,
+            .bitwise_xor,
+            .bitwise_or,
+            .bitwise_and,
+            .shift_left,
+            .shift_right,
+            .@"and",
+            .@"or",
+            .assign,
+            .eql_lt,
+            .eql_gt,
+            .mod,
+            => try self.emitInfix(inst.as(lir.Inst.Double)),
+            .not, .bitwise_not, .negate => try self.emitPrefix(inst.as(lir.Inst.Single)),
+            .int => try self.emitInt(inst.as(lir.Inst.Int)),
+            .string => try self.emitString(inst.as(lir.Inst.String)),
+            .primitive => try self.emitPrim(inst.as(lir.Inst.Primitive)),
+            .ident => try self.emitIdent(inst.as(lir.Inst.Single)),
+            .decl => try self.emitDecl(inst.as(lir.Inst.Decl)),
+            .@"return" => try self.emitRet(inst.as(lir.Inst.Single)),
+            .func => {},
+            .call => {},
+            .@"for" => {},
+            .@"while" => {},
+            .@"switch" => {},
+            .condition => {},
+            .@"break" => {},
+            .@"continue" => {},
+            .@"enum" => {},
+            .range => {},
+            .list => {},
+            .map => {},
+            .import => {},
+            .block => {},
+            .comment => {},
+            .store => {},
+            .pair => {},
+            .load => {},
+            .type_def => {},
+            .branch => {},
+        }
     }
 
     /// Return the amount of instructions
-    pub fn len(self: Instructions) u32 {
+    fn len(self: Instructions) u32 {
         return @intCast(u32, self.list.items.len);
     }
 
     /// Appends a new `Instruction`
-    pub fn append(self: *Instructions, inst: Instruction) !void {
-        return self.list.append(inst);
+    fn append(self: *Instructions, inst: Instruction) !void {
+        return self.list.append(self.gpa, inst);
     }
 
     /// Appends a new `Instruction` and returns the position of the instruction
-    pub fn appendRetPos(self: *Instructions, inst: Instruction) !u32 {
+    fn appendRetPos(self: *Instructions, inst: Instruction) !u32 {
         try self.list.append(inst);
         return self.len() - 1;
     }
 
     /// Can be used to check if last instruction is of given opcode
-    pub fn lastIs(self: Instructions, op: Opcode) bool {
+    fn lastIs(self: Instructions, op: Opcode) bool {
         const last = self.list.items[self.list.items.len - 1];
         return last.getOp() == op;
     }
 
     /// Replaces the ptr of an instruction, this is used for jumping instructions
-    pub fn replacePtr(self: *Instructions, pos: u32, ptr: u32) void {
+    fn replacePtr(self: *Instructions, pos: u32, ptr: u32) void {
         self.list.items[pos].ptr.pos = ptr;
     }
 
     /// Replaces the opcode of the last instruction
     /// Asserts there's atleast 1 instruction saved
-    pub fn replaceLastOp(self: *Instructions, op: Opcode) void {
+    fn replaceLastOp(self: *Instructions, op: Opcode) void {
         self.list.items[self.len() - 1].op = op;
     }
 
     /// Pops the last instruction
-    pub fn pop(self: *Instructions) void {
+    fn pop(self: *Instructions) void {
         _ = self.list.popOrNull();
     }
 
-    /// Frees all `Instructions` memory
-    pub fn deinit(self: Instructions) void {
-        self.list.deinit();
+    /// emits an integer
+    fn emitInt(self: *Instructions, int: *lir.Inst.Int) !void {
+        try self.append(Instruction.genInteger(int.value));
+    }
+
+    /// emits a string
+    fn emitString(self: *Instructions, string: *lir.Inst.String) !void {
+        try self.append(Instruction.genString(try self.gpa.dupe(u8, string.value)));
+    }
+
+    /// Emits a function
+    fn emitFunc(self: *Instructions, name: []const u8, entry_point: u32, func: *lir.Inst.Function) !void {
+        try self.append(Instruction.genFunction(
+            try self.gpa.dupe(u8, name),
+            func.locals,
+            func.params.len,
+            entry_point,
+        ));
+    }
+
+    /// emits a single opcode
+    fn emit(self: *Instructions, op: Opcode) !void {
+        try self.append(Instruction.gen(op));
+    }
+
+    /// Emits an opcode that contains an aditional index
+    fn emitPtr(self: *Instructions, op: Opcode, ptr: u32) !void {
+        try self.append(Instruction.genPtr(op, ptr));
+    }
+
+    /// Generates bytecode for an arithmetic operation
+    fn emitInfix(self: *Instructions, double: *lir.Inst.Double) !void {
+        try self.gen(double.lhs);
+        try self.gen(double.rhs);
+        try self.emit(switch (double.base.tag) {
+            .add => .add,
+            .mul => .mul,
+            .sub => .sub,
+            .div => .div,
+            .lt => .less_than,
+            .gt => .greater_than,
+            .eql => .equal,
+            .nql => .not_equal,
+            .eql_lt => .less_than_equal,
+            .eql_gt => .greater_than_equal,
+            .mod => .mod,
+            .@"and" => .@"and",
+            .@"or" => .@"or",
+            .bitwise_xor => .bitwise_xor,
+            .bitwise_or => .bitwise_or,
+            .bitwise_and => .bitwise_and,
+            .not => .bitwise_not,
+            .shift_left => .shift_left,
+            .shift_right => .shift_right,
+            .assign_add => .assign_add,
+            .assign_sub => .assign_sub,
+            .assign_mul => .assign_mul,
+            .assign_div => .assign_div,
+            else => unreachable,
+        });
+    }
+
+    /// Emits bytecode to load a prefix into the VM
+    fn emitPrefix(self: *Instructions, single: *lir.Inst.Single) !void {
+        try self.gen(single.rhs);
+        try self.emit(switch (single.base.tag) {
+            .negate => .minus,
+            .not => .not,
+            .bitwise_not => .bitwise_not,
+            else => unreachable,
+        });
+    }
+
+    /// Emits a primitive bytecode
+    fn emitPrim(self: *Instructions, prim: *lir.Inst.Primitive) !void {
+        try self.emit(switch (prim.prim_type) {
+            .@"true" => .load_true,
+            .@"false" => .load_false,
+            .@"void" => .load_void,
+            .nil => .load_nil,
+        });
+    }
+
+    /// Generates the bytecode to load an identifier into the vm
+    fn emitIdent(self: *Instructions, single: *lir.Inst.Single) !void {
+        const decl = single.rhs.as(lir.Inst.Decl);
+        try self.emitPtr(
+            if (decl.scope == .global) .load_global else .load_local,
+            decl.index,
+        );
+    }
+
+    /// Generates bytecode to bind a value to an identifier
+    fn emitDecl(self: *Instructions, decl: *lir.Inst.Decl) !void {
+        try self.gen(decl.value);
+        try self.emitPtr(
+            if (decl.scope == .global) .bind_global else .bind_local,
+            decl.index,
+        );
+    }
+
+    /// Generates bytecode for returning a value
+    fn emitRet(self: *Instructions, single: *lir.Inst.Single) !void {
+        try self.gen(single.rhs);
+        try self.emit(.return_value);
+    }
+
+    /// Creates a `ByteCode` object from the current instructions
+    pub fn final(self: *Instructions) ByteCode {
+        return .{
+            .instructions = self.list.toOwnedSlice(self.gpa),
+            .allocator = self.gpa,
+        };
     }
 };
 
@@ -133,7 +315,7 @@ pub const Instruction = union(Type) {
     integer: u64,
     string: []const u8,
     function: struct {
-        name: ?[]const u8,
+        name: []const u8,
         locals: u32,
         arg_len: u8,
         entry: u32,
@@ -175,7 +357,7 @@ pub const Instruction = union(Type) {
     }
 
     /// Generates a `function` Instruction
-    pub fn genFunction(name: ?[]const u8, locals: usize, arg_len: usize, entry_point: u32) Instruction {
+    pub fn genFunction(name: []const u8, locals: usize, arg_len: usize, entry_point: u32) Instruction {
         return .{
             .function = .{
                 .name = name,
@@ -215,7 +397,7 @@ pub const ByteCode = struct {
     pub fn deinit(self: *ByteCode) void {
         for (self.instructions) |i| {
             if (i == .string) self.allocator.free(i.string);
-            if (i == .function) if (i.function.name) |name| self.allocator.free(name);
+            if (i == .function) self.allocator.free(i.function.name);
         }
         self.allocator.free(self.instructions);
         self.* = undefined;
@@ -284,7 +466,7 @@ pub const Encoder = struct {
     /// Emits a `load_func` opcode where the struct is encoded as a byte slice
     fn emitFunc(
         writer: anytype,
-        name: ?[]const u8,
+        name: []const u8,
         func: struct {
             locals: u32,
             arg_len: u8,
@@ -292,13 +474,9 @@ pub const Encoder = struct {
         },
     ) @TypeOf(writer).Error!void {
         try emitOp(writer, .load_func);
-        const len: u8 = if (name) |n| @intCast(u8, n.len) else 0;
+        const len: u8 = @intCast(u8, name.len);
         try writer.writeIntLittle(u8, len);
-
-        if (name) |n| {
-            try writer.writeAll(n);
-        }
-
+        try writer.writeAll(name);
         try writer.writeIntLittle(u32, func.locals);
         try writer.writeIntLittle(u8, func.arg_len);
         try writer.writeIntLittle(u32, func.entry);
@@ -313,7 +491,7 @@ pub const Decoder = struct {
         errdefer {
             for (instructions.items) |i| {
                 if (i == .string) allocator.free(i.string);
-                if (i == .function and i.function.name != null) allocator.free(i.function.name.?);
+                if (i == .function) allocator.free(i.function.name);
             }
             instructions.deinit();
         }
@@ -362,7 +540,7 @@ pub const Decoder = struct {
             if ((try reader.readAll(string)) < name_length)
                 return error.InvalidBytecode;
             break :blk string;
-        } else null;
+        } else "";
 
         inst.* = .{
             .function = .{
@@ -441,7 +619,7 @@ test "Encoding and decoding of instructions" {
             .string => testing.expectEqualStrings(inst.string, decoded[i].string),
             .integer => testing.expectEqual(inst.integer, decoded[i].integer),
             .function => |func| {
-                testing.expectEqualStrings(func.name.?, decoded[i].function.name.?);
+                testing.expectEqualStrings(func.name, decoded[i].function.name);
                 testing.expectEqual(func.locals, decoded[i].function.locals);
                 testing.expectEqual(func.arg_len, decoded[i].function.arg_len);
                 testing.expectEqual(func.entry, decoded[i].function.entry);
@@ -451,6 +629,80 @@ test "Encoding and decoding of instructions" {
 
     for (decoded) |inst| {
         if (inst == .string) allocator.free(inst.string);
-        if (inst == .function and inst.function.name != null) allocator.free(inst.function.name.?);
+        if (inst == .function) allocator.free(inst.function.name);
+    }
+}
+
+fn testInput(input: []const u8, expected: []const Opcode) !void {
+    var alloc = testing.allocator;
+
+    var err = @import("error.zig").Errors.init(alloc);
+    defer err.deinit();
+
+    var cu = try @import("compiler.zig").compile(alloc, input, &err);
+    defer cu.deinit();
+
+    var result = try Instructions.fromCu(alloc, cu);
+    defer result.deinit();
+
+    for (result.instructions) |inst, i| {
+        testing.expectEqual(expected[i], inst.getOp());
+    }
+}
+
+test "IR to Bytecode - Arithmetic" {
+    const test_cases = .{
+        .{
+            .input = "1 + 2",
+            .opcodes = &[_]Opcode{ .load_integer, .load_integer, .add, .pop },
+        },
+        .{
+            .input = "3 - 1",
+            .opcodes = &[_]Opcode{ .load_integer, .load_integer, .sub, .pop },
+        },
+        .{
+            .input = "1 * 2",
+            .opcodes = &[_]Opcode{ .load_integer, .load_integer, .mul, .pop },
+        },
+        .{
+            .input = "2 / 2",
+            .opcodes = &[_]Opcode{ .load_integer, .load_integer, .div, .pop },
+        },
+        .{
+            .input = "true",
+            .opcodes = &[_]Opcode{ .load_true, .pop },
+        },
+        .{
+            .input = "1 > 2",
+            .opcodes = &[_]Opcode{ .load_integer, .load_integer, .greater_than, .pop },
+        },
+        .{
+            .input = "1 < 2",
+            .opcodes = &[_]Opcode{ .load_integer, .load_integer, .less_than, .pop },
+        },
+        .{
+            .input = "1 == 2",
+            .opcodes = &[_]Opcode{ .load_integer, .load_integer, .equal, .pop },
+        },
+        .{
+            .input = "1 != 2",
+            .opcodes = &[_]Opcode{ .load_integer, .load_integer, .not_equal, .pop },
+        },
+        .{
+            .input = "true == false",
+            .opcodes = &[_]Opcode{ .load_true, .load_false, .equal, .pop },
+        },
+        .{
+            .input = "-1",
+            .opcodes = &[_]Opcode{ .load_integer, .minus, .pop },
+        },
+        .{
+            .input = "!true",
+            .opcodes = &[_]Opcode{ .load_true, .not, .pop },
+        },
+    };
+
+    inline for (test_cases) |case| {
+        try testInput(case.input, case.opcodes);
     }
 }
