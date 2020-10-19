@@ -395,11 +395,11 @@ pub const Compiler = struct {
             const decl = n.declaration;
             const name = decl.name.identifier.value;
 
-            const symbol = try module.symbols.getOrPut(self.allocator, name);
-            if (symbol.found_existing)
+            if (module.symbols.contains(name))
                 return self.fail("Identifier '{}' already exists", n.declaration.name.tokenPos(), .{name});
 
-            symbol.entry.value.* = .{
+            const symbol = try self.allocator.create(Symbol);
+            symbol.* = .{
                 .name = name,
                 .mutable = decl.mutable,
                 .scope = .global,
@@ -408,6 +408,8 @@ pub const Compiler = struct {
                 .index = self.gc,
                 .decl = undefined,
             };
+
+            try module.symbols.putNoClobber(self.allocator, name, symbol);
 
             self.gc += 1;
         }

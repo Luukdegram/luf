@@ -129,24 +129,22 @@ pub const Instructions = struct {
             .assign => try self.emitAssign(inst.as(lir.Inst.Double)),
             .store => try self.emitStore(inst.as(lir.Inst.Triple)),
             .load => try self.emitLoad(inst.as(lir.Inst.Double)),
+            .list, .map => try self.emitList(inst.as(lir.Inst.DataStructure)),
+            .pair => try self.emitPair(inst.as(lir.Inst.Double)),
+            .range => try self.emitRange(inst.as(lir.Inst.Double)),
+            .import => try self.emitModule(inst.as(lir.Inst.String)),
+            .@"enum" => try self.emitEnum(inst.as(lir.Inst.Enum)),
             .func => {},
             .call => {},
             .@"for" => {},
             .@"while" => {},
             .@"switch" => {},
+            .branch => {},
             .condition => {},
             .@"break" => {},
             .@"continue" => {},
-            .@"enum" => {},
-            .range => {},
-            .list => {},
-            .map => {},
-            .import => {},
             .block => {},
-            .comment => {},
-            .pair => {},
-            .type_def => {},
-            .branch => {},
+            .comment, .type_def => {}, //VM doesn't do anything with this
         }
     }
 
@@ -188,6 +186,16 @@ pub const Instructions = struct {
         _ = self.list.popOrNull();
     }
 
+    /// emits a single opcode
+    fn emit(self: *Instructions, op: Opcode) !void {
+        try self.append(Instruction.gen(op));
+    }
+
+    /// Emits an opcode that contains an aditional index/pointer to a length/object/position
+    fn emitPtr(self: *Instructions, op: Opcode, ptr: u32) !void {
+        try self.append(Instruction.genPtr(op, ptr));
+    }
+
     /// emits an integer
     fn emitInt(self: *Instructions, int: *lir.Inst.Int) !void {
         try self.append(Instruction.genInteger(int.value));
@@ -206,16 +214,6 @@ pub const Instructions = struct {
             func.params.len,
             entry_point,
         ));
-    }
-
-    /// emits a single opcode
-    fn emit(self: *Instructions, op: Opcode) !void {
-        try self.append(Instruction.gen(op));
-    }
-
-    /// Emits an opcode that contains an aditional index
-    fn emitPtr(self: *Instructions, op: Opcode, ptr: u32) !void {
-        try self.append(Instruction.genPtr(op, ptr));
     }
 
     /// Generates bytecode for an arithmetic operation
@@ -321,6 +319,37 @@ pub const Instructions = struct {
         try self.gen(double.lhs);
         try self.gen(double.rhs);
         try self.emit(.get_by_index);
+    }
+
+    /// Generates bytecode from IR to create either a list or map
+    fn emitList(self: *Instructions, ds: *lir.Inst.DataStructure) !void {
+        for (ds.elements) |e| try self.gen(e);
+        try self.emit(if (ds.base.tag == .list) .make_array else .make_map);
+    }
+
+    /// Emits bytecode to generate a key-value pair for maps
+    fn emitPair(self: *Instructions, double: *lir.Inst.Double) !void {
+        try self.gen(double.lhs);
+        try self.gen(double.rhs);
+    }
+
+    /// Generates bytecode to create a range
+    fn emitRange(self: *Instructions, double: *lir.Inst.Double) !void {
+        try self.gen(double.lhs);
+        try self.gen(double.rhs);
+        try self.emit(.make_range);
+    }
+
+    /// Emits .load_module bytecode with filename of the imported module
+    fn emitModule(self: *Instructions, string: *lir.Inst.String) !void {
+        try self.emitString(string);
+        try self.emit(.load_module);
+    }
+
+    /// Emites the bytecode required to build an enum
+    fn emitEnum(self: *Instructions, enm: *lir.Inst.Enum) !void {
+        for (enm.value) |e| try self.gen(e);
+        try self.emit(.make_enum);
     }
 
     /// Creates a `ByteCode` object from the current instructions
@@ -735,7 +764,7 @@ test "IR to Bytecode - Arithmetic" {
     }
 }
 
-test "IR to Bytecode - Declaration" {
+test "IR to Bytecode - Non control flow" {
     const test_cases = .{
         .{
             .input = "const x = 5",
@@ -744,6 +773,42 @@ test "IR to Bytecode - Declaration" {
         .{
             .input = "const x = \"foo\"",
             .opcodes = &[_]Opcode{ .load_string, .bind_global },
+        },
+        .{
+            .input = "const x = []int{1, 2, 3}",
+            .opcodes = &[_]Opcode{ .load_integer, .load_integer, .load_integer, .make_array, .bind_global },
+        },
+        .{
+            .input = "const x = []int:int{1: 2, 2: 1, 5: 6}",
+            .opcodes = &[_]Opcode{
+                .load_integer,
+                .load_integer,
+                .load_integer,
+                .load_integer,
+                .load_integer,
+                .load_integer,
+                .make_map,
+                .bind_global,
+            },
+        },
+        .{
+            .input = "const x = 1..5",
+            .opcodes = &[_]Opcode{
+                .load_integer,
+                .load_integer,
+                .make_range,
+                .bind_global,
+            },
+        },
+        .{
+            .input = "const x = enum{first_value, second_value, third_value}",
+            .opcodes = &[_]Opcode{
+                .load_string,
+                .load_string,
+                .load_string,
+                .make_enum,
+                .bind_global,
+            },
         },
     };
 
