@@ -53,6 +53,7 @@ pub fn compile(
     try compiler.forwardDeclareNodes(tree.nodes);
 
     for (tree.nodes) |node| {
+        if (node == .declaration and node.declaration.value == .func_lit) continue; // already compiled above
         try compiler.instructions.append(allocator, try compiler.resolveInst(node));
     }
 
@@ -745,7 +746,6 @@ pub const Compiler = struct {
         }
 
         const func = try self.resolveInst(call.function);
-
         return self.ir.emitCall(call.token.start, func, args.items);
     }
 
@@ -1112,6 +1112,72 @@ test "Lists" {
         .{
             .input = "const x = []int{1, 2, 3}",
             .tags = &[_]lir.Inst.Tag{.decl},
+        },
+        .{
+            .input = "const x = []int{1, 2, 3}[0]",
+            .tags = &[_]lir.Inst.Tag{.decl},
+        },
+        .{
+            .input = "const x = []int:int{1: 2, 2: 1, 5: 6}",
+            .tags = &[_]lir.Inst.Tag{.decl},
+        },
+        .{
+            .input = "const list = []int{1, 2, 3} list[1] = 10 list[1]",
+            .tags = &[_]lir.Inst.Tag{ .decl, .store, .load },
+        },
+    };
+
+    inline for (test_cases) |case| {
+        try testInput(case.input, case.tags);
+    }
+}
+
+test "Functions" {
+    const test_cases = .{
+        .{
+            .input = "fn() void { 1 + 2 }",
+            .tags = &[_]lir.Inst.Tag{.func},
+        },
+        .{
+            .input = "const x = fn() void { 1 } x()",
+            .tags = &[_]lir.Inst.Tag{ .decl, .call },
+        },
+        .{
+            .input = "const func = fn(x: int) int { return x } func(5)",
+            .tags = &[_]lir.Inst.Tag{ .decl, .call },
+        },
+    };
+
+    inline for (test_cases) |case| {
+        try testInput(case.input, case.tags);
+    }
+}
+
+test "Loop" {
+    const input = "while (true) { 10 }";
+
+    const alloc = testing.allocator;
+    var err = errors.Errors.init(alloc);
+    defer err.deinit();
+
+    var result = try compile(alloc, input, &err);
+    defer result.deinit();
+
+    var inst = result.instructions[0];
+
+    testing.expectEqual(lir.Inst.Tag.@"while", inst.tag);
+
+    const loop = inst.as(lir.Inst.Double);
+    testing.expectEqual(lir.Inst.Tag.primitive, loop.lhs.tag);
+    testing.expectEqual(lir.Inst.Primitive.PrimType.@"true", loop.lhs.as(lir.Inst.Primitive).prim_type);
+    testing.expectEqual(@as(u64, 10), loop.rhs.as(lir.Inst.Block).instructions[0].as(lir.Inst.Int).value);
+}
+
+test "Assign" {
+    const test_cases = .{
+        .{
+            .input = "mut x = 5 x = 6",
+            .tags = &[_]lir.Inst.Tag{ .decl, .assign },
         },
     };
 
