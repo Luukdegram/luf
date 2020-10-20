@@ -75,6 +75,17 @@ pub const Instructions = struct {
     list: std.ArrayListUnmanaged(Instruction),
     gpa: *std.mem.Allocator,
 
+    /// Utility struct to ease patching of instructions
+    const Label = struct {
+        inst: *Instruction,
+
+        /// Updates the `ptr` field of the instruction
+        fn patch(self: *Label, ptr: u32) void {
+            std.debug.assert(self.inst.* == .ptr);
+            self.inst.ptr.pos = ptr;
+        }
+    };
+
     pub const Error = error{OutOfMemory};
 
     /// Creates a new instance of `Instructions`
@@ -83,7 +94,7 @@ pub const Instructions = struct {
     }
 
     /// Creates a new instance of `Instructions` aswell as codegen bytecode instructions from Luf's IR
-    pub fn fromCu(gpa: *std.mem.Allocator, cu: lir.CompileUnit) !ByteCode {
+    pub fn fromCu(gpa: *std.mem.Allocator, cu: lir.CompileUnit) Error!ByteCode {
         var instructions = init(gpa);
 
         for (cu.instructions) |inst| {
@@ -124,6 +135,7 @@ pub const Instructions = struct {
             .string => try self.emitString(inst.as(lir.Inst.String)),
             .primitive => try self.emitPrim(inst.as(lir.Inst.Primitive)),
             .ident => try self.emitIdent(inst.as(lir.Inst.Single)),
+            .expr => try self.emitExpr(inst.as(lir.Inst.Single)),
             .decl => try self.emitDecl(inst.as(lir.Inst.Decl)),
             .@"return" => try self.emitRet(inst.as(lir.Inst.Single)),
             .assign => try self.emitAssign(inst.as(lir.Inst.Double)),
@@ -134,16 +146,16 @@ pub const Instructions = struct {
             .range => try self.emitRange(inst.as(lir.Inst.Double)),
             .import => try self.emitModule(inst.as(lir.Inst.String)),
             .@"enum" => try self.emitEnum(inst.as(lir.Inst.Enum)),
+            .condition => try self.emitCond(inst.as(lir.Inst.Condition)),
+            .block => try self.emitBlock(inst.as(lir.Inst.Block)),
             .func => {},
             .call => {},
             .@"for" => {},
             .@"while" => {},
             .@"switch" => {},
             .branch => {},
-            .condition => {},
             .@"break" => {},
             .@"continue" => {},
-            .block => {},
             .comment, .type_def => {}, //VM doesn't do anything with this
         }
     }
@@ -160,7 +172,7 @@ pub const Instructions = struct {
 
     /// Appends a new `Instruction` and returns the position of the instruction
     fn appendRetPos(self: *Instructions, inst: Instruction) !u32 {
-        try self.list.append(inst);
+        try self.list.append(self.gpa, inst);
         return self.len() - 1;
     }
 
@@ -171,7 +183,7 @@ pub const Instructions = struct {
     }
 
     /// Replaces the ptr of an instruction, this is used for jumping instructions
-    fn replacePtr(self: *Instructions, pos: u32, ptr: u32) void {
+    fn replaceLabel(self: *Instructions, pos: u32, ptr: u32) void {
         self.list.items[pos].ptr.pos = ptr;
     }
 
@@ -194,6 +206,13 @@ pub const Instructions = struct {
     /// Emits an opcode that contains an aditional index/pointer to a length/object/position
     fn emitPtr(self: *Instructions, op: Opcode, ptr: u32) !void {
         try self.append(Instruction.genPtr(op, ptr));
+    }
+
+    /// Emits an opcode and returns a label with a pointer to the new instruction
+    /// Sets the ptr to 0x0 as default
+    fn emitLabel(self: *Instructions, op: Opcode) !Label {
+        const pos = try self.appendRetPos(Instruction.genPtr(op, 0x0));
+        return Label{ .inst = &self.list.items[pos] };
     }
 
     /// emits an integer
@@ -278,6 +297,13 @@ pub const Instructions = struct {
         );
     }
 
+    /// First emits bytecode of expression's value, and then emits a `pop` instruction
+    /// at the end of the expression.
+    fn emitExpr(self: *Instructions, single: *lir.Inst.Single) !void {
+        try self.gen(single.rhs);
+        try self.emit(.pop);
+    }
+
     /// Generates bytecode to bind a value to an identifier
     fn emitDecl(self: *Instructions, decl: *lir.Inst.Decl) !void {
         try self.gen(decl.value);
@@ -346,10 +372,43 @@ pub const Instructions = struct {
         try self.emit(.load_module);
     }
 
-    /// Emites the bytecode required to build an enum
+    /// Emits the bytecode required to build an enum
     fn emitEnum(self: *Instructions, enm: *lir.Inst.Enum) !void {
         for (enm.value) |e| try self.gen(e);
         try self.emit(.make_enum);
+    }
+
+    /// Emits the bytecode for an if with optional else statement
+    fn emitCond(self: *Instructions, condition: *lir.Inst.Condition) !void {
+        try self.gen(condition.cond);
+
+        var false_label = try self.emitLabel(.jump_false);
+
+        try self.gen(condition.then_block);
+
+        var jump_label = try self.emitLabel(.jump);
+
+        false_label.patch(self.len());
+
+        if (condition.else_block) |block| {
+            try self.gen(block);
+
+            if (self.lastIs(.pop)) self.pop();
+        } else
+            try self.emit(.load_void);
+
+        jump_label.patch(self.len());
+    }
+
+    /// Generates bytecode for each expression inside the block
+    /// Removes last instruction if it ends with a `pop`
+    fn emitBlock(self: *Instructions, block: *lir.Inst.Block) !void {
+        for (block.instructions) |inst| try self.gen(inst);
+
+        if (self.lastIs(.pop))
+            self.pop()
+        else if (!self.lastIs(.return_value))
+            try self.emit(.load_void);
     }
 
     /// Creates a `ByteCode` object from the current instructions
@@ -702,8 +761,8 @@ fn testInput(input: []const u8, expected: []const Opcode) !void {
     var result = try Instructions.fromCu(alloc, cu);
     defer result.deinit();
 
-    for (result.instructions) |inst, i| {
-        testing.expectEqual(expected[i], inst.getOp());
+    for (expected) |exp, i| {
+        testing.expectEqual(exp, result.instructions[i].getOp());
     }
 }
 
@@ -808,6 +867,28 @@ test "IR to Bytecode - Non control flow" {
                 .load_string,
                 .make_enum,
                 .bind_global,
+            },
+        },
+    };
+
+    inline for (test_cases) |case| {
+        try testInput(case.input, case.opcodes);
+    }
+}
+
+test "IR to Bytecode - Control flow" {
+    const test_cases = .{
+        .{
+            .input = "if (true) { 5 } else { 7 } 10",
+            .opcodes = &[_]Opcode{
+                .load_true,
+                .jump_false,
+                .load_integer,
+                .jump,
+                .load_integer,
+                .pop,
+                .load_integer,
+                .pop,
             },
         },
     };

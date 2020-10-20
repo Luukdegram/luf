@@ -68,6 +68,7 @@ pub const Inst = struct {
         load,
         type_def,
         branch,
+        expr,
 
         /// Returns the type of that belongs to a `Tag`
         /// Can be used to cast to the correct Type from a `Tag`.
@@ -78,6 +79,7 @@ pub const Inst = struct {
                 .bitwise_not,
                 .not,
                 .ident,
+                .expr,
                 => Single,
                 .add,
                 .sub,

@@ -421,7 +421,7 @@ pub const Compiler = struct {
     /// Depending on an `ast.Node` type, generates a `lir.Inst` instruction recursively
     fn resolveInst(self: *Compiler, node: ast.Node) (Error || lir.Module.Error || parser.Parser.Error)!*lir.Inst {
         return try switch (node) {
-            .expression => |exp| self.resolveInst(exp.value),
+            .expression => |exp| self.compileExpr(exp),
             .block_statement => |block| self.compileBlock(block),
             .infix => |infix| self.compileInfix(infix),
             .prefix => |prefix| self.compilePrefix(prefix),
@@ -452,6 +452,13 @@ pub const Compiler = struct {
             .type_def => |td| self.compileTypeDef(td),
             else => unreachable,
         };
+    }
+
+    /// Compiles an `ast.Node.Expression` into a `lir.Inst.Single` this can be used
+    /// by backends to know when an expression ends. For example, to pop a value.
+    fn compileExpr(self: *Compiler, exp: *ast.Node.Expression) !*lir.Inst {
+        const rhs = try self.resolveInst(exp.value);
+        return self.ir.emitSingle(exp.token.start, .expr, rhs);
     }
 
     /// Compiles a `ast.Node.BlockStatement` node into a list of instructions
@@ -1019,51 +1026,51 @@ test "Arithmetic" {
     const test_cases = .{
         .{
             .input = "1 + 2",
-            .tags = &[_]lir.Inst.Tag{.add},
+            .tags = &[_]lir.Inst.Tag{.expr},
         },
         .{
             .input = "3 - 1",
-            .tags = &[_]lir.Inst.Tag{.sub},
+            .tags = &[_]lir.Inst.Tag{.expr},
         },
         .{
             .input = "1 * 2",
-            .tags = &[_]lir.Inst.Tag{.mul},
+            .tags = &[_]lir.Inst.Tag{.expr},
         },
         .{
             .input = "2 / 2",
-            .tags = &[_]lir.Inst.Tag{.div},
+            .tags = &[_]lir.Inst.Tag{.expr},
         },
         .{
             .input = "1 + 2 * 2",
-            .tags = &[_]lir.Inst.Tag{.add},
+            .tags = &[_]lir.Inst.Tag{.expr},
         },
         .{
             .input = "5 * 2 / 5 - 8",
-            .tags = &[_]lir.Inst.Tag{.sub},
+            .tags = &[_]lir.Inst.Tag{.expr},
         },
         .{
             .input = "1 < 2",
-            .tags = &[_]lir.Inst.Tag{.lt},
+            .tags = &[_]lir.Inst.Tag{.expr},
         },
         .{
             .input = "2 > 1",
-            .tags = &[_]lir.Inst.Tag{.gt},
+            .tags = &[_]lir.Inst.Tag{.expr},
         },
         .{
             .input = "1 == 2",
-            .tags = &[_]lir.Inst.Tag{.eql},
+            .tags = &[_]lir.Inst.Tag{.expr},
         },
         .{
             .input = "1 != 2",
-            .tags = &[_]lir.Inst.Tag{.nql},
+            .tags = &[_]lir.Inst.Tag{.expr},
         },
         .{
             .input = "true == false",
-            .tags = &[_]lir.Inst.Tag{.eql},
+            .tags = &[_]lir.Inst.Tag{.expr},
         },
         .{
             .input = "-1",
-            .tags = &[_]lir.Inst.Tag{.negate},
+            .tags = &[_]lir.Inst.Tag{.expr},
         },
     };
 
@@ -1076,11 +1083,11 @@ test "Conditional" {
     const test_cases = .{
         .{
             .input = "if (true) { 5 } 10",
-            .tags = &[_]lir.Inst.Tag{ .condition, .int },
+            .tags = &[_]lir.Inst.Tag{ .expr, .expr },
         },
         .{
             .input = "if (true) { 5 } else { 7 } 10",
-            .tags = &[_]lir.Inst.Tag{ .condition, .int },
+            .tags = &[_]lir.Inst.Tag{ .expr, .expr },
         },
     };
 
@@ -1125,7 +1132,7 @@ test "Lists" {
         },
         .{
             .input = "const list = []int{1, 2, 3} list[1] = 10 list[1]",
-            .tags = &[_]lir.Inst.Tag{ .decl, .store, .load },
+            .tags = &[_]lir.Inst.Tag{ .decl, .expr, .expr },
         },
     };
 
@@ -1138,15 +1145,15 @@ test "Functions" {
     const test_cases = .{
         .{
             .input = "fn() void { 1 + 2 }",
-            .tags = &[_]lir.Inst.Tag{.func},
+            .tags = &[_]lir.Inst.Tag{.expr},
         },
         .{
             .input = "const x = fn() void { 1 } x()",
-            .tags = &[_]lir.Inst.Tag{ .decl, .call },
+            .tags = &[_]lir.Inst.Tag{ .decl, .expr },
         },
         .{
             .input = "const func = fn(x: int) int { return x } func(5)",
-            .tags = &[_]lir.Inst.Tag{ .decl, .call },
+            .tags = &[_]lir.Inst.Tag{ .decl, .expr },
         },
     };
 
@@ -1172,18 +1179,21 @@ test "Loop" {
     const loop = inst.as(lir.Inst.Double);
     testing.expectEqual(lir.Inst.Tag.primitive, loop.lhs.tag);
     testing.expectEqual(lir.Inst.Primitive.PrimType.@"true", loop.lhs.as(lir.Inst.Primitive).prim_type);
-    testing.expectEqual(@as(u64, 10), loop.rhs.as(lir.Inst.Block).instructions[0].as(lir.Inst.Int).value);
+    testing.expectEqual(
+        @as(u64, 10),
+        loop.rhs.as(lir.Inst.Block).instructions[0].as(lir.Inst.Single).rhs.as(lir.Inst.Int).value,
+    );
 }
 
 test "Assign" {
     const test_cases = .{
         .{
             .input = "mut x = 5 x = 6",
-            .tags = &[_]lir.Inst.Tag{ .decl, .assign },
+            .tags = &[_]lir.Inst.Tag{ .decl, .expr },
         },
         .{
             .input = "mut x = 5 x += 6 x",
-            .tags = &[_]lir.Inst.Tag{ .decl, .assign_add, .ident },
+            .tags = &[_]lir.Inst.Tag{ .decl, .expr, .expr },
         },
     };
 
