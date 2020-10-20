@@ -658,6 +658,18 @@ pub const Compiler = struct {
                 function.token.start,
                 .{param.func_arg.value},
             );
+
+            // generate a void declaration to attach to the symbol
+            const decl = try self.ir.emitDecl(
+                param.tokenPos(),
+                symbol.name,
+                symbol.index,
+                .local,
+                false,
+                false,
+                try self.ir.emitPrimitive(param.tokenPos(), .@"void"),
+            );
+            symbol.decl = decl;
         }
 
         const body = try self.resolveInst(function.body orelse return self.fail(

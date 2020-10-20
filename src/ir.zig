@@ -179,7 +179,7 @@ pub const Inst = struct {
 
     pub const Function = struct {
         base: Inst,
-        block: *Inst,
+        body: *Inst,
         locals: usize,
         params: usize,
     };
@@ -382,7 +382,7 @@ pub const Module = struct {
     pub fn emitFunc(
         self: *Module,
         pos: usize,
-        block: *Inst,
+        body: *Inst,
         locals: usize,
         params: usize,
     ) Error!*Inst {
@@ -392,7 +392,7 @@ pub const Module = struct {
                 .tag = .func,
                 .pos = pos,
             },
-            .block = block,
+            .body = body,
             .locals = locals,
             .params = params,
         };

@@ -148,8 +148,8 @@ pub const Instructions = struct {
             .@"enum" => try self.emitEnum(inst.as(lir.Inst.Enum)),
             .condition => try self.emitCond(inst.as(lir.Inst.Condition)),
             .block => try self.emitBlock(inst.as(lir.Inst.Block)),
-            .func => {},
-            .call => {},
+            .func => try self.emitFunc("", inst.as(lir.Inst.Function)),
+            .call => try self.emitCall(inst.as(lir.Inst.Call)),
             .@"for" => {},
             .@"while" => {},
             .@"switch" => {},
@@ -226,13 +226,25 @@ pub const Instructions = struct {
     }
 
     /// Emits a function
-    fn emitFunc(self: *Instructions, name: []const u8, entry_point: u32, func: *lir.Inst.Function) !void {
-        try self.append(Instruction.genFunction(
+    fn emitFunc(self: *Instructions, name: []const u8, func: *lir.Inst.Function) !void {
+        // initial jump over the body
+        var jump = try self.emitLabel(.jump);
+        const entry_point = self.len();
+
+        try self.gen(func.body);
+
+        // incase no return statement was inside the body, append our own that returns void
+        if (!self.lastIs(.return_value)) try self.emit(.@"return");
+
+        const end = try self.appendRetPos(Instruction.genFunction(
             try self.gpa.dupe(u8, name),
             func.locals,
-            func.params.len,
+            func.params,
             entry_point,
         ));
+
+        // jump to end of our function
+        jump.patch(end);
     }
 
     /// Generates bytecode for an arithmetic operation
@@ -306,7 +318,11 @@ pub const Instructions = struct {
 
     /// Generates bytecode to bind a value to an identifier
     fn emitDecl(self: *Instructions, decl: *lir.Inst.Decl) !void {
-        try self.gen(decl.value);
+        if (decl.value.tag == .func)
+            try self.emitFunc(decl.name, decl.value.as(lir.Inst.Function))
+        else
+            try self.gen(decl.value);
+
         try self.emitPtr(
             if (decl.scope == .global) .bind_global else .bind_local,
             decl.index,
@@ -409,6 +425,15 @@ pub const Instructions = struct {
             self.pop()
         else if (!self.lastIs(.return_value))
             try self.emit(.load_void);
+    }
+
+    /// Emits the .call bytecode after emitting the bytecode for the
+    /// identifier
+    fn emitCall(self: *Instructions, call: *lir.Inst.Call) !void {
+        for (call.args) |arg| try self.gen(arg);
+        try self.gen(call.func);
+
+        try self.emitPtr(.call, @intCast(u32, call.args.len));
     }
 
     /// Creates a `ByteCode` object from the current instructions
@@ -888,6 +913,45 @@ test "IR to Bytecode - Control flow" {
                 .load_integer,
                 .pop,
                 .load_integer,
+                .pop,
+            },
+        },
+        .{
+            .input = "fn() void { 1 + 2 }",
+            .opcodes = &[_]Opcode{
+                .jump,
+                .load_integer,
+                .load_integer,
+                .add,
+                .@"return",
+                .load_func,
+                .pop,
+            },
+        },
+        .{
+            .input = "const x = fn() void { 1 } x()",
+            .opcodes = &[_]Opcode{
+                .jump,
+                .load_integer,
+                .@"return",
+                .load_func,
+                .bind_global,
+                .load_global,
+                .call,
+                .pop,
+            },
+        },
+        .{
+            .input = "const func = fn(x: int) int { return x } func(5)",
+            .opcodes = &[_]Opcode{
+                .jump,
+                .load_local,
+                .return_value,
+                .load_func,
+                .bind_global,
+                .load_integer,
+                .load_global,
+                .call,
                 .pop,
             },
         },
