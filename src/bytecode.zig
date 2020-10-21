@@ -75,17 +75,6 @@ pub const Instructions = struct {
     list: std.ArrayListUnmanaged(Instruction),
     gpa: *std.mem.Allocator,
 
-    /// Utility struct to ease patching of instructions
-    const Label = struct {
-        inst: *Instruction,
-
-        /// Updates the `ptr` field of the instruction
-        fn patch(self: *Label, ptr: u32) void {
-            std.debug.assert(self.inst.* == .ptr);
-            self.inst.ptr.pos = ptr;
-        }
-    };
-
     pub const Error = error{OutOfMemory};
 
     /// Creates a new instance of `Instructions`
@@ -150,8 +139,8 @@ pub const Instructions = struct {
             .block => try self.emitBlock(inst.as(lir.Inst.Block)),
             .func => try self.emitFunc("", inst.as(lir.Inst.Function)),
             .call => try self.emitCall(inst.as(lir.Inst.Call)),
+            .@"while" => try self.emitWhile(inst.as(lir.Inst.Double)),
             .@"for" => {},
-            .@"while" => {},
             .@"switch" => {},
             .branch => {},
             .@"break" => {},
@@ -183,13 +172,14 @@ pub const Instructions = struct {
     }
 
     /// Replaces the ptr of an instruction, this is used for jumping instructions
-    fn replaceLabel(self: *Instructions, pos: u32, ptr: u32) void {
+    fn patch(self: *Instructions, pos: u32, ptr: u32) void {
         self.list.items[pos].ptr.pos = ptr;
     }
 
     /// Replaces the opcode of the last instruction
     /// Asserts there's atleast 1 instruction saved
     fn replaceLastOp(self: *Instructions, op: Opcode) void {
+        std.debug.assert(self.list.items.len > 0);
         self.list.items[self.len() - 1].op = op;
     }
 
@@ -210,9 +200,8 @@ pub const Instructions = struct {
 
     /// Emits an opcode and returns a label with a pointer to the new instruction
     /// Sets the ptr to 0x0 as default
-    fn emitLabel(self: *Instructions, op: Opcode) !Label {
-        const pos = try self.appendRetPos(Instruction.genPtr(op, 0x0));
-        return Label{ .inst = &self.list.items[pos] };
+    fn emitLabel(self: *Instructions, op: Opcode) !u32 {
+        return try self.appendRetPos(Instruction.genPtr(op, 0x0));
     }
 
     /// emits an integer
@@ -244,7 +233,7 @@ pub const Instructions = struct {
         ));
 
         // jump to end of our function
-        jump.patch(end);
+        self.patch(jump, end);
     }
 
     /// Generates bytecode for an arithmetic operation
@@ -398,13 +387,13 @@ pub const Instructions = struct {
     fn emitCond(self: *Instructions, condition: *lir.Inst.Condition) !void {
         try self.gen(condition.cond);
 
-        var false_label = try self.emitLabel(.jump_false);
+        const false_label = try self.emitLabel(.jump_false);
 
         try self.gen(condition.then_block);
 
-        var jump_label = try self.emitLabel(.jump);
+        const jump_label = try self.emitLabel(.jump);
 
-        false_label.patch(self.len());
+        self.patch(false_label, self.len());
 
         if (condition.else_block) |block| {
             try self.gen(block);
@@ -413,7 +402,7 @@ pub const Instructions = struct {
         } else
             try self.emit(.load_void);
 
-        jump_label.patch(self.len());
+        self.patch(jump_label, self.len());
     }
 
     /// Generates bytecode for each expression inside the block
@@ -436,7 +425,22 @@ pub const Instructions = struct {
         try self.emitPtr(.call, @intCast(u32, call.args.len));
     }
 
+    /// Generates the bytecode for a while loop
+    fn emitWhile(self: *Instructions, loop: *lir.Inst.Double) !void {
+        const start = self.len();
+
+        try self.gen(loop.lhs);
+        const false_jump = try self.emitLabel(.jump_false);
+
+        try self.gen(loop.rhs);
+
+        try self.emitPtr(.jump, start);
+
+        self.patch(false_jump, self.len());
+    }
+
     /// Creates a `ByteCode` object from the current instructions
+    /// NOTE: This makes the instructions list on `self` invalid
     pub fn final(self: *Instructions) ByteCode {
         return .{
             .instructions = self.list.toOwnedSlice(self.gpa),
@@ -894,6 +898,16 @@ test "IR to Bytecode - Non control flow" {
                 .bind_global,
             },
         },
+        .{
+            .input = "mut x = 5 x = 10",
+            .opcodes = &[_]Opcode{
+                .load_integer,
+                .bind_global,
+                .load_integer,
+                .assign_global,
+                .pop,
+            },
+        },
     };
 
     inline for (test_cases) |case| {
@@ -953,6 +967,20 @@ test "IR to Bytecode - Control flow" {
                 .load_global,
                 .call,
                 .pop,
+            },
+        },
+        .{
+            .input = "mut i = 0 while (i > 10) { i = 10 }",
+            .opcodes = &[_]Opcode{
+                .load_integer,
+                .bind_global,
+                .load_global,
+                .load_integer,
+                .greater_than,
+                .jump_false,
+                .load_integer,
+                .assign_global,
+                .jump,
             },
         },
     };

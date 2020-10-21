@@ -570,7 +570,7 @@ pub const Compiler = struct {
 
         const decl_value = try self.resolveInst(decl.value);
 
-        return self.ir.emitDecl(
+        const decl_ir = try self.ir.emitDecl(
             decl.token.start,
             symbol.name,
             symbol.index,
@@ -582,6 +582,8 @@ pub const Compiler = struct {
             symbol.mutable,
             decl_value,
         );
+        symbol.decl = decl_ir;
+        return decl_ir;
     }
 
     /// Compiles an `ast.Node.Identifier` node into a `lir.Inst.Ident`
