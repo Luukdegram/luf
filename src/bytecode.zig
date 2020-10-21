@@ -74,12 +74,34 @@ pub const Opcode = enum(u8) {
 pub const Instructions = struct {
     list: std.ArrayListUnmanaged(Instruction),
     gpa: *std.mem.Allocator,
+    scope: Scope,
 
     pub const Error = error{OutOfMemory};
 
+    const Id = enum { none, loop };
+
+    const Scope = union(Id) {
+        none,
+        loop: struct { start: u32, jumps: std.ArrayListUnmanaged(u32) },
+
+        /// Creates a new loop Scope
+        fn createLoop(start: u32) Scope {
+            return .{
+                .loop = .{
+                    .start = start,
+                    .jumps = std.ArrayListUnmanaged(u32){},
+                },
+            };
+        }
+    };
+
     /// Creates a new instance of `Instructions`
     pub fn init(gpa: *std.mem.Allocator) Instructions {
-        return .{ .list = std.ArrayListUnmanaged(Instruction){}, .gpa = gpa };
+        return .{
+            .list = std.ArrayListUnmanaged(Instruction){},
+            .gpa = gpa,
+            .scope = .{ .none = {} },
+        };
     }
 
     /// Creates a new instance of `Instructions` aswell as codegen bytecode instructions from Luf's IR
@@ -142,9 +164,9 @@ pub const Instructions = struct {
             .@"while" => try self.emitWhile(inst.as(lir.Inst.Double)),
             .@"switch" => try self.emitSwitch(inst.as(lir.Inst.Switch)),
             .branch => try self.emitBranch(inst.as(lir.Inst.Double)),
-            .@"for" => {},
-            .@"break" => {},
-            .@"continue" => {},
+            .@"break" => try self.scope.loop.jumps.append(self.gpa, try self.label(.jump)),
+            .@"continue" => try self.emitPtr(.jump, self.scope.loop.start),
+            .@"for" => try self.emitLoop(inst.as(lir.Inst.Loop)),
             .comment, .type_def => {}, //VM doesn't do anything with this
         }
     }
@@ -200,7 +222,7 @@ pub const Instructions = struct {
 
     /// Emits an opcode and returns a label with a pointer to the new instruction
     /// Sets the ptr to 0x0 as default
-    fn emitLabel(self: *Instructions, op: Opcode) !u32 {
+    fn label(self: *Instructions, op: Opcode) !u32 {
         return try self.appendRetPos(Instruction.genPtr(op, 0x0));
     }
 
@@ -217,7 +239,7 @@ pub const Instructions = struct {
     /// Emits a function
     fn emitFunc(self: *Instructions, name: []const u8, func: *lir.Inst.Function) !void {
         // initial jump over the body
-        var jump = try self.emitLabel(.jump);
+        var jump = try self.label(.jump);
         const entry_point = self.len();
 
         try self.gen(func.body);
@@ -387,11 +409,11 @@ pub const Instructions = struct {
     fn emitCond(self: *Instructions, condition: *lir.Inst.Condition) !void {
         try self.gen(condition.cond);
 
-        const false_label = try self.emitLabel(.jump_false);
+        const false_label = try self.label(.jump_false);
 
         try self.gen(condition.then_block);
 
-        const jump_label = try self.emitLabel(.jump);
+        const jump_label = try self.label(.jump);
 
         self.patch(false_label, self.len());
 
@@ -428,15 +450,19 @@ pub const Instructions = struct {
     /// Generates the bytecode for a while loop
     fn emitWhile(self: *Instructions, loop: *lir.Inst.Double) !void {
         const start = self.len();
+        self.scope = Scope.createLoop(start);
 
         try self.gen(loop.lhs);
-        const false_jump = try self.emitLabel(.jump_false);
+        const false_jump = try self.label(.jump_false);
 
         try self.gen(loop.rhs);
 
         try self.emitPtr(.jump, start);
 
         self.patch(false_jump, self.len());
+
+        self.scope.loop.jumps.deinit(self.gpa);
+        self.scope = Scope.none;
     }
 
     /// Generates the full bytecode for a switch statement
@@ -451,9 +477,42 @@ pub const Instructions = struct {
         try self.gen(branch.lhs);
         try self.emit(.match);
 
-        const jump = try self.emitLabel(.jump_false);
+        const jump = try self.label(.jump_false);
         try self.gen(branch.rhs);
         self.patch(jump, self.len());
+    }
+
+    /// Emits bytecode to generate a for loop
+    fn emitLoop(self: *Instructions, loop: *lir.Inst.Loop) !void {
+        // first create our iterator
+        try self.gen(loop.it);
+        try self.emitPtr(.make_iter, if (loop.has_index) 1 else 0);
+
+        // start of loop
+        try self.emit(.iter_next);
+        self.scope = Scope.createLoop(self.len() - 1);
+
+        const end_jump = try self.label(.jump_false);
+
+        // index and capture
+        if (loop.has_index) try self.emit(.assign_local);
+        try self.emit(.assign_local);
+
+        try self.gen(loop.block);
+
+        // pop last value from block before we jump to ensure clean loop state
+        if (!self.lastIs(.pop)) try self.emit(.pop);
+
+        try self.emitPtr(.jump, self.scope.loop.start);
+
+        for (self.scope.loop.jumps.items) |jump_pos| {
+            self.patch(jump_pos, self.len());
+        }
+
+        self.patch(end_jump, self.len());
+
+        self.scope.loop.jumps.deinit(self.gpa);
+        self.scope = Scope.none;
     }
 
     /// Creates a `ByteCode` object from the current instructions
@@ -1015,6 +1074,48 @@ test "IR to Bytecode - Control flow" {
                 .load_nil,
                 .pop,
                 .pop,
+            },
+        },
+        .{
+            .input = "while(true){break continue}",
+            .opcodes = &[_]Opcode{
+                .load_true,
+                .jump_false,
+                .jump,
+                .jump,
+                .load_void,
+                .jump,
+            },
+        },
+        .{
+            .input = "for(0..1)|x|{}",
+            .opcodes = &[_]Opcode{
+                .load_integer,
+                .load_integer,
+                .make_range,
+                .make_iter,
+                .iter_next,
+                .jump_false,
+                .assign_local,
+                .load_void,
+                .pop,
+                .jump,
+            },
+        },
+        .{
+            .input = "for(0..1)|x, i|{}",
+            .opcodes = &[_]Opcode{
+                .load_integer,
+                .load_integer,
+                .make_range,
+                .make_iter,
+                .iter_next,
+                .jump_false,
+                .assign_local,
+                .assign_local,
+                .load_void,
+                .pop,
+                .jump,
             },
         },
     };
