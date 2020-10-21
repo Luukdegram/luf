@@ -1,13 +1,13 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
-comptime {
-    std.meta.refAllDecls(@This());
-}
+//! This file contains Luf's typed intermediate representation
+//! This pass is used by codegen to construct other output such as WASM,
+//! Luf bytecode, ASM or other possible future outputs.
 
-///! This file contains Luf's typed intermediate representation
-///! This pass is used by codegen to construct other output such as WASM,
-///! Luf bytecode, ASM or other possible future outputs.
+/// General instruction struct. Contains the type (tag) of the instruction,
+/// and also the source code position, which can be used for debug symbols.
+/// `Inst` is used as a child pointer to the actual Instruction set.
 pub const Inst = struct {
     /// The type of instruction
     tag: Tag,
