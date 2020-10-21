@@ -140,9 +140,9 @@ pub const Instructions = struct {
             .func => try self.emitFunc("", inst.as(lir.Inst.Function)),
             .call => try self.emitCall(inst.as(lir.Inst.Call)),
             .@"while" => try self.emitWhile(inst.as(lir.Inst.Double)),
+            .@"switch" => try self.emitSwitch(inst.as(lir.Inst.Switch)),
+            .branch => try self.emitBranch(inst.as(lir.Inst.Double)),
             .@"for" => {},
-            .@"switch" => {},
-            .branch => {},
             .@"break" => {},
             .@"continue" => {},
             .comment, .type_def => {}, //VM doesn't do anything with this
@@ -437,6 +437,23 @@ pub const Instructions = struct {
         try self.emitPtr(.jump, start);
 
         self.patch(false_jump, self.len());
+    }
+
+    /// Generates the full bytecode for a switch statement
+    fn emitSwitch(self: *Instructions, sw: *lir.Inst.Switch) !void {
+        try self.gen(sw.capture);
+        for (sw.branches) |branch| try self.gen(branch);
+        try self.emit(.pop);
+    }
+
+    /// Emits the bytecode for a single branch inside a switch statement
+    fn emitBranch(self: *Instructions, branch: *lir.Inst.Double) !void {
+        try self.gen(branch.lhs);
+        try self.emit(.match);
+
+        const jump = try self.emitLabel(.jump_false);
+        try self.gen(branch.rhs);
+        self.patch(jump, self.len());
     }
 
     /// Creates a `ByteCode` object from the current instructions
@@ -981,6 +998,23 @@ test "IR to Bytecode - Control flow" {
                 .load_integer,
                 .assign_global,
                 .jump,
+            },
+        },
+        .{
+            .input = "switch(5){4: nil, 5: nil}",
+            .opcodes = &[_]Opcode{
+                .load_integer,
+                .load_integer,
+                .match,
+                .jump_false,
+                .load_nil,
+                .pop,
+                .load_integer,
+                .match,
+                .jump_false,
+                .load_nil,
+                .pop,
+                .pop,
             },
         },
     };
