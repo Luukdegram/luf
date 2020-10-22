@@ -405,7 +405,7 @@ pub const Instructions = struct {
     /// Emits the bytecode required to build an enum
     fn emitEnum(self: *Instructions, enm: *lir.Inst.Enum) !void {
         for (enm.value) |e| try self.gen(e);
-        try self.emit(.make_enum);
+        try self.emitPtr(.make_enum, @intCast(u32, enm.value.len));
     }
 
     /// Emits the bytecode for an if with optional else statement
@@ -464,6 +464,10 @@ pub const Instructions = struct {
 
         self.patch(false_jump, self.len());
 
+        for (self.scope.loop.jumps.items) |jump_pos| {
+            self.patch(jump_pos, self.len());
+        }
+
         self.scope.loop.jumps.deinit(self.gpa);
         self.scope = Scope.none;
     }
@@ -489,7 +493,7 @@ pub const Instructions = struct {
     fn emitLoop(self: *Instructions, loop: *lir.Inst.Loop) !void {
         // first create our iterator
         try self.gen(loop.it);
-        try self.emitPtr(.make_iter, if (loop.has_index) 1 else 0);
+        try self.emitPtr(.make_iter, if (loop.index != null) 1 else 0);
 
         // start of loop
         try self.emit(.iter_next);
@@ -498,8 +502,8 @@ pub const Instructions = struct {
         const end_jump = try self.label(.jump_false);
 
         // index and capture
-        if (loop.has_index) try self.emit(.assign_local);
-        try self.emit(.assign_local);
+        if (loop.index) |index| try self.emitPtr(.assign_local, index.as(lir.Inst.Decl).index);
+        try self.emitPtr(.assign_local, loop.capture.as(lir.Inst.Decl).index);
 
         try self.gen(loop.block);
 
@@ -508,11 +512,13 @@ pub const Instructions = struct {
 
         try self.emitPtr(.jump, self.scope.loop.start);
 
+        self.patch(end_jump, self.len());
+
         for (self.scope.loop.jumps.items) |jump_pos| {
             self.patch(jump_pos, self.len());
         }
 
-        self.patch(end_jump, self.len());
+        if (self.scope.loop.jumps.items.len > 0) try self.emit(.pop);
 
         self.scope.loop.jumps.deinit(self.gpa);
         self.scope = Scope.none;

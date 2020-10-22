@@ -194,7 +194,8 @@ pub const Inst = struct {
         base: Inst,
         it: *Inst,
         block: *Inst,
-        has_index: bool,
+        capture: *Inst,
+        index: ?*Inst,
     };
 
     pub const NoOp = struct {
@@ -405,7 +406,8 @@ pub const Module = struct {
         pos: usize,
         iterator: *Inst,
         block: *Inst,
-        has_index: bool,
+        capture: *Inst,
+        index: ?*Inst,
     ) Error!*Inst {
         const inst = try self.gpa.create(Inst.Loop);
         inst.* = .{
@@ -415,7 +417,8 @@ pub const Module = struct {
             },
             .it = iterator,
             .block = block,
-            .has_index = has_index,
+            .capture = capture,
+            .index = index,
         };
         return &inst.base;
     }

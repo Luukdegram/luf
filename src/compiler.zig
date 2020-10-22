@@ -49,7 +49,7 @@ pub fn compile(
     };
     defer compiler.deinit();
 
-    // declare all identifiers first
+    // declare all functions first
     try compiler.forwardDeclareNodes(tree.nodes);
 
     for (tree.nodes) |node| {
@@ -344,19 +344,20 @@ pub const Compiler = struct {
             const symbol = (try self.defineSymbol(decl.name.identifier.value, decl.mutable, node, true)) orelse
                 return self.fail("'{}' has already been declared", node.tokenPos(), .{decl.name.identifier.value});
         }
-        for (self.scope.symbols.items()) |symbol| {
-            const value = try self.resolveInst(symbol.value.node.declaration.value);
+        for (self.scope.symbols.items()) |entry| {
+            const symbol: *Symbol = entry.value;
+
+            const value = try self.resolveInst(symbol.node.declaration.value);
             const decl = try self.ir.emitDecl(
-                symbol.value.node.tokenPos(),
-                symbol.value.name,
-                symbol.value.index,
+                symbol.node.tokenPos(),
+                symbol.name,
+                symbol.index,
                 .global,
                 false,
-                symbol.value.mutable,
+                symbol.mutable,
                 value,
             );
-
-            symbol.value.decl = decl;
+            symbol.decl = decl;
             try self.instructions.append(self.allocator, decl);
         }
     }
@@ -825,14 +826,27 @@ pub const Compiler = struct {
         const it = try self.resolveInst(loop.iter);
 
         // as above, parser ensures it's an identifier
-        if (loop.index) |i| {
+        const index = if (loop.index) |i| blk: {
             // loop is just a boolean, so create a new Node that represents the integer for the counter
             const index_node = &ast.Node.ForLoop.index_node;
             index_node.token = i.identifier.token;
 
             const symbol = (try self.defineSymbol(i.identifier.value, false, ast.Node{ .int_lit = index_node }, false)) orelse
                 return self.fail("Identifier '{}' has already been declared", loop.token.start, .{i.identifier.value});
-        }
+
+            // generate a declaration to attach to the symbol
+            const decl = try self.ir.emitDecl(
+                i.tokenPos(),
+                symbol.name,
+                symbol.index,
+                .local,
+                false,
+                false,
+                try self.ir.emitInt(i.tokenPos(), 0),
+            );
+            symbol.decl = decl;
+            break :blk decl;
+        } else null;
 
         // parser already parses it as an identifier, no need to check here again
         const capture = (try self.defineSymbol(loop.capture.identifier.value, false, loop.iter, false)) orelse return self.fail(
@@ -841,11 +855,23 @@ pub const Compiler = struct {
             .{loop.capture.identifier.value},
         );
 
+        // generate a void declaration to attach to the symbol
+        const decl = try self.ir.emitDecl(
+            loop.capture.tokenPos(),
+            capture.name,
+            capture.index,
+            .local,
+            false,
+            false,
+            try self.ir.emitPrimitive(loop.capture.tokenPos(), .@"void"),
+        );
+        capture.decl = decl;
+
         const body = try self.resolveInst(loop.block);
 
         self.exitScope();
 
-        return self.ir.emitFor(loop.token.start, it, body, loop.index != null);
+        return self.ir.emitFor(loop.token.start, it, body, decl, index);
     }
 
     /// Compiles an `ast.Node.Assignment` node into a `lir.Inst.Assign`
