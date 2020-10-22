@@ -106,11 +106,13 @@ pub const Vm = struct {
 
     /// Compiles the given source code and then runs it on the `Vm`
     pub fn compileAndRun(self: *Vm, source: []const u8) !void {
-        var code = try compiler.compile(self.allocator, source, &self.errors);
+        var cu = try compiler.compile(self.allocator, source, &self.errors);
+        defer cu.deinit();
+
+        var code = try byte_code.Instructions.fromCu(self.allocator, cu);
         defer code.deinit();
 
         self.code = &code;
-
         try self.run();
     }
 
@@ -1375,7 +1377,9 @@ test "Luf function from Zig" {
     ;
     var vm = try Vm.init(testing.allocator);
     defer vm.deinit();
-    var code = try compiler.compile(testing.allocator, input, &vm.errors);
+    var cu = try compiler.compile(testing.allocator, input, &vm.errors);
+    defer cu.deinit();
+    var code = try byte_code.Instructions.fromCu(testing.allocator, cu);
     defer code.deinit();
 
     vm.loadCode(&code);

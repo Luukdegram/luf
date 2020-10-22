@@ -377,7 +377,10 @@ pub const Instructions = struct {
     /// Generates bytecode from IR to create either a list or map
     fn emitList(self: *Instructions, ds: *lir.Inst.DataStructure) !void {
         for (ds.elements) |e| try self.gen(e);
-        try self.emit(if (ds.base.tag == .list) .make_array else .make_map);
+        try self.emitPtr(
+            if (ds.base.tag == .list) .make_array else .make_map,
+            @intCast(u32, ds.elements.len),
+        );
     }
 
     /// Emits bytecode to generate a key-value pair for maps
