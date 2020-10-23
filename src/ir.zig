@@ -78,7 +78,6 @@ pub const Inst = struct {
                 .@"return",
                 .bitwise_not,
                 .not,
-                .ident,
                 .expr,
                 => Single,
                 .add,
@@ -124,6 +123,7 @@ pub const Inst = struct {
                 .string, .import, .comment => String,
                 .block => Block,
                 .@"enum" => Enum,
+                .ident => Ident,
             };
         }
     };
@@ -205,6 +205,15 @@ pub const Inst = struct {
     pub const Enum = struct {
         base: Inst,
         value: []*Inst,
+    };
+
+    pub const Ident = struct {
+        base: Inst,
+        index: u32,
+        scope: Scope,
+        name: []const u8,
+
+        pub const Scope = enum { global, local };
     };
 
     pub const Switch = struct {
@@ -507,7 +516,14 @@ pub const Module = struct {
 
     /// Emits a `Triple` instruction, that contains the `Tag`, lhs, index and a rhs `Inst`
     /// Used for setting the value of an element inside a list or map
-    pub fn emitTriple(self: *Module, pos: usize, tag: Inst.Tag, lhs: *Inst, index: *Inst, rhs: *Inst) Error!*Inst {
+    pub fn emitTriple(
+        self: *Module,
+        pos: usize,
+        tag: Inst.Tag,
+        lhs: *Inst,
+        index: *Inst,
+        rhs: *Inst,
+    ) Error!*Inst {
         const inst = try self.gpa.create(Inst.Triple);
         inst.* = .{
             .base = .{
@@ -537,7 +553,7 @@ pub const Module = struct {
         return &inst.base;
     }
 
-    /// Emites a `Call` instruction which calls a function
+    /// Emits a `Call` instruction which calls a function
     pub fn emitCall(self: *Module, pos: usize, func: *Inst, args: []*Inst) Error!*Inst {
         const inst = try self.gpa.create(Inst.Call);
         inst.* = .{
@@ -548,6 +564,28 @@ pub const Module = struct {
             .args = try self.gpa.dupe(*Inst, args),
             .func = func,
         };
+        return &inst.base;
+    }
+
+    /// Emits an identifier that contains the scope that it was defined in and its index
+    pub fn emitIdent(
+        self: *Module,
+        pos: usize,
+        name: []const u8,
+        scope: Inst.Ident.Scope,
+        index: u32,
+    ) Error!*Inst {
+        const inst = try self.gpa.create(Inst.Ident);
+        inst.* = .{
+            .base = .{
+                .tag = .ident,
+                .pos = pos,
+            },
+            .name = try self.gpa.dupe(u8, name),
+            .index = index,
+            .scope = scope,
+        };
+
         return &inst.base;
     }
 };

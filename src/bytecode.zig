@@ -145,7 +145,7 @@ pub const Instructions = struct {
             .int => try self.emitInt(inst.as(lir.Inst.Int)),
             .string => try self.emitString(inst.as(lir.Inst.String)),
             .primitive => try self.emitPrim(inst.as(lir.Inst.Primitive)),
-            .ident => try self.emitIdent(inst.as(lir.Inst.Single)),
+            .ident => try self.emitIdent(inst.as(lir.Inst.Ident)),
             .expr => try self.emitExpr(inst.as(lir.Inst.Single)),
             .decl => try self.emitDecl(inst.as(lir.Inst.Decl)),
             .@"return" => try self.emitRet(inst.as(lir.Inst.Single)),
@@ -312,11 +312,10 @@ pub const Instructions = struct {
     }
 
     /// Generates the bytecode to load an identifier into the vm
-    fn emitIdent(self: *Instructions, single: *lir.Inst.Single) !void {
-        const decl = single.rhs.as(lir.Inst.Decl);
+    fn emitIdent(self: *Instructions, ident: *lir.Inst.Ident) !void {
         try self.emitPtr(
-            if (decl.scope == .global) .load_global else .load_local,
-            decl.index,
+            if (ident.scope == .global) .load_global else .load_local,
+            ident.index,
         );
     }
 
@@ -348,11 +347,11 @@ pub const Instructions = struct {
 
     /// Generates bytecode to reassign a global or local variable
     fn emitAssign(self: *Instructions, double: *lir.Inst.Double) !void {
-        const decl = double.lhs.as(lir.Inst.Decl);
+        const ident = double.lhs.as(lir.Inst.Ident);
         try self.gen(double.rhs);
         try self.emitPtr(
-            if (decl.scope == .global) .assign_global else .assign_local,
-            decl.index,
+            if (ident.scope == .global) .assign_global else .assign_local,
+            ident.index,
         );
     }
 
@@ -502,8 +501,8 @@ pub const Instructions = struct {
         const end_jump = try self.label(.jump_false);
 
         // index and capture
-        if (loop.index) |index| try self.emitPtr(.assign_local, index.as(lir.Inst.Decl).index);
-        try self.emitPtr(.assign_local, loop.capture.as(lir.Inst.Decl).index);
+        if (loop.index) |index| try self.emitPtr(.assign_local, index.as(lir.Inst.Ident).index);
+        try self.emitPtr(.assign_local, loop.capture.as(lir.Inst.Ident).index);
 
         try self.gen(loop.block);
 

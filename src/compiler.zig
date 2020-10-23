@@ -107,7 +107,7 @@ pub const Compiler = struct {
         /// Set to `true` if the symbol was created during forward declaration
         forward_declared: bool,
         /// IR declaration
-        decl: *lir.Inst,
+        ident: *lir.Inst,
     };
 
     /// Module with its global symbols
@@ -177,7 +177,7 @@ pub const Compiler = struct {
                 .scope = self.id,
                 .node = node,
                 .forward_declared = forward_declared,
-                .decl = undefined,
+                .ident = undefined,
             };
 
             try self.symbols.putNoClobber(self.allocator, name, symbol);
@@ -203,6 +203,7 @@ pub const Compiler = struct {
     fn deinit(self: *Compiler) void {
         var it = self.modules.iterator();
         while (it.next()) |mod| {
+            for (mod.value.symbols.items()) |entry| self.allocator.destroy(entry.value);
             mod.value.symbols.deinit(self.allocator);
             self.allocator.destroy(mod.value);
         }
@@ -343,6 +344,7 @@ pub const Compiler = struct {
 
             const symbol = (try self.defineSymbol(decl.name.identifier.value, decl.mutable, node, true)) orelse
                 return self.fail("'{}' has already been declared", node.tokenPos(), .{decl.name.identifier.value});
+            symbol.ident = try self.ir.emitIdent(node.tokenPos(), symbol.name, .global, symbol.index);
         }
         for (self.scope.symbols.items()) |entry| {
             const symbol: *Symbol = entry.value;
@@ -357,7 +359,7 @@ pub const Compiler = struct {
                 symbol.mutable,
                 value,
             );
-            symbol.decl = decl;
+
             try self.instructions.append(self.allocator, decl);
         }
     }
@@ -407,7 +409,7 @@ pub const Compiler = struct {
                 .node = n,
                 .forward_declared = true,
                 .index = self.gc,
-                .decl = undefined,
+                .ident = undefined,
             };
 
             try module.symbols.putNoClobber(self.allocator, name, symbol);
@@ -555,19 +557,31 @@ pub const Compiler = struct {
                 );
         }
 
-        if (self.resolveSymbol(self.scope, decl.name.identifier.value)) |s| {
+        const symbol = if (self.resolveSymbol(self.scope, decl.name.identifier.value)) |s| blk: {
             if (decl.value == .func_lit and s.forward_declared) {
                 s.forward_declared = false;
-                return s.decl;
+                break :blk s;
             } else
                 return self.fail(
                     "Identifier '{}' has already been declared",
                     decl.token.start,
                     .{decl.name.identifier.value},
                 );
-        }
+        } else blk: {
+            const s = (try self.defineSymbol(decl.name.identifier.value, decl.mutable, node, false)).?;
+            s.ident = try self.ir.emitIdent(
+                node.tokenPos(),
+                s.name,
+                switch (s.scope) {
+                    .global, .module => .global,
+                    else => .local,
+                },
+                s.index,
+            );
+            break :blk s;
+        };
 
-        const symbol = (try self.defineSymbol(decl.name.identifier.value, decl.mutable, node, false)).?;
+        //const symbol = (try self.defineSymbol(decl.name.identifier.value, decl.mutable, node, false)).?;
 
         const decl_value = try self.resolveInst(decl.value);
 
@@ -583,7 +597,6 @@ pub const Compiler = struct {
             symbol.mutable,
             decl_value,
         );
-        symbol.decl = decl_ir;
         return decl_ir;
     }
 
@@ -592,7 +605,7 @@ pub const Compiler = struct {
         const symbol = self.resolveSymbol(self.scope, id.value) orelse
             return self.fail("Identifier '{}' is undefined", id.token.start, .{id.value});
 
-        return self.ir.emitSingle(id.token.start, .ident, symbol.decl);
+        return symbol.ident;
     }
 
     /// Compiles an `ast.Node.DataStructure` node into a `lir.Inst.DataStructure`
@@ -639,7 +652,7 @@ pub const Compiler = struct {
                 const func_name = index.index.string_lit.value;
                 var func: *Symbol = module.symbols.get(func_name).?;
 
-                return self.ir.emitSingle(index.token.start, .ident, func.decl);
+                return try self.ir.emitIdent(index.token.start, func.name, .global, func.index);
             }
         }
 
@@ -662,17 +675,7 @@ pub const Compiler = struct {
                 .{param.func_arg.value},
             );
 
-            // generate a void declaration to attach to the symbol
-            const decl = try self.ir.emitDecl(
-                param.tokenPos(),
-                symbol.name,
-                symbol.index,
-                .local,
-                false,
-                false,
-                try self.ir.emitPrimitive(param.tokenPos(), .@"void"),
-            );
-            symbol.decl = decl;
+            symbol.ident = try self.ir.emitIdent(param.tokenPos(), symbol.name, .local, symbol.index);
         }
 
         const body = try self.resolveInst(function.body orelse return self.fail(
@@ -834,18 +837,9 @@ pub const Compiler = struct {
             const symbol = (try self.defineSymbol(i.identifier.value, false, ast.Node{ .int_lit = index_node }, false)) orelse
                 return self.fail("Identifier '{}' has already been declared", loop.token.start, .{i.identifier.value});
 
-            // generate a declaration to attach to the symbol
-            const decl = try self.ir.emitDecl(
-                i.tokenPos(),
-                symbol.name,
-                symbol.index,
-                .local,
-                false,
-                false,
-                try self.ir.emitInt(i.tokenPos(), 0),
-            );
-            symbol.decl = decl;
-            break :blk decl;
+            // generate an identifier to attach to the symbol
+            symbol.ident = try self.ir.emitIdent(i.tokenPos(), symbol.name, .local, symbol.index);
+            break :blk symbol.ident;
         } else null;
 
         // parser already parses it as an identifier, no need to check here again
@@ -855,23 +849,15 @@ pub const Compiler = struct {
             .{loop.capture.identifier.value},
         );
 
-        // generate a void declaration to attach to the symbol
-        const decl = try self.ir.emitDecl(
-            loop.capture.tokenPos(),
-            capture.name,
-            capture.index,
-            .local,
-            false,
-            false,
-            try self.ir.emitPrimitive(loop.capture.tokenPos(), .@"void"),
-        );
-        capture.decl = decl;
+        capture.ident = try self.ir.emitIdent(loop.capture.tokenPos(), capture.name, .local, capture.index);
 
         const body = try self.resolveInst(loop.block);
 
+        const loop_declaration = self.ir.emitFor(loop.token.start, it, body, capture.ident, index);
+
         self.exitScope();
 
-        return self.ir.emitFor(loop.token.start, it, body, decl, index);
+        return loop_declaration;
     }
 
     /// Compiles an `ast.Node.Assignment` node into a `lir.Inst.Assign`
@@ -898,7 +884,7 @@ pub const Compiler = struct {
 
             const rhs = try self.resolveInst(asg.right);
 
-            return self.ir.emitDouble(asg.token.start, .assign, symbol.decl, rhs);
+            return self.ir.emitDouble(asg.token.start, .assign, symbol.ident, rhs);
         } else if (asg.left == .index) {
             const index = asg.left.index;
 
@@ -948,18 +934,25 @@ pub const Compiler = struct {
 
             for (mod.symbols.items()) |entry| {
                 const symbol: *Symbol = entry.value;
-                _ = try self.scope.define(symbol.name, symbol.mutable, symbol.node, true, symbol.index);
+                const new_symbol = try self.scope.define(
+                    symbol.name,
+                    symbol.mutable,
+                    symbol.node,
+                    true,
+                    symbol.index,
+                );
+                new_symbol.?.ident = try self.ir.emitIdent(symbol.node.tokenPos(), symbol.name, .global, symbol.index);
             }
 
             // we can't do it in the loop above because all symbols need to be defined first so we
             // can call functions from other functions
             for (self.scope.symbols.items()) |*entry| {
-                var symbol: *Symbol = entry.value;
-                const value = try self.resolveInst(symbol.node.declaration.value);
-                symbol.decl = try self.ir.emitDecl(symbol.node.tokenPos(), symbol.name, symbol.index, switch (symbol.scope) {
-                    .global, .module => .global,
-                    else => .local,
-                }, false, symbol.mutable, value);
+                // var symbol: *Symbol = entry.value;
+                // const value = try self.resolveInst(symbol.node.declaration.value);
+                // symbol.decl = try self.ir.emitDecl(symbol.node.tokenPos(), symbol.name, symbol.index, switch (symbol.scope) {
+                //     .global, .module => .global,
+                //     else => .local,
+                // }, false, symbol.mutable, value);
             }
 
             for (tree.nodes) |n| {
