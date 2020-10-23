@@ -21,13 +21,13 @@ pub const Error = struct {
 pub const Errors = struct {
     /// internal list, containing all errors
     /// call deinit() on `Errors` to free its memory
-    list: std.ArrayList(Error),
+    list: std.ArrayListUnmanaged(Error),
     /// Allocator used to allocPrint error messages
     allocator: *std.mem.Allocator,
 
     /// Creates a new Errors object that can be catch errors and print them out to a writer
     pub fn init(allocator: *std.mem.Allocator) Errors {
-        return .{ .list = std.ArrayList(Error).init(allocator), .allocator = allocator };
+        return .{ .list = std.ArrayListUnmanaged(Error){}, .allocator = allocator };
     }
 
     /// Appends a new error to the error list
@@ -35,7 +35,7 @@ pub const Errors = struct {
         const msg = try std.fmt.allocPrint(self.allocator, fmt, args);
         errdefer self.allocator.free(msg);
 
-        return self.list.append(.{
+        return self.list.append(self.allocator, .{
             .fmt = msg,
             .kind = kind,
             .index = index,
@@ -43,11 +43,12 @@ pub const Errors = struct {
     }
 
     /// Frees the memory of the errors
-    pub fn deinit(self: Errors) void {
+    pub fn deinit(self: *Errors) void {
         for (self.list.items) |err| {
             self.allocator.free(err.fmt);
         }
-        return self.list.deinit();
+        self.list.deinit(self.allocator);
+        self.* = undefined;
     }
 
     /// Consumes the errors and writes the errors to the writer interface

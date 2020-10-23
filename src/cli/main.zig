@@ -99,9 +99,12 @@ fn builder(gpa: *std.mem.Allocator, file_path: []const u8, output_name: ?[]const
     var errors = luf.Errors.init(gpa);
     defer errors.deinit();
 
-    var byte_code = luf.compiler.compile(gpa, source, &errors) catch |_| {
+    var cu = luf.compiler.compile(gpa, source, &errors) catch |_| {
         return errors.write(source, std.io.getStdErr().writer());
     };
+    defer cu.deinit();
+
+    var byte_code = try luf.byte_code.Instructions.fromCu(gpa, cu);
     defer byte_code.deinit();
 
     const final_output_name = output_name orelse blk: {
