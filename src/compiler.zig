@@ -483,7 +483,7 @@ pub const Compiler = struct {
             .switch_prong => |prong| self.comileProng(prong),
             .comment => |cmt| self.ir.emitString(.comment, node.tokenPos(), cmt.value),
             .type_def => |td| self.compileTypeDef(td),
-            else => unreachable,
+            .func_arg => |arg| self.compileFuncArg(arg),
         };
     }
 
@@ -703,22 +703,10 @@ pub const Compiler = struct {
         try self.createScope(.function);
         self.scope.id.function = function;
 
-        for (function.params) |param| {
-            // function arguments are not mutable by default
-            const symbol = (try self.defineSymbol(param.func_arg.value, false, param, false, false)) orelse
-                return self.fail(
-                "Identifier '{}' has already been declared",
-                function.token.start,
-                .{param.func_arg.value},
-            );
+        var args = try std.ArrayList(*Inst).initCapacity(self.allocator, function.params.len);
 
-            symbol.ident = try self.ir.emitIdent(
-                try self.resolveType(param),
-                param.tokenPos(),
-                symbol.name,
-                .local,
-                symbol.index,
-            );
+        for (function.params) |param| {
+            args.appendAssumeCapacity(self.resolveInst(param));
         }
 
         const body = try self.resolveInst(function.body orelse return self.fail(
@@ -730,7 +718,31 @@ pub const Compiler = struct {
         const locals = self.scope.symbols.items().len;
         self.exitScope();
 
-        return self.ir.emitFunc(function.token.start, body, locals, function.params.len);
+        return self.ir.emitFunc(function.token.start, body, locals, args.toOwnedSlice());
+    }
+
+    /// Compiles an `ast.Node.FunctionArgument` into a `lir.Inst.FuncArg`
+    fn compileFuncArg(self: *Compiler, arg: *ast.Node.FunctionArgument) !*lir.Inst {
+        const ty = try self.resolveType(arg.arg_type);
+        const name = arg.value;
+
+        // function arguments are not mutable by default
+        const symbol = (try self.defineSymbol(param.func_arg.value, false, param, false)) orelse
+            return self.fail(
+            "Identifier '{}' has already been declared",
+            function.token.start,
+            .{param.func_arg.value},
+        );
+
+        symbol.ident = try self.ir.emitIdent(
+            ty,
+            param.tokenPos(),
+            symbol.name,
+            .local,
+            symbol.index,
+        );
+
+        return self.ir.emitFuncArg(arg.token.start, ty, symbol.name);
     }
 
     /// Compiles an `ast.Node.CallExpression` node into a `lir.Inst.Call`

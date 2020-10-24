@@ -54,30 +54,36 @@ const Section = enum {
     data,
 };
 
-/// Export sections as described at:
-/// http://webassembly.github.io/spec/core/binary/modules.html#export-section
-const ExportType = enum {
-    func = 0x00,
-    table = 0x01,
-    mem = 0x02,
-    global = 0x03,
-};
-
-/// Contains all possible types
+/// Contains all possible types as described at
+/// https://webassembly.github.io/spec/core/binary/types.html
 const Types = struct {
     const block: u8 = 0x40;
     const func: u8 = 0x60;
+    const table: u8 = 0x70;
 
-    /// Wasm types as described at:
-    /// https://webassembly.github.io/spec/core/binary/types.html
-    const Type = enum(u7) {
-        t_i32 = 0x7F,
-        t_i64 = 0x7E,
-        t_f32 = 0x7D,
-        t_f64 = 0x7C,
-        t_func_ref = 0x70,
-        t_val = 0x60,
-        t_result = 0x40,
+    /// Limits as described at:
+    /// https://webassembly.github.io/spec/core/binary/types.html#limits
+    const Limits = enum(u1) {
+        zero,
+        one,
+    };
+
+    /// Wasm Value types as described at:
+    /// https://webassembly.github.io/spec/core/binary/types.html#value-types
+    const Value = enum(u7) {
+        I32 = 0x7F,
+        I64 = 0x7E,
+        F32 = 0x7D,
+        F64 = 0x7C,
+    };
+
+    /// Export sections as described at:
+    /// http://webassembly.github.io/spec/core/binary/modules.html#export-section
+    const Export = enum {
+        func = 0x00,
+        table = 0x01,
+        mem = 0x02,
+        global = 0x03,
     };
 };
 
@@ -291,6 +297,16 @@ pub const Wasm = struct {
             try self.gen(cond.else_block);
             try self.emit(.block);
         }
+    }
+
+    /// Emits a Wasm function
+    fn emitFunc(self: *Wasm, func: *lir.Inst.Function) !void {
+        try self.emitUnsigned(@intCast(u32, func.args.len));
+        
+        for(func.args)|arg| {
+            try self.raw(try self.resolveType(arg.ty));
+        }
+        
     }
 };
 

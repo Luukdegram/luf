@@ -37,6 +37,7 @@ pub const Inst = struct {
         assign_mul,
         assign_div,
         func,
+        func_arg,
         call,
         @"for",
         @"while",
@@ -116,6 +117,7 @@ pub const Inst = struct {
                 .condition => Condition,
                 .primitive => Primitive,
                 .func => Function,
+                .func_arg => FuncArg,
                 .call => Call,
                 .@"for" => Loop,
                 .@"switch" => Switch,
@@ -183,8 +185,13 @@ pub const Inst = struct {
     pub const Function = struct {
         base: Inst,
         body: *Inst,
+        args: []*const Inst,
         locals: usize,
-        params: usize,
+    };
+
+    pub const FuncArg = struct {
+        base: Inst,
+        name: []const u8,
     };
 
     pub const Call = struct {
@@ -411,7 +418,7 @@ pub const Module = struct {
         pos: usize,
         body: *Inst,
         locals: usize,
-        params: usize,
+        args: []*const Inst,
     ) Error!*Inst {
         const inst = try self.gpa.create(Inst.Function);
         inst.* = .{
@@ -422,7 +429,21 @@ pub const Module = struct {
             },
             .body = body,
             .locals = locals,
-            .params = params,
+            .args = args,
+        };
+        return &inst.base;
+    }
+
+    /// Creates a `FuncArg` instruction
+    pub fn emitFuncArg(self: *Module, pos: usize, ty: Type, name: []const u8) Error!*Inst {
+        const inst = try self.gpa.create(Inst.FuncArg);
+        inst.* = .{
+            .base = .{
+                .tag = .func_arg,
+                .pos = pos,
+                .ty = ty,
+            },
+            .name = try self.gpa.dupe(u8, name),
         };
         return &inst.base;
     }
