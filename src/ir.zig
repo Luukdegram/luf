@@ -1,4 +1,5 @@
 const std = @import("std");
+const Type = @import("value.zig").Value.Type;
 const Allocator = std.mem.Allocator;
 
 //! This file contains Luf's typed intermediate representation
@@ -13,6 +14,8 @@ pub const Inst = struct {
     tag: Tag,
     /// The position of the instruction within the source code
     pos: usize,
+    /// Luf type that corresponts to the instructions
+    ty: Type,
 
     /// The kind of instruction
     pub const Tag = enum {
@@ -72,7 +75,7 @@ pub const Inst = struct {
 
         /// Returns the type of that belongs to a `Tag`
         /// Can be used to cast to the correct Type from a `Tag`.
-        pub fn Type(self: Tag) type {
+        pub fn IrType(self: Tag) type {
             return switch (self) {
                 .negate,
                 .@"return",
@@ -130,10 +133,10 @@ pub const Inst = struct {
 
     /// Casts `Inst` into the type that corresponds to `tag`
     /// returns null if tag does not match.
-    pub fn castTag(self: *Inst, comptime tag: Tag) ?*tag.Type() {
+    pub fn castTag(self: *Inst, comptime tag: Tag) ?*tag.IrType() {
         if (self.tag != tag) return null;
 
-        return @fieldParentPtr(tag.Type(), "base", self);
+        return @fieldParentPtr(tag.IrType(), "base", self);
     }
 
     /// Casts `Inst` into `T`
@@ -299,6 +302,7 @@ pub const Module = struct {
             .base = .{
                 .tag = .int,
                 .pos = pos,
+                .ty = .integer,
             },
             .value = value,
         };
@@ -309,12 +313,17 @@ pub const Module = struct {
     /// Creates a new `String` instruction. This duplicates the string value
     /// and takes ownership of its memory. Caller must therefore free the original's
     /// string's memory by themselves
-    pub fn emitString(self: *Module, tag: Inst.Tag, pos: usize, value: []const u8) Error!*Inst {
+    pub fn emitString(self: *Module, comptime tag: Inst.Tag, pos: usize, value: []const u8) Error!*Inst {
         const inst = try self.gpa.create(Inst.String);
         inst.* = .{
             .base = .{
                 .tag = tag,
                 .pos = pos,
+                .ty = switch (tag) {
+                    .string, .comment => .string,
+                    .import => .module,
+                    else => @compileError("Unsupported type"),
+                },
             },
             .value = try self.gpa.dupe(u8, value),
         };
@@ -329,6 +338,7 @@ pub const Module = struct {
             .base = .{
                 .tag = .block,
                 .pos = pos,
+                .ty = ._void,
             },
             .instructions = try self.gpa.dupe(*Inst, instructions),
         };
@@ -342,6 +352,11 @@ pub const Module = struct {
             .base = .{
                 .tag = .primitive,
                 .pos = pos,
+                .ty = switch (value) {
+                    .@"true", .@"false" => .boolean,
+                    .@"void" => ._void,
+                    .nil => .nil,
+                },
             },
             .prim_type = value,
         };
@@ -364,6 +379,7 @@ pub const Module = struct {
             .base = .{
                 .tag = .decl,
                 .pos = pos,
+                .ty = value.ty,
             },
             .scope = scope,
             .name = try self.gpa.dupe(u8, name),
@@ -382,6 +398,7 @@ pub const Module = struct {
             .base = .{
                 .tag = tag,
                 .pos = pos,
+                .ty = .list,
             },
             .elements = try self.gpa.dupe(*Inst, elements),
         };
@@ -401,6 +418,7 @@ pub const Module = struct {
             .base = .{
                 .tag = .func,
                 .pos = pos,
+                .ty = .function,
             },
             .body = body,
             .locals = locals,
@@ -423,6 +441,7 @@ pub const Module = struct {
             .base = .{
                 .tag = .@"for",
                 .pos = pos,
+                .ty = ._void,
             },
             .it = iterator,
             .block = block,
@@ -439,6 +458,7 @@ pub const Module = struct {
             .base = .{
                 .tag = .assign,
                 .pos = pos,
+                .ty = decl.ty,
             },
             .decl = decl,
             .rhs = rhs,
@@ -453,6 +473,7 @@ pub const Module = struct {
             .base = .{
                 .tag = tag,
                 .pos = pos,
+                .ty = ._void,
             },
         };
         return &inst.base;
@@ -465,6 +486,7 @@ pub const Module = struct {
             .base = .{
                 .tag = .@"enum",
                 .pos = pos,
+                .ty = ._enum,
             },
             .value = try self.gpa.dupe(*Inst, nodes),
         };
@@ -478,6 +500,7 @@ pub const Module = struct {
             .base = .{
                 .tag = .@"switch",
                 .pos = pos,
+                .ty = ._void,
             },
             .capture = capture,
             .branches = try self.gpa.dupe(*Inst, branches),
@@ -493,6 +516,7 @@ pub const Module = struct {
             .base = .{
                 .tag = tag,
                 .pos = pos,
+                .ty = rhs.ty,
             },
             .rhs = rhs,
         };
@@ -507,6 +531,7 @@ pub const Module = struct {
             .base = .{
                 .tag = tag,
                 .pos = pos,
+                .ty = lhs.ty,
             },
             .lhs = lhs,
             .rhs = rhs,
@@ -529,6 +554,7 @@ pub const Module = struct {
             .base = .{
                 .tag = tag,
                 .pos = pos,
+                .ty = rhs.ty,
             },
             .lhs = lhs,
             .index = index,
@@ -544,6 +570,7 @@ pub const Module = struct {
             .base = .{
                 .tag = .condition,
                 .pos = pos,
+                .ty = ._void,
             },
             .cond = cond,
             .then_block = then_block,
@@ -560,6 +587,7 @@ pub const Module = struct {
             .base = .{
                 .tag = .call,
                 .pos = pos,
+                .ty = ._void,
             },
             .args = try self.gpa.dupe(*Inst, args),
             .func = func,
@@ -570,6 +598,7 @@ pub const Module = struct {
     /// Emits an identifier that contains the scope that it was defined in and its index
     pub fn emitIdent(
         self: *Module,
+        ty: Type,
         pos: usize,
         name: []const u8,
         scope: Inst.Ident.Scope,
@@ -580,6 +609,7 @@ pub const Module = struct {
             .base = .{
                 .tag = .ident,
                 .pos = pos,
+                .ty = ty,
             },
             .name = try self.gpa.dupe(u8, name),
             .index = index,

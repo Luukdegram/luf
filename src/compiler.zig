@@ -600,6 +600,7 @@ pub const Compiler = struct {
         } else blk: {
             const s = (try self.defineSymbol(decl.name.identifier.value, decl.mutable, node, false, decl.is_pub)).?;
             s.ident = try self.ir.emitIdent(
+                try self.resolveType(decl.value),
                 node.tokenPos(),
                 s.name,
                 switch (s.scope) {
@@ -682,7 +683,13 @@ pub const Compiler = struct {
                 const func_name = index.index.string_lit.value;
                 var func: *Symbol = module.symbols.get(func_name).?;
 
-                return try self.ir.emitIdent(index.token.start, func.name, .global, func.index);
+                return try self.ir.emitIdent(
+                    try self.resolveType(func.node),
+                    index.token.start,
+                    func.name,
+                    .global,
+                    func.index,
+                );
             }
         }
 
@@ -705,7 +712,13 @@ pub const Compiler = struct {
                 .{param.func_arg.value},
             );
 
-            symbol.ident = try self.ir.emitIdent(param.tokenPos(), symbol.name, .local, symbol.index);
+            symbol.ident = try self.ir.emitIdent(
+                try self.resolveType(param),
+                param.tokenPos(),
+                symbol.name,
+                .local,
+                symbol.index,
+            );
         }
 
         const body = try self.resolveInst(function.body orelse return self.fail(
@@ -877,7 +890,7 @@ pub const Compiler = struct {
             );
 
             // generate an identifier to attach to the symbol
-            symbol.ident = try self.ir.emitIdent(i.tokenPos(), symbol.name, .local, symbol.index);
+            symbol.ident = try self.ir.emitIdent(.integer, i.tokenPos(), symbol.name, .local, symbol.index);
             break :blk symbol.ident;
         } else null;
 
@@ -894,7 +907,13 @@ pub const Compiler = struct {
             .{loop.capture.identifier.value},
         );
 
-        capture.ident = try self.ir.emitIdent(loop.capture.tokenPos(), capture.name, .local, capture.index);
+        capture.ident = try self.ir.emitIdent(
+            try self.resolveScalarType(capture.node),
+            loop.capture.tokenPos(),
+            capture.name,
+            .local,
+            capture.index,
+        );
 
         const body = try self.resolveInst(loop.block);
 
@@ -987,7 +1006,13 @@ pub const Compiler = struct {
                     symbol.is_pub,
                     symbol.index,
                 );
-                new_symbol.?.ident = try self.ir.emitIdent(symbol.node.tokenPos(), symbol.name, .global, symbol.index);
+                new_symbol.?.ident = try self.ir.emitIdent(
+                    try self.resolveType(symbol.node),
+                    symbol.node.tokenPos(),
+                    symbol.name,
+                    .global,
+                    symbol.index,
+                );
             }
 
             // we can't do it in the loop above because all symbols need to be defined first so we
