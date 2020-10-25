@@ -167,7 +167,7 @@ pub const Instructions = struct {
             .@"break" => try self.scope.loop.jumps.append(self.gpa, try self.label(.jump)),
             .@"continue" => try self.emitPtr(.jump, self.scope.loop.start),
             .@"for" => try self.emitLoop(inst.as(lir.Inst.Loop)),
-            .comment, .type_def => {}, //VM doesn't do anything with this
+            .comment, .type_def, .func_arg => {}, //VM doesn't do anything with this
         }
     }
 
@@ -250,7 +250,7 @@ pub const Instructions = struct {
         const end = try self.appendRetPos(Instruction.genFunction(
             try self.gpa.dupe(u8, name),
             func.locals,
-            func.params,
+            func.args.len,
             entry_point,
         ));
 

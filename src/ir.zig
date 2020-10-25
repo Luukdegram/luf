@@ -121,7 +121,7 @@ pub const Inst = struct {
                 .call => Call,
                 .@"for" => Loop,
                 .@"switch" => Switch,
-                .@"break", .@"continue", .type_def => NoOp,
+                .@"break", .@"continue" => NoOp,
                 .list, .map => DataStructure,
                 .decl => Decl,
                 .int => Int,
@@ -129,6 +129,7 @@ pub const Inst = struct {
                 .block => Block,
                 .@"enum" => Enum,
                 .ident => Ident,
+                .type_def => TypeDef,
             };
         }
     };
@@ -185,7 +186,8 @@ pub const Inst = struct {
     pub const Function = struct {
         base: Inst,
         body: *Inst,
-        args: []*const Inst,
+        args: []*Inst,
+        ret_type: *Inst,
         locals: usize,
     };
 
@@ -224,6 +226,10 @@ pub const Inst = struct {
         name: []const u8,
 
         pub const Scope = enum { global, local };
+    };
+
+    pub const TypeDef = struct {
+        base: Inst,
     };
 
     pub const Switch = struct {
@@ -418,7 +424,8 @@ pub const Module = struct {
         pos: usize,
         body: *Inst,
         locals: usize,
-        args: []*const Inst,
+        args: []*Inst,
+        ret_type: *Inst,
     ) Error!*Inst {
         const inst = try self.gpa.create(Inst.Function);
         inst.* = .{
@@ -430,6 +437,7 @@ pub const Module = struct {
             .body = body,
             .locals = locals,
             .args = args,
+            .ret_type = ret_type,
         };
         return &inst.base;
     }
@@ -637,6 +645,19 @@ pub const Module = struct {
             .scope = scope,
         };
 
+        return &inst.base;
+    }
+
+    /// Emits a type definition
+    pub fn emitType(self: *Module, ty: Type, pos: usize) Error!*Inst {
+        const inst = try self.gpa.create(Inst.TypeDef);
+        inst.* = .{
+            .base = .{
+                .tag = .type_def,
+                .pos = pos,
+                .ty = ty,
+            },
+        };
         return &inst.base;
     }
 };

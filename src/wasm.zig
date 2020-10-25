@@ -1,5 +1,7 @@
 pub const std = @import("std");
 pub const lir = @import("ir.zig");
+pub const LufType = @import("value.zig").Value.Type;
+const Allocator = std.mem.Allocator;
 const leb = std.debug.leb;
 
 const Op = enum(u8) {
@@ -39,10 +41,10 @@ const Op = enum(u8) {
 
 /// Section id's as described at:
 /// https://webassembly.github.io/spec/core/binary/modules.html#sections
-const Section = enum {
+const SectionType = enum {
     custom,
     @"type",
-    import,
+    import, // not used in Luf, everything is compiled to 1 compile unit
     func,
     table,
     memory,
@@ -52,6 +54,30 @@ const Section = enum {
     element,
     code,
     data,
+};
+
+const Section = struct {
+    ty: SectionType,
+    code: std.ArrayList(u8),
+    size: u32,
+
+    fn init(ty: SectionType, gpa: *Allocator) Section {
+        return .{ .ty = ty, .code = std.ArrayList(u8).init(gpa), .size = 0 };
+    }
+
+    /// Emits all code from the section into the writer
+    /// This invalidates the code saved into section itself
+    fn emit(self: Section, writer: anytype) !void {
+        if (self.code.items.len == 0) return;
+
+        // section id
+        writer.writeByte(@enumToInt(self.ty));
+
+        // count
+        leb.writeULEB128(writer, self.size);
+
+        writer.writeAll(self.code.toOwnedSlice(gpa));
+    }
 };
 
 /// Contains all possible types as described at
@@ -95,16 +121,22 @@ const module_version = [_]u8{ 0x01, 0x00, 0x00, 0x00 }; // v1
 /// to manage instructions
 pub const Wasm = struct {
     buffer: std.ArrayList(u8),
+    sections: std.ArrayListUnmanaged(Section),
+    gpa: *Allocator,
 
     pub const Error = error{OutOfMemory};
 
     /// Creates a new instance of `Instructions`
-    pub fn init(gpa: *std.mem.Allocator) Wasm {
-        return .{ .buffer = std.ArrayList(u8).init(gpa) };
+    pub fn init(gpa: *Allocator) Wasm {
+        return .{
+            .buffer = std.ArrayList(u8).init(gpa),
+            .sections = std.ArrayListUnmanaged(Section),
+            .gpa = gpa,
+        };
     }
 
     /// Creates a new instance of `Instructions` aswell as codegen bytecode instructions from Luf's IR
-    pub fn fromCu(gpa: *std.mem.Allocator, cu: lir.CompileUnit) Error![]const u8 {
+    pub fn fromCu(gpa: *Allocator, cu: lir.CompileUnit) Error![]const u8 {
         var wasm = init(gpa);
         wasm.writer().writeIntLittle(u32, module_header);
         wasm.writer().writeIntLittle(u32, module_version);
@@ -129,8 +161,18 @@ pub const Wasm = struct {
         self.buffer.deinit(self.gpa);
     }
 
+    /// Wrapper around internal `buffer`'s writer(), allows for code completion
+    /// and easier access to its writer
     fn writer(self: *Wasm) std.io.Writer(Wasm, Error, self.buffer.writer) {
         return self.buffer.writer;
+    }
+
+    /// Resolves the Wasm's value type given the LufType
+    fn resolveValType(ty: LufType) Types.Value {
+        switch (ty) {
+            .integer => .I64,
+            else => @panic("TODO: Implement more types for wasm"),
+        }
     }
 
     /// Generates and appends instructions based on the given IR instruction
@@ -299,16 +341,38 @@ pub const Wasm = struct {
         }
     }
 
-    /// Emits a Wasm function
-    fn emitFunc(self: *Wasm, func: *lir.Inst.Function) !void {
-        try self.emitUnsigned(@intCast(u32, func.args.len));
-        
-        for(func.args)|arg| {
-            try self.raw(try self.resolveType(arg.ty));
-        }
-        
+    /// Emits a Wasm function, expects a declaration instead of a function
+    /// as we need information regarding its index
+    fn emitFunc(self: *Wasm, decl: *lir.Inst.Decl) !void {
+        const func = decl.value.as(lir.Inst.Function);
+        const name = decl.name;
     }
 };
+
+/// Emits a function type and appends it to the given section
+/// Caller must ensure declaration contains a function
+fn emitFuncType(section: *Section, func: *lir.Inst.Function) !void {
+    const writer = section.code.writer();
+
+    // tell wasm it's a function type
+    try writer.writeByte(Types.func);
+
+    // emit arguments length and their types
+    try leb.writeULEB128(writer, @intCast(u32, func.args.len));
+    for (func.args) |arg| try writer.writeByte(try Wasm.resolveValType(arg.ty));
+
+    // Result types -> Wasm only allows for 1 result type, currently
+    // if return type is void, provide no return type
+    if (func.ret_type.ty == ._void) {
+        try leb.writeULEB128(writer, @as(u32, 0));
+    } else {
+        try leb.writeULEB128(writer, @as(u32, 1));
+        try writer.writeByte(try resolveValType(func.ret_type.ty));
+    }
+
+    // Make sure we increase the size of the section
+    section.size += 1;
+}
 
 comptime {
     std.meta.refAllDecls(@This());

@@ -703,10 +703,10 @@ pub const Compiler = struct {
         try self.createScope(.function);
         self.scope.id.function = function;
 
-        var args = try std.ArrayList(*Inst).initCapacity(self.allocator, function.params.len);
+        var args = try std.ArrayList(*lir.Inst).initCapacity(self.ir.gpa, function.params.len);
 
         for (function.params) |param| {
-            args.appendAssumeCapacity(self.resolveInst(param));
+            args.appendAssumeCapacity(try self.resolveInst(param));
         }
 
         const body = try self.resolveInst(function.body orelse return self.fail(
@@ -718,7 +718,15 @@ pub const Compiler = struct {
         const locals = self.scope.symbols.items().len;
         self.exitScope();
 
-        return self.ir.emitFunc(function.token.start, body, locals, args.toOwnedSlice());
+        const ret_type = try self.resolveInst(function.ret_type);
+
+        return self.ir.emitFunc(
+            function.token.start,
+            body,
+            locals,
+            args.toOwnedSlice(),
+            ret_type,
+        );
     }
 
     /// Compiles an `ast.Node.FunctionArgument` into a `lir.Inst.FuncArg`
@@ -727,22 +735,22 @@ pub const Compiler = struct {
         const name = arg.value;
 
         // function arguments are not mutable by default
-        const symbol = (try self.defineSymbol(param.func_arg.value, false, param, false)) orelse
+        const symbol = (try self.defineSymbol(name, false, arg.arg_type, false)) orelse
             return self.fail(
             "Identifier '{}' has already been declared",
-            function.token.start,
-            .{param.func_arg.value},
+            arg.token.start,
+            .{name},
         );
 
         symbol.ident = try self.ir.emitIdent(
             ty,
-            param.tokenPos(),
+            arg.token.start,
             symbol.name,
             .local,
             symbol.index,
         );
 
-        return self.ir.emitFuncArg(arg.token.start, ty, symbol.name);
+        return self.ir.emitFuncArg(arg.token.start, ty, name);
     }
 
     /// Compiles an `ast.Node.CallExpression` node into a `lir.Inst.Call`
@@ -1118,7 +1126,7 @@ pub const Compiler = struct {
     /// This is only used for the compiler to ensure type safety
     /// and generates a no op instruction that codegen can ignore
     fn compileTypeDef(self: *Compiler, node: *ast.Node.TypeDef) !*lir.Inst {
-        return self.ir.emitNoOp(node.token.start, .type_def);
+        return self.ir.emitType(node.getType().?, node.token.start);
     }
 };
 
