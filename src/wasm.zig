@@ -59,7 +59,7 @@ const SectionType = enum {
 const Section = struct {
     ty: SectionType,
     code: std.ArrayList(u8),
-    size: u32,
+    count: u32,
 
     fn init(ty: SectionType, gpa: *Allocator) Section {
         return .{ .ty = ty, .code = std.ArrayList(u8).init(gpa), .size = 0 };
@@ -74,7 +74,7 @@ const Section = struct {
         writer.writeByte(@enumToInt(self.ty));
 
         // count
-        leb.writeULEB128(writer, self.size);
+        leb.writeULEB128(writer, self.count);
 
         writer.writeAll(self.code.toOwnedSlice(gpa));
     }
@@ -121,7 +121,8 @@ const module_version = [_]u8{ 0x01, 0x00, 0x00, 0x00 }; // v1
 /// to manage instructions
 pub const Wasm = struct {
     buffer: std.ArrayList(u8),
-    sections: std.ArrayListUnmanaged(Section),
+    sections: [12]Section,
+    section_size: usize,
     gpa: *Allocator,
 
     pub const Error = error{OutOfMemory};
@@ -130,7 +131,8 @@ pub const Wasm = struct {
     pub fn init(gpa: *Allocator) Wasm {
         return .{
             .buffer = std.ArrayList(u8).init(gpa),
-            .sections = std.ArrayListUnmanaged(Section),
+            .sections = undefined,
+            .section_size = 0,
             .gpa = gpa,
         };
     }
@@ -138,14 +140,44 @@ pub const Wasm = struct {
     /// Creates a new instance of `Instructions` aswell as codegen bytecode instructions from Luf's IR
     pub fn fromCu(gpa: *Allocator, cu: lir.CompileUnit) Error![]const u8 {
         var wasm = init(gpa);
+
+        // so when sections are created we do not have to allocate it
+        try wasm.sections.ensureCapacity(gpa, 12);
+
         wasm.writer().writeIntLittle(u32, module_header);
         wasm.writer().writeIntLittle(u32, module_version);
 
+        // first do all declarations, required for our sections
         for (cu.instructions) |inst| {
+            if (inst.tag == .decl) {}
+        }
+
+        // sort our sections so they will be emitted in correct order
+        std.sort.sort(Section, wasm.sections, void, sortSections);
+
+        // emit the sections
+        for (wasm.sections[0..wasm.section_size]) |sec| {
+            try sec.emit(wasm.writer());
+        }
+
+        // Finally, do all other instructions
+        for (cu.instructions) |inst| {
+            if (inst.tag == .decl) continue;
             try wasm.gen(inst);
         }
 
         return wasm.final();
+    }
+
+    /// Returns a section based on the given section type
+    /// if the section does not exist yet, a new one will be created
+    fn section(self: *Wasm, id: SectionType) *Section {
+        for (self.sections.items) |*s| if (s.ty == id) return s;
+
+        // not found, so create a new Section and return a pointer to it
+        self.sections[self.section_size] = Section.init(id, self.gpa);
+        defer self.section_size += 1;
+        return &self.sections[self.section_size];
     }
 
     /// Returns the current instruction set as Wasm
@@ -169,14 +201,14 @@ pub const Wasm = struct {
 
     /// Resolves the Wasm's value type given the LufType
     fn resolveValType(ty: LufType) Types.Value {
-        switch (ty) {
-            .integer => .I64,
+        return switch (ty) {
+            .integer => Types.Value.I64,
             else => @panic("TODO: Implement more types for wasm"),
-        }
+        };
     }
 
     /// Generates and appends instructions based on the given IR instruction
-    fn gen(self: *Wasm, inst: *lir.Inst) Error!void {
+    fn gen(self: *Wasm, writer: anytype, inst: *lir.Inst) Error!void {
         switch (inst.tag) {
             .add,
             .sub,
@@ -258,100 +290,115 @@ pub const Wasm = struct {
     }
 
     /// Emits a Wasm block instruction
-    fn emitBlock(self: *Wasm, block: *lir.Inst.Block) !void {
-        for (block.instructions) |inst| try self.gen(inst);
+    fn emitBlock(self: *Wasm, writer: anytype, block: *lir.Inst.Block) !void {
+        for (block.instructions) |inst| try self.gen(writer, inst);
     }
 
     /// Loads a local or global variable onto the stack
-    fn emitIdent(self: *Wasm, ident: *lir.Inst.Ident) !void {
-        try self.emit(if (ident.scope == .global) .global_get else .local_get);
-        try self.emitUnsigned(ident.index);
+    fn emitIdent(self: *Wasm, writer: antype, ident: *lir.Inst.Ident) !void {
+        try self.emit(writer, if (ident.scope == .global) .global_get else .local_get);
+        try self.emitUnsigned(writer, ident.index);
     }
 
     /// Emits a return statement in Wasm
-    fn emitRet(self: *Wasm, ret: *lir.Inst.Single) !void {
-        try self.gen(ret.rhs);
-        try self.emit(.@"return");
+    fn emitRet(self: *Wasm, writer: anytype, ret: *lir.Inst.Single) !void {
+        try self.gen(writer, ret.rhs);
+        try self.emit(writer, .@"return");
     }
 
     /// Emits wasm for the declation's value to put it on the stack
     /// and then generates a .local_set or .global_set based on its scope
-    fn emitDecl(self: *Wasm, decl: *lir.Inst.Decl) !void {
-        try self.gen(decl.value);
-        try self.emit(if (decl.scope == .global) .global_set else .local_set);
-        try self.emitUnsigned(decl.index);
+    fn emitDecl(self: *Wasm, writer, decl: *lir.Inst.Decl) !void {
+        try self.gen(writer, decl.value);
+        try self.emit(writer, if (decl.scope == .global) .global_set else .local_set);
+        try self.emitUnsigned(writer, decl.index);
     }
 
     /// Emits Wasm to perform a while loop. This first creates a block type
     /// and then a loop type
-    fn emitWhile(self: *Wasm, loop: *lir.Inst.Double) !void {
-        try self.emit(.block);
-        try self.raw(Types.block);
+    fn emitWhile(self: *Wasm, writer: anytype, loop: *lir.Inst.Double) !void {
+        try self.emit(writer, .block);
+        try self.raw(writer, Types.block);
 
-        try self.emit(.loop);
-        try self.raw(Types.block);
+        try self.emit(writer, .loop);
+        try self.raw(writer, Types.block);
 
         // condition of the while loop
-        try self.gen(loop.lhs);
+        try self.gen(writer, loop.lhs);
 
-        try self.emit(.break_if);
-        try self.emitSigned(1);
+        try self.emit(writer, .break_if);
+        try self.emitSigned(writer, 1);
 
         // block
-        try self.gen(loop.rhs);
+        try self.gen(writer, loop.rhs);
 
-        try self.emit(.@"break");
-        try self.emitSigned(0);
+        try self.emit(writer, .@"break");
+        try self.emitSigned(writer, 0);
 
         // end loop
-        try self.emit(.end);
+        try self.emit(writer, .end);
 
         // end block
-        try self.emit(.end);
+        try self.emit(writer, .end);
     }
 
     /// Emits Wasm for an if-statement
-    fn emitCond(self: *Wasm, cond: *lir.Inst.Condition) !void {
-        // if block
-        {
-            try self.emit(.block);
-            try self.raw(Types.block);
-
-            try self.gen(cond.cond);
-
-            try self.emit(.break_if);
-            try self.emitSigned(0);
-
-            try self.gen(cond.then_block);
-            try self.emit(.end);
-        }
-
-        // else block
-        {
-            try self.emit(.block);
-            try self.raw(Types.block);
-
-            try self.gen(cond.cond);
-
-            try self.emit(.break_if);
-            try self.emitSigned(0);
-
-            try self.gen(cond.else_block);
-            try self.emit(.block);
-        }
-    }
+    fn emitCond(self: *Wasm, cond: *lir.Inst.Condition) !void {}
 
     /// Emits a Wasm function, expects a declaration instead of a function
-    /// as we need information regarding its index
+    /// as we need information regarding its index and name
     fn emitFunc(self: *Wasm, decl: *lir.Inst.Decl) !void {
         const func = decl.value.as(lir.Inst.Function);
         const name = decl.name;
+
+        // register the function type
+        const type_section = self.section(.@"type");
+        const type_idx = try emitFuncType(type_section, func);
+
+        // register the function itself
+        const func_section = self.section(.func);
+        const func_idx = func_section.count;
+        func_section.code.writer().writeIntLittle(u32, func_idx);
+        func_section.count += 1; // manually increase as no helper function here
+
+        // register the code section, this will contain the body of the function
+        const code_section = self.section(.code);
+    }
+
+    /// Appends a function body into the given section
+    /// Will increase the section's count by 1
+    fn emitFuncBody(self: *Wasm, section: *Section, func: *lir.Inst.Function) !void {
+        const writer = section.code.writer();
+
+        try writer.writeIntLittle(u32, @intCast(u32, func.locals));
+        const body = func.body.as(lir.Inst.Block);
+        // if we have locals, extract them from the body
+        // TODO maybe we can make this nicer by making locals a slice of instructions
+        // rather than a counter so we don't have to loop over the body twice
+        if (func.locals > 0) {
+            for (body.instructions) |inst| {
+                if (inst.tag == .decl) {
+                    self.raw(@enumToInt(self.resolveValType(inst.ty)));
+                }
+            }
+        }
+
+        // generate the bytecode for the body
+        // exclude the declarations
+        for (body.instructions) |inst| {
+            if (inst.tag != .decl) self.gen(writer, inst);
+        }
+
+        // "end" byte
+        try writer.writeByte(@enumToInt(Op.end));
+
+        section.count += 1;
     }
 };
 
 /// Emits a function type and appends it to the given section
-/// Caller must ensure declaration contains a function
-fn emitFuncType(section: *Section, func: *lir.Inst.Function) !void {
+/// Returns the typeidx and increases the section's count by 1
+fn emitFuncType(section: *Section, func: *lir.Inst.Function) !u32 {
     const writer = section.code.writer();
 
     // tell wasm it's a function type
@@ -359,7 +406,7 @@ fn emitFuncType(section: *Section, func: *lir.Inst.Function) !void {
 
     // emit arguments length and their types
     try leb.writeULEB128(writer, @intCast(u32, func.args.len));
-    for (func.args) |arg| try writer.writeByte(try Wasm.resolveValType(arg.ty));
+    for (func.args) |arg| try writer.writeByte(@enumToInt(Wasm.resolveValType(arg.ty)));
 
     // Result types -> Wasm only allows for 1 result type, currently
     // if return type is void, provide no return type
@@ -367,11 +414,20 @@ fn emitFuncType(section: *Section, func: *lir.Inst.Function) !void {
         try leb.writeULEB128(writer, @as(u32, 0));
     } else {
         try leb.writeULEB128(writer, @as(u32, 1));
-        try writer.writeByte(try resolveValType(func.ret_type.ty));
+        const ret_type = Wasm.resolveValType(func.ret_type.ty);
+        try writer.writeByte(@enumToInt(ret_type));
     }
 
     // Make sure we increase the size of the section
-    section.size += 1;
+    section.count += 1;
+
+    // the typeidx (-1 because we just increased it by 1 above)
+    return section.count - 1;
+}
+
+/// function used to sort sections by their type
+fn sortSections(context: void, lhs: Section, rhs: Section) bool {
+    return @enumToInt(lhs.ty) < @enumToInt(rhs.ty);
 }
 
 comptime {
