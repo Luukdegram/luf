@@ -264,29 +264,29 @@ pub const Wasm = struct {
     }
 
     /// Writes an unsigned integer value
-    fn emitUnsigned(self: *Wasm, value: anytype) !void {
-        try leb.writeULEB128(self.buffer.writer(), value);
+    fn emitUnsigned(self: *Wasm, writer: anytype, value: anytype) !void {
+        try leb.writeULEB128(writer, value);
     }
 
     /// Writes a signed integer value
-    fn emitSigned(self: *Wasm, value: anytype) !void {
-        try leb.writeILEB128(self.buffer.writer(), value);
+    fn emitSigned(self: *Wasm, writer, value: anytype) !void {
+        try leb.writeILEB128(writer, value);
     }
 
     /// Emits an integer
-    fn emitInt(self: *Wasm, int: *lir.Inst.Int) !void {
-        try self.emit(.i64_const);
-        try self.emitSigned(int.value);
+    fn emitInt(self: *Wasm, writer: anytype, int: *lir.Inst.Int) !void {
+        try self.emit(writer, .i64_const);
+        try self.emitSigned(writer, int.value);
     }
 
     /// Emits a single opcode
-    fn emit(self: *Wasm, op: Op) !void {
-        try self.buffer.writer().writeByte(@enumToInt(op));
+    fn emit(self: *Wasm, writer: anytype, op: Op) !void {
+        try writer.writeByte(@enumToInt(op));
     }
 
     /// Emits a raw byte
-    fn raw(self: *Wasm, c: u8) !void {
-        try self.buffer.writer().writeByte(c);
+    fn raw(self: *Wasm, writer: anytype, c: u8) !void {
+        try writer.writeByte(c);
     }
 
     /// Emits a Wasm block instruction
@@ -295,7 +295,7 @@ pub const Wasm = struct {
     }
 
     /// Loads a local or global variable onto the stack
-    fn emitIdent(self: *Wasm, writer: antype, ident: *lir.Inst.Ident) !void {
+    fn emitIdent(self: *Wasm, writer: anytype, ident: *lir.Inst.Ident) !void {
         try self.emit(writer, if (ident.scope == .global) .global_get else .local_get);
         try self.emitUnsigned(writer, ident.index);
     }
@@ -308,7 +308,7 @@ pub const Wasm = struct {
 
     /// Emits wasm for the declation's value to put it on the stack
     /// and then generates a .local_set or .global_set based on its scope
-    fn emitDecl(self: *Wasm, writer, decl: *lir.Inst.Decl) !void {
+    fn emitDecl(self: *Wasm, writer: anytype, decl: *lir.Inst.Decl) !void {
         try self.gen(writer, decl.value);
         try self.emit(writer, if (decl.scope == .global) .global_set else .local_set);
         try self.emitUnsigned(writer, decl.index);
@@ -343,7 +343,7 @@ pub const Wasm = struct {
     }
 
     /// Emits Wasm for an if-statement
-    fn emitCond(self: *Wasm, cond: *lir.Inst.Condition) !void {}
+    fn emitCond(self: *Wasm, writer: anytype, cond: *lir.Inst.Condition) !void {}
 
     /// Emits a Wasm function, expects a declaration instead of a function
     /// as we need information regarding its index and name
@@ -363,6 +363,7 @@ pub const Wasm = struct {
 
         // register the code section, this will contain the body of the function
         const code_section = self.section(.code);
+        try self.emitFuncBody(code_section, func);
     }
 
     /// Appends a function body into the given section
@@ -378,7 +379,7 @@ pub const Wasm = struct {
         if (func.locals > 0) {
             for (body.instructions) |inst| {
                 if (inst.tag == .decl) {
-                    self.raw(@enumToInt(self.resolveValType(inst.ty)));
+                    try writer.writeByte(@enumToInt(self.resolveValType(inst.ty)));
                 }
             }
         }
@@ -386,7 +387,7 @@ pub const Wasm = struct {
         // generate the bytecode for the body
         // exclude the declarations
         for (body.instructions) |inst| {
-            if (inst.tag != .decl) self.gen(writer, inst);
+            if (inst.tag != .decl) try self.gen(writer, inst);
         }
 
         // "end" byte
