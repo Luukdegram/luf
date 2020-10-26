@@ -476,11 +476,11 @@ test "IR to Wasm - Basic" {
 test "IR to Wasm - Functions" {
     const input = "const add = fn(x: int, y: int) int { return x + y }";
 
-    const expected = magic_bytes ++
-        "\x01\x07\x01\x60\x02\x7e\x7e\x01\x7e" ++
-        "\x03\x02\x01\x00\x07" ++
-        "\x07\x01\x03\x61\x64\x64\x00\x00" ++
-        "\x0a\x0a\x01\x08\x00\x20\x00\x20\x01\x7c\x0f\x0b";
+    const expected = magic_bytes ++ // \0asm                (module
+        "\x01\x07\x01\x60\x02\x7e\x7e\x01\x7e" ++ //            (type (i64 i64) (func (result i64)))
+        "\x03\x02\x01\x00\x07" ++ //                            (func (i64 i64) (type 0))
+        "\x07\x01\x03\x61\x64\x64\x00\x00" ++ //                (export "add" (func 0))
+        "\x0a\x0a\x01\x08\x00\x20\x00\x20\x01\x7c\x0f\x0b"; //      load_local load_local i64.add)
 
     try testWasm(input, expected);
 }
