@@ -79,7 +79,8 @@ const Section = struct {
         try leb.writeULEB128(writer, @intCast(u32, self.code.items.len + 1));
         try leb.writeULEB128(writer, self.count);
 
-        try writer.writeAll(self.code.toOwnedSlice());
+        try writer.writeAll(self.code.items);
+        self.code.deinit();
     }
 };
 
@@ -361,6 +362,7 @@ pub const Wasm = struct {
     /// Will increase the section's count by 1
     fn emitFuncBody(self: *Wasm, sec: *Section, func: *lir.Inst.Function) !void {
         var func_body = std.ArrayList(u8).init(self.gpa);
+        defer func_body.deinit();
         const writer = func_body.writer();
 
         // calculate locals (Don't count arguments as locals)
@@ -392,7 +394,7 @@ pub const Wasm = struct {
         const sec_writer = sec.code.writer();
 
         try leb.writeULEB128(sec_writer, @intCast(u32, func_body.items.len));
-        try sec_writer.writeAll(func_body.toOwnedSlice());
+        try sec_writer.writeAll(func_body.items);
 
         sec.count += 1;
     }
