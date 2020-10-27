@@ -126,7 +126,7 @@ const Section = struct {
 /// Contains all possible types as described at
 /// https://webassembly.github.io/spec/core/binary/types.html
 const Types = struct {
-    const block: u8 = 0x40;
+    const block: i7 = -0x40; // we only allow void blocks
     const func: i7 = -0x20;
     const table: u8 = 0x70;
 
@@ -286,7 +286,7 @@ pub const Wasm = struct {
             .range => {},
             .import => {},
             .@"enum" => {},
-            .condition => {},
+            .condition => try self.emitCond(writer, inst.as(lir.Inst.Condition)),
             .block => try self.emitBlock(writer, inst.as(lir.Inst.Block)),
             .func => {},
             .call => try self.emitCall(writer, inst.as(lir.Inst.Call)),
@@ -296,7 +296,7 @@ pub const Wasm = struct {
             .@"break" => {},
             .@"continue" => {},
             .@"for" => {},
-            .comment, .type_def, .func_arg => {}, //VM doesn't do anything with this
+            .comment, .type_def, .func_arg => {}, //ignore those
         }
     }
 
@@ -363,7 +363,30 @@ pub const Wasm = struct {
     fn emitWhile(self: *Wasm, writer: anytype, loop: *lir.Inst.Double) !void {}
 
     /// Emits Wasm for an if-statement
-    fn emitCond(self: *Wasm, writer: anytype, cond: *lir.Inst.Condition) !void {}
+    fn emitCond(self: *Wasm, writer: anytype, cond: *lir.Inst.Condition) !void {
+        // start our block of expressions
+        try self.emit(writer, .block);
+        try self.emitSigned(writer, Types.block); // void block
+
+        // generate the condition to determine if or else
+        try self.gen(writer, cond.cond);
+
+        // start our if statement with an implicit 'then block'
+        try self.emit(writer, .@"if");
+        try self.emitSigned(writer, Types.block);
+        try self.gen(writer, cond.then_block);
+
+        if (cond.else_block) |alt| {
+            try self.emit(writer, .@"else");
+            try self.gen(writer, alt);
+        }
+
+        // end our if statement
+        try self.emit(writer, .end);
+
+        // end our block
+        try self.emit(writer, .end);
+    }
 
     /// Emits Wasm bytecode to call a function
     fn emitCall(self: *Wasm, writer: anytype, call: *lir.Inst.Call) !void {
@@ -433,7 +456,7 @@ pub const Wasm = struct {
         }
 
         // "end" byte
-        try leb.writeULEB128(writer, @enumToInt(Op.end));
+        try self.emit(writer, .end);
 
         const sec_writer = sec.code.writer();
 
@@ -527,4 +550,31 @@ test "IR to Wasm - Functions" {
         "\x0a\x0a\x01\x08\x00\x20\x00\x20\x01\x7c\x0f\x0b"; //      load_local load_local i64.add)
 
     try testWasm(input, expected);
+}
+
+test "IR to Wasm - Conditionals" {
+    const input =
+        \\const test = fn(x: int) int { 
+        \\  if (x == 2) {
+        \\      return 5
+        \\  } else {
+        \\      return 10
+        \\  }
+        \\  return 15
+        \\}
+    ;
+    const alloc = testing.allocator;
+    var err = @import("error.zig").Errors.init(alloc);
+    defer err.deinit();
+
+    var cu = try @import("compiler.zig").compile(alloc, input, &err);
+    defer cu.deinit();
+
+    const wasm = try Wasm.fromCu(alloc, cu);
+    defer alloc.free(wasm);
+
+    var file = try std.fs.cwd().createFile("src/cond.wasm", .{});
+    defer file.close();
+
+    try file.writeAll(wasm);
 }
