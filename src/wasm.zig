@@ -33,12 +33,51 @@ const Op = enum(u8) {
     mem_size = 0x3F,
     mem_grow = 0x40,
     i64_const = 0x42,
-    eqz = 0x45,
-    eq = 0x46,
-    ne = 0x47,
-    lt_s = 0x48,
-    lt_u = 0x49,
+    i32_eqz = 0x45,
+    i32_eq = 0x46,
+    i32_ne = 0x47,
+    i32_lt_s = 0x48,
+    i64_eqz = 0x50,
+    i64_eq = 0x51,
+    i64_ne = 0x52,
+    i64_lt = 0x53,
+    i64_gt = 0x55,
+    i64_le = 0x57,
+    i64_ge = 0x59,
     i64_add = 0x7C,
+    i64_sub = 0x7D,
+    i64_mul = 0x7E,
+    i64_div = 0x7F,
+    i64_rem = 0x81,
+    i64_and = 0x83,
+    i64_or = 0x84,
+    i64_xor = 0x85,
+    i64_shl = 0x86,
+    i64_shr = 0x87,
+
+    /// Generates the Opcode for specific tag and its type
+    /// i.e. generates .64_add if `wanted` = .add and `ty` = .integer
+    fn fromTagAndType(wanted: lir.Inst.Tag, ty: LufType) Op {
+        return switch (wanted) {
+            .add => .i64_add,
+            .sub => .i64_sub,
+            .mul => .i64_mul,
+            .div => .i64_div,
+            .eql => .i64_eq,
+            .nql => .i64_ne,
+            .lt => .i64_lt,
+            .gt => .i64_gt,
+            .eql_lt => .i64_le,
+            .eql_gt => .i64_ge,
+            .bitwise_xor => .i64_xor,
+            .bitwise_or => .i64_or,
+            .bitwise_and => .i64_and,
+            .shift_left => .i64_shl,
+            .shift_right => .i64_shr,
+            .mod => .i64_rem,
+            else => unreachable,
+        };
+    }
 };
 
 /// Section id's as described at:
@@ -286,7 +325,12 @@ pub const Wasm = struct {
     fn emitInfix(self: *Wasm, writer: anytype, double: *lir.Inst.Double) !void {
         try self.gen(writer, double.lhs);
         try self.gen(writer, double.rhs);
-        try self.emit(writer, .i64_add);
+
+        switch (double.base.tag) {
+            .assign_add, .assign_sub, .assign_mul, .assign_div, .@"and", .@"or" => @panic("TODO Add support for assignments and logical AND/OR"),
+            else => try self.emit(writer, Op.fromTagAndType(double.base.tag, double.lhs.ty)),
+        }
+        //try self.emit(writer, .i64_add);
     }
 
     /// Emits a Wasm block instruction
