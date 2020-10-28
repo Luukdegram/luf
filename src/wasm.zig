@@ -144,6 +144,11 @@ const Types = struct {
         I64 = -0x02,
         F32 = -0x03,
         F64 = -0x04,
+
+        /// returns actual value of the enum
+        fn val(self: Value) i7 {
+            return @enumToInt(self);
+        }
     };
 
     /// Export sections as described at:
@@ -163,12 +168,20 @@ const module_version = [_]u8{ 0x01, 0x00, 0x00, 0x00 }; // v1
 /// Utility struct with helper functions to make it easier
 /// to manage instructions
 pub const Wasm = struct {
+    /// buffer that will contain all instructions
     buffer: std.ArrayList(u8),
+    /// array of all sections that are optional and may contain instructions
     sections: [12]Section,
+    /// size of the section list that have been initialized. (`sections` will be sorted)
     section_size: usize,
+    /// allocator used to generate the instructions
     gpa: *Allocator,
+    /// current function, used to check for return types in blocks
+    func: *lir.Inst.Function,
+    /// funcidx of the main function. Cannot be 'null' after iterating our declarations
+    main_index: ?usize,
 
-    pub const Error = error{OutOfMemory};
+    pub const Error = error{ OutOfMemory, MissingMainFunction };
 
     /// Creates a new instance of `Instructions`
     pub fn init(gpa: *Allocator) Wasm {
@@ -177,6 +190,8 @@ pub const Wasm = struct {
             .sections = undefined,
             .section_size = 0,
             .gpa = gpa,
+            .func = undefined,
+            .main_index = null,
         };
     }
 
@@ -194,6 +209,9 @@ pub const Wasm = struct {
                 try wasm.emitFunc(inst.as(lir.Inst.Decl));
             }
         }
+
+        // After iterating all declarations and no
+        if (wasm.main_index == null) return Error.MissingMainFunction;
 
         // sort our sections so they will be emitted in correct order
         std.sort.sort(Section, wasm.sections[0..wasm.section_size], {}, sortSections);
@@ -364,16 +382,15 @@ pub const Wasm = struct {
 
     /// Emits Wasm for an if-statement
     fn emitCond(self: *Wasm, writer: anytype, cond: *lir.Inst.Condition) !void {
-        // start our block of expressions
-        try self.emit(writer, .block);
-        try self.emitSigned(writer, Types.block); // void block
-
         // generate the condition to determine if or else
         try self.gen(writer, cond.cond);
 
         // start our if statement with an implicit 'then block'
         try self.emit(writer, .@"if");
-        try self.emitSigned(writer, Types.block);
+        if (self.func.ret_type.ty == ._void)
+            try self.emitSigned(writer, Types.block)
+        else
+            try self.emitSigned(writer, resolveValType(self.func.ret_type.ty).val());
         try self.gen(writer, cond.then_block);
 
         if (cond.else_block) |alt| {
@@ -382,9 +399,6 @@ pub const Wasm = struct {
         }
 
         // end our if statement
-        try self.emit(writer, .end);
-
-        // end our block
         try self.emit(writer, .end);
     }
 
@@ -404,6 +418,7 @@ pub const Wasm = struct {
     fn emitFunc(self: *Wasm, decl: *lir.Inst.Decl) !void {
         const func = decl.value.as(lir.Inst.Function);
         const name = decl.name;
+        self.func = func;
 
         // register the function type
         const type_section = self.section(.@"type");
@@ -414,6 +429,8 @@ pub const Wasm = struct {
         const func_idx = func_section.count;
         try leb.writeULEB128(func_section.code.writer(), func_idx);
         func_section.count += 1; // manually increase as no helper function here
+
+        if (std.mem.eql(u8, "main", name)) self.main_index = func_idx;
 
         // register the code section, this will contain the body of the function
         const code_section = self.section(.code);
@@ -444,7 +461,7 @@ pub const Wasm = struct {
         if (locals > 0) {
             for (body.instructions) |inst| {
                 if (inst.tag == .decl) {
-                    try leb.writeILEB128(writer, @enumToInt(resolveValType(inst.ty)));
+                    try leb.writeILEB128(writer, resolveValType(inst.ty).val());
                 }
             }
         }
@@ -477,7 +494,7 @@ fn emitFuncType(sec: *Section, func: *lir.Inst.Function) !u32 {
 
     // emit arguments length and their types
     try leb.writeULEB128(writer, @intCast(u32, func.args.len));
-    for (func.args) |arg| try leb.writeILEB128(writer, @enumToInt(Wasm.resolveValType(arg.ty)));
+    for (func.args) |arg| try leb.writeILEB128(writer, Wasm.resolveValType(arg.ty).val());
 
     // Result types -> Wasm only allows for 1 result type, currently
     // if return type is void, provide no return type
@@ -485,8 +502,7 @@ fn emitFuncType(sec: *Section, func: *lir.Inst.Function) !u32 {
         try leb.writeULEB128(writer, @as(u1, 0));
     } else {
         try leb.writeULEB128(writer, @as(u1, 1));
-        const ret_type = Wasm.resolveValType(func.ret_type.ty);
-        try leb.writeILEB128(writer, @enumToInt(ret_type));
+        try leb.writeILEB128(writer, Wasm.resolveValType(func.ret_type.ty).val());
     }
 
     // Make sure we increase the size of the section
@@ -528,53 +544,39 @@ fn testWasm(input: []const u8, expected: []const u8) !void {
     const wasm = try Wasm.fromCu(alloc, cu);
     defer alloc.free(wasm);
 
-    testing.expectEqualStrings(expected, wasm);
+    testing.expectEqualSlices(u8, expected, wasm);
 }
 
 const magic_bytes = &[_]u8{ 0, 'a', 's', 'm', 1, 0, 0, 0 };
 
-test "IR to Wasm - Basic" {
-    const input = "1 + 1";
-    const expected = magic_bytes ++ "\x42\x01\x42\x01\x7c";
-
-    try testWasm(input, expected);
-}
-
 test "IR to Wasm - Functions" {
-    const input = "const add = fn(x: int, y: int) int { return x + y }";
+    const input = "const main = fn(x: int, y: int) int { return x + y }";
 
     const expected = magic_bytes ++ // \0asm                (module
         "\x01\x07\x01\x60\x02\x7e\x7e\x01\x7e" ++ //            (type (i64 i64) (func (result i64)))
-        "\x03\x02\x01\x00\x07" ++ //                            (func (i64 i64) (type 0))
-        "\x07\x01\x03\x61\x64\x64\x00\x00" ++ //                (export "add" (func 0))
+        "\x03\x02\x01\x00" ++ //                            (func (i64 i64) (type 0))
+        "\x07\x08\x01\x04\x6d\x61\x69\x6e\x00\x00" ++ //                (export "main" (func 0))
         "\x0a\x0a\x01\x08\x00\x20\x00\x20\x01\x7c\x0f\x0b"; //      load_local load_local i64.add)
 
     try testWasm(input, expected);
 }
 
-test "IR to Wasm - Conditionals" {
+test "IR to Wasm - Conditional" {
     const input =
-        \\const test = fn(x: int) int { 
+        \\const main = fn(x: int) int { 
         \\  if (x == 2) {
         \\      return 5
         \\  } else {
         \\      return 10
         \\  }
-        \\  return 15
         \\}
     ;
-    const alloc = testing.allocator;
-    var err = @import("error.zig").Errors.init(alloc);
-    defer err.deinit();
 
-    var cu = try @import("compiler.zig").compile(alloc, input, &err);
-    defer cu.deinit();
+    const expected = magic_bytes ++
+        "\x01\x06\x01\x60\x01\x7e\x01\x7e" ++
+        "\x03\x02\x01\x00" ++
+        "\x07\x08\x01\x04\x6d\x61\x69\x6e\x00\x00" ++
+        "\x0a\x13\x01\x11\x00\x20\x00\x42\x02\x51\x04\x7e\x42\x05\x0f\x05\x42\x0a\x0f\x0b\x0b";
 
-    const wasm = try Wasm.fromCu(alloc, cu);
-    defer alloc.free(wasm);
-
-    var file = try std.fs.cwd().createFile("src/cond.wasm", .{});
-    defer file.close();
-
-    try file.writeAll(wasm);
+    try testWasm(input, expected);
 }
