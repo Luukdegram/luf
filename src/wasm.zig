@@ -450,29 +450,37 @@ pub const Wasm = struct {
         const writer = func_body.writer();
 
         // calculate locals (Don't count arguments as locals)
-        const locals = @intCast(u32, func.locals - func.args.len);
+        const locals = @intCast(u32, func.locals.len - func.args.len);
         try leb.writeULEB128(writer, locals);
 
         const body = func.body.as(lir.Inst.Block);
-        // if we have locals, extract them from the body
-        // TODO maybe we can make this nicer by making locals a slice of instructions
-        // rather than a counter so we don't have to loop over the body twice
-        // TODO we need to tell how many we have per type, yikes
+
+        // generate bytecode for locals
         if (locals > 0) {
-            for (body.instructions) |inst| {
-                if (inst.tag == .decl) {
-                    try leb.writeILEB128(writer, resolveValType(inst.ty).val());
-                }
+            var locals_map = std.AutoArrayHashMap(Types.Value, u32).init(self.gpa);
+            defer locals_map.deinit();
+
+            for (func.locals[func.args.len..]) |local| {
+                const ty = resolveValType(local.ty);
+                const entry = try locals_map.getOrPut(ty);
+                if (entry.found_existing)
+                    entry.entry.value += 1
+                else
+                    entry.entry.value = 1;
+            }
+
+            for (locals_map.items()) |entry| {
+                try self.emitUnsigned(writer, entry.value);
+                try self.emitSigned(writer, entry.key.val());
             }
         }
 
         // generate the bytecode for the body
-        // exclude the declarations
         for (body.instructions) |inst| {
-            if (inst.tag != .decl) try self.gen(writer, inst);
+            try self.gen(writer, inst);
         }
 
-        // "end" byte
+        // "end" byte that concludes the function body
         try self.emit(writer, .end);
 
         const sec_writer = sec.code.writer();
@@ -532,8 +540,14 @@ comptime {
     std.meta.refAllDecls(@This());
 }
 
+/// When `file_name` is set to a value, it will generate a wasm binary file
+/// which can be used by external tools to expect the output
+const TestOutput = struct {
+    file_name: ?[]const u8 = null,
+};
+
 /// compiles input and checks if it matches the expected output
-fn testWasm(input: []const u8, expected: []const u8) !void {
+fn testWasm(input: []const u8, expected: []const u8, with_output: TestOutput) !void {
     const alloc = testing.allocator;
     var err = @import("error.zig").Errors.init(alloc);
     defer err.deinit();
@@ -544,8 +558,16 @@ fn testWasm(input: []const u8, expected: []const u8) !void {
     const wasm = try Wasm.fromCu(alloc, cu);
     defer alloc.free(wasm);
 
+    if (with_output.file_name) |name| {
+        var file = try std.fs.cwd().createFile(name, .{});
+        defer file.close();
+        try file.writeAll(wasm);
+    }
+
     testing.expectEqualSlices(u8, expected, wasm);
 }
+
+fn outputWasm(input: []const u8, name: []const u8) !void {}
 
 const magic_bytes = &[_]u8{ 0, 'a', 's', 'm', 1, 0, 0, 0 };
 
@@ -558,7 +580,7 @@ test "IR to Wasm - Functions" {
         "\x07\x08\x01\x04\x6d\x61\x69\x6e\x00\x00" ++ //                (export "main" (func 0))
         "\x0a\x0a\x01\x08\x00\x20\x00\x20\x01\x7c\x0f\x0b"; //      load_local load_local i64.add)
 
-    try testWasm(input, expected);
+    try testWasm(input, expected, .{});
 }
 
 test "IR to Wasm - Conditional" {
@@ -578,5 +600,27 @@ test "IR to Wasm - Conditional" {
         "\x07\x08\x01\x04\x6d\x61\x69\x6e\x00\x00" ++
         "\x0a\x13\x01\x11\x00\x20\x00\x42\x02\x51\x04\x7e\x42\x05\x0f\x05\x42\x0a\x0f\x0b\x0b";
 
-    try testWasm(input, expected);
+    try testWasm(input, expected, .{});
+}
+
+test "IR to Wasm - Function locals" {
+    const input =
+        \\const main = fn(x: int) int { 
+        \\  const y = 20
+        \\  if (x == 2) {
+        \\      return 5
+        \\  } else {
+        \\      return 10
+        \\  }
+        \\}
+    ;
+
+    const expected = magic_bytes ++
+        "\x01\x06\x01\x60\x01\x7e\x01\x7e" ++
+        "\x03\x02\x01\x00" ++
+        "\x07\x08\x01\x04\x6d\x61\x69\x6e\x00\x00" ++
+        "\x0a\x19\x01\x17\x01\x01\x7E\x42\x14\x21\x01" ++ // locals section
+        "\x20\x00\x42\x02\x51\x04\x7e\x42\x05\x0f\x05\x42\x0a\x0f\x0b\x0b";
+
+    try testWasm(input, expected, .{});
 }

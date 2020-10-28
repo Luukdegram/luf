@@ -188,7 +188,7 @@ pub const Inst = struct {
         body: *Inst,
         args: []*Inst,
         ret_type: *Inst,
-        locals: usize,
+        locals: []*Inst,
     };
 
     pub const FuncArg = struct {
@@ -423,7 +423,7 @@ pub const Module = struct {
         self: *Module,
         pos: usize,
         body: *Inst,
-        locals: usize,
+        locals: []*Inst,
         args: []*Inst,
         ret_type: *Inst,
     ) Error!*Inst {

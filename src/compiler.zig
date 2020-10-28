@@ -715,7 +715,11 @@ pub const Compiler = struct {
             .{},
         ));
 
-        const locals = self.scope.symbols.items().len;
+        // get locals
+        var locals = try std.ArrayList(*lir.Inst).initCapacity(self.ir.gpa, self.scope.symbols.items().len);
+        for (self.scope.symbols.items()) |entry|
+            locals.appendAssumeCapacity(entry.value.ident);
+
         self.exitScope();
 
         const ret_type = try self.resolveInst(function.ret_type);
@@ -723,7 +727,7 @@ pub const Compiler = struct {
         return self.ir.emitFunc(
             function.token.start,
             body,
-            locals,
+            locals.toOwnedSlice(),
             args.toOwnedSlice(),
             ret_type,
         );

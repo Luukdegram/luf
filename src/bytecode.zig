@@ -249,7 +249,7 @@ pub const Instructions = struct {
 
         const end = try self.appendRetPos(Instruction.genFunction(
             try self.gpa.dupe(u8, name),
-            func.locals,
+            func.locals.len,
             func.args.len,
             entry_point,
         ));
