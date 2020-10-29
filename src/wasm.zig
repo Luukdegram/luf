@@ -98,16 +98,22 @@ const SectionType = enum {
 };
 
 const Section = struct {
+    /// `SectionType` that is represented by this `Section`
     ty: SectionType,
+    /// The full bytecode contained within this section.
+    /// use emit() to transfer to another writer
     code: std.ArrayList(u8),
+    /// The amount of additions done to this section.
+    /// i.e. the amount of function bodies inside the 'code section'
     count: u32,
 
+    /// Initializes a section
     fn init(ty: SectionType, gpa: *Allocator) Section {
         return .{ .ty = ty, .code = std.ArrayList(u8).init(gpa), .count = 0 };
     }
 
     /// Emits all code from the section into the writer
-    /// This invalidates the code saved into section itself
+    /// This invalidates the `code` saved into section itself
     fn emit(self: *Section, writer: anytype) !void {
         if (self.count == 0) return;
 
@@ -126,7 +132,7 @@ const Section = struct {
 /// Contains all possible types as described at
 /// https://webassembly.github.io/spec/core/binary/types.html
 const Types = struct {
-    const block: i7 = -0x40; // we only allow void blocks
+    const block: i7 = -0x40; // void block
     const func: i7 = -0x20;
     const table: u8 = 0x70;
 
@@ -146,6 +152,7 @@ const Types = struct {
         F64 = -0x04,
 
         /// returns actual value of the enum
+        /// shorthand for @enumToInt as a method instead
         fn val(self: Value) i7 {
             return @enumToInt(self);
         }
@@ -203,11 +210,15 @@ pub const Wasm = struct {
         try writer.writeAll(module_header[0..]);
         try writer.writeAll(module_version[0..]);
 
-        // first do all declarations, required for our sections
+        // build the bytecode
         for (cu.instructions) |inst| {
-            if (inst.tag == .decl and inst.as(lir.Inst.Decl).value.tag == .func) {
-                try wasm.emitFunc(inst.as(lir.Inst.Decl));
-            }
+            if (inst.tag != .decl) continue; // only declarations
+
+            const decl = inst.as(lir.Inst.Decl);
+            if (decl.value.tag == .func)
+                try wasm.emitFunc(inst.as(lir.Inst.Decl))
+            else
+                try wasm.emitGlobal(decl);
         }
 
         // After iterating all declarations and no
@@ -216,15 +227,9 @@ pub const Wasm = struct {
         // sort our sections so they will be emitted in correct order
         std.sort.sort(Section, wasm.sections[0..wasm.section_size], {}, sortSections);
 
-        // emit the sections
+        // emit the sections into the final bytecode
         for (wasm.sections[0..wasm.section_size]) |*sec| {
             try sec.emit(writer);
-        }
-
-        // Finally, do all other instructions
-        for (cu.instructions) |inst| {
-            if (inst.tag == .decl) continue;
-            try wasm.gen(writer, inst);
         }
 
         return wasm.final();
@@ -372,7 +377,7 @@ pub const Wasm = struct {
     /// and then generates a .local_set or .global_set based on its scope
     fn emitDecl(self: *Wasm, writer: anytype, decl: *lir.Inst.Decl) !void {
         try self.gen(writer, decl.value);
-        try self.emit(writer, if (decl.scope == .global) Op.global_set else Op.local_set);
+        try self.emit(writer, .local_set); // globals are done seperately, therefore this is a local
         try self.emitUnsigned(writer, decl.index);
     }
 
@@ -402,6 +407,34 @@ pub const Wasm = struct {
         try self.emit(writer, .end);
     }
 
+    /// Emits the bytecode for a global variable by appending it to the
+    /// 'global' section of the module
+    fn emitGlobal(self: *Wasm, decl: *lir.Inst.Decl) !void {
+        const sec = self.section(.global);
+
+        const writer = sec.code.writer();
+        // emit its type
+        try self.emitSigned(writer, resolveValType(decl.value.ty).val());
+        // mutability: 0 immutable, 1 mutable
+        try self.emitUnsigned(writer, @boolToInt(decl.is_mut));
+
+        // TODO: For now we only support init expr for integers
+        const initial_value: u64 = if (decl.value.ty == .integer)
+            decl.value.as(lir.Inst.Int).value
+        else
+            0;
+
+        // emit actual value
+        try self.emit(writer, Op.i64_const);
+        try self.emitSigned(writer, @intCast(i64, initial_value));
+
+        // emit 'end' so wasm is aware where our global ends
+        try self.emit(writer, .end);
+
+        // TODO: Save the globalidx somewhere
+        sec.count += 1;
+    }
+
     /// Emits Wasm bytecode to call a function
     fn emitCall(self: *Wasm, writer: anytype, call: *lir.Inst.Call) !void {
         // generate arguments
@@ -410,6 +443,9 @@ pub const Wasm = struct {
         // find funcidx and emit .call (0x10)
         const ident = call.func.as(lir.Inst.Ident);
         try self.emit(writer, .call);
+
+        // functions are compiled first by the compiler, therefore their indices
+        // will match that of Wasm's funcidx's. This means we can directly use the index
         try self.emitUnsigned(writer, ident.index);
     }
 
@@ -516,7 +552,7 @@ fn emitFuncType(sec: *Section, func: *lir.Inst.Function) !u32 {
     // Make sure we increase the size of the section
     sec.count += 1;
 
-    // the typeidx (-1 because we just increased it by 1 above)
+    // the typeidx
     return sec.count - 1;
 }
 
@@ -621,6 +657,21 @@ test "IR to Wasm - Function locals" {
         "\x07\x08\x01\x04\x6d\x61\x69\x6e\x00\x00" ++
         "\x0a\x19\x01\x17\x01\x01\x7E\x42\x14\x21\x01" ++ // locals section
         "\x20\x00\x42\x02\x51\x04\x7e\x42\x05\x0f\x05\x42\x0a\x0f\x0b\x0b";
+
+    try testWasm(input, expected, .{});
+}
+
+test "IR to Wasm - Globals" {
+    const input =
+        \\const x = 5
+        \\const main = fn()void{}
+    ;
+    const expected = magic_bytes ++
+        "\x01\x04\x01\x60\x00\x00" ++
+        "\x03\x02\x01\x00" ++
+        "\x06\x06\x01\x7e\x00\x42\x05\x0b" ++ // globals section
+        "\x07\x08\x01\x04\x6d\x61\x69\x6e\x00\x00" ++
+        "\x0a\x04\x01\x02\x00\x0b";
 
     try testWasm(input, expected, .{});
 }

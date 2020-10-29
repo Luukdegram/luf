@@ -5,4 +5,5 @@ pub const Errors = @import("error.zig").Errors;
 
 test "All tests" {
     _ = @import("vm.zig");
+    _ = @import("wasm.zig");
 }
