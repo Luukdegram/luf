@@ -336,7 +336,7 @@ pub const Wasm = struct {
     /// Emits an integer
     fn emitInt(self: *Wasm, writer: anytype, int: *lir.Inst.Int) !void {
         try self.emit(writer, .i64_const);
-        try self.emitSigned(writer, int.value);
+        try self.emitSigned(writer, @intCast(i64, int.value));
     }
 
     /// Emits a single opcode
@@ -419,14 +419,13 @@ pub const Wasm = struct {
         try self.emitUnsigned(writer, @boolToInt(decl.is_mut));
 
         // TODO: For now we only support init expr for integers
-        const initial_value: u64 = if (decl.value.ty == .integer)
-            decl.value.as(lir.Inst.Int).value
-        else
-            0;
-
-        // emit actual value
-        try self.emit(writer, Op.i64_const);
-        try self.emitSigned(writer, @intCast(i64, initial_value));
+        if (decl.value.ty == .integer)
+            try self.emitInt(writer, decl.value.as(lir.Inst.Int))
+        else {
+            // for now just emit a 0 value
+            try self.emit(writer, .i64_const);
+            try self.emitSigned(writer, @as(i64, 0));
+        }
 
         // emit 'end' so wasm is aware where our global ends
         try self.emit(writer, .end);
