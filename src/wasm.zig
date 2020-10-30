@@ -571,10 +571,6 @@ fn sortSections(context: void, lhs: Section, rhs: Section) bool {
     return @enumToInt(lhs.ty) < @enumToInt(rhs.ty);
 }
 
-comptime {
-    std.meta.refAllDecls(@This());
-}
-
 /// When `file_name` is set to a value, it will generate a wasm binary file
 /// which can be used by external tools to expect the output
 const TestOutput = struct {
