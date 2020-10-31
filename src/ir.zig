@@ -250,12 +250,6 @@ pub const Inst = struct {
         };
     };
 
-    pub const Assign = struct {
-        base: Inst,
-        decl: *Decl,
-        rhs: *Inst,
-    };
-
     pub const Single = struct {
         base: Inst,
         rhs: *Inst,
@@ -476,21 +470,6 @@ pub const Module = struct {
             .block = block,
             .capture = capture,
             .index = index,
-        };
-        return &inst.base;
-    }
-
-    /// Creates an assignment instruction
-    pub fn emitAssign(self: *Module, pos: usize, decl: *Inst, rhs: *Inst) Error!*Inst {
-        const inst = try self.gpa.create(Inst.Assign);
-        inst.* = .{
-            .base = .{
-                .tag = .assign,
-                .pos = pos,
-                .ty = decl.ty,
-            },
-            .decl = decl,
-            .rhs = rhs,
         };
         return &inst.base;
     }

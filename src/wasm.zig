@@ -174,7 +174,7 @@ const Types = struct {
 };
 
 // Magic constants, required for a valid Wasm module
-const module_header = [_]u8{ 0x00, 0x61, 0x73, 0x6D }; // \x00asm
+const module_header = [_]u8{ 0x00, 0x61, 0x73, 0x6D }; // 0x00asm
 const module_version = [_]u8{ 0x01, 0x00, 0x00, 0x00 }; // v1
 
 /// Utility struct with helper functions to make it easier
@@ -315,7 +315,7 @@ pub const Wasm = struct {
             .expr => try self.gen(writer, inst.as(lir.Inst.Single).rhs),
             .decl => try self.emitDecl(writer, inst.as(lir.Inst.Decl)),
             .@"return" => try self.emitRet(writer, inst.as(lir.Inst.Single)),
-            .assign => {},
+            .assign => try self.emitAssign(writer, inst.as(lir.Inst.Double)),
             .store => {},
             .load => {},
             .list, .map => {},
@@ -387,6 +387,23 @@ pub const Wasm = struct {
         try self.emit(writer, .@"return");
     }
 
+    /// Emits bytecode that first retrieves the local or global and then assigns
+    /// a new value to it
+    fn emitAssign(self: *Wasm, writer: anytype, double: *lir.Inst.Double) !void {
+        const ident = double.lhs.as(lir.Inst.Ident);
+
+        // first get the local or global variable
+        try self.emit(writer, if (ident.scope == .global) Op.global_get else Op.local_get);
+        try self.emitUnsigned(writer, ident.index);
+
+        // generate the new value
+        try self.gen(writer, double.rhs);
+
+        // set the new value to the local/global
+        try self.emit(writer, if (ident.scope == .global) Op.global_set else Op.local_set);
+        try self.emitUnsigned(writer, ident.index);
+    }
+
     /// Emits wasm for the declation's value to put it on the stack
     /// and then generates a .local_set or .global_set based on its scope
     fn emitDecl(self: *Wasm, writer: anytype, decl: *lir.Inst.Decl) !void {
@@ -397,7 +414,36 @@ pub const Wasm = struct {
 
     /// Emits Wasm to perform a while loop. This first creates a block type
     /// and then a loop type
-    fn emitWhile(self: *Wasm, writer: anytype, loop: *lir.Inst.Double) !void {}
+    fn emitWhile(self: *Wasm, writer: anytype, loop: *lir.Inst.Double) !void {
+        // begin block
+        try self.emit(writer, .block);
+        try self.emitSigned(writer, Types.block);
+
+        // begin loop
+        try self.emit(writer, .loop);
+        try self.emitSigned(writer, Types.block);
+
+        // generate the condition
+        try self.gen(writer, loop.lhs);
+
+        // break loop if condition = false
+        try self.emit(writer, .i32_eqz);
+        try self.emit(writer, .break_if);
+        try self.emitUnsigned(writer, @as(u32, 1));
+
+        // finally, generate its body
+        try self.gen(writer, loop.rhs);
+
+        // continue at loop label
+        try self.emit(writer, .@"break");
+        try self.emitUnsigned(writer, @as(u32, 0));
+
+        // end loop
+        try self.emit(writer, .end);
+
+        // end block
+        try self.emit(writer, .end);
+    }
 
     /// Emits Wasm for an if-statement
     fn emitCond(self: *Wasm, writer: anytype, cond: *lir.Inst.Condition) !void {
@@ -506,14 +552,8 @@ pub const Wasm = struct {
         defer func_body.deinit();
         const writer = func_body.writer();
 
-        // calculate locals (Don't count arguments as locals)
-        const locals = @intCast(u32, func.locals.len - func.args.len);
-        try leb.writeULEB128(writer, locals);
-
-        const body = func.body.as(lir.Inst.Block);
-
         // generate bytecode for locals
-        if (locals > 0) {
+        if (func.locals.len - func.args.len > 0) {
             var locals_map = std.AutoArrayHashMap(Types.Value, u32).init(self.gpa);
             defer locals_map.deinit();
 
@@ -526,12 +566,16 @@ pub const Wasm = struct {
                     entry.entry.value = 1;
             }
 
+            // write the locals (we actually emit the amount of types)
+            try self.emitUnsigned(writer, locals_map.items().len);
+
             for (locals_map.items()) |entry| {
                 try self.emitUnsigned(writer, entry.value);
                 try self.emitSigned(writer, entry.key.val());
             }
-        }
+        } else try self.emitUnsigned(writer, @as(u32, 0));
 
+        const body = func.body.as(lir.Inst.Block);
         // generate the bytecode for the body
         for (body.instructions) |inst| {
             try self.gen(writer, inst);
@@ -725,6 +769,27 @@ test "IR to Wasm - Function call" {
         "\x07\x11\x02\x06\x61\x64\x64\x4f\x6e\x65\x00\x00\x04\x6d\x61\x69\x6e\x00\x01" ++
         "\x08\x01\x01\x0a\x15\x02\x08\x00\x20\x00\x42\x01\x7c\x0f\x0b" ++
         "\x0a\x01\x01\x7e\x42\x01\x10\x00\x21\x00\x0b";
+
+    try testWasm(input, expected, .{});
+}
+
+test "IR to Wasm - Loop" {
+    const input =
+        \\const loop = fn() void {
+        \\  const x = 5
+        \\  mut i = 0
+        \\  while(i < x) {
+        \\      i = i + 1
+        \\  }
+        \\}
+    ;
+
+    const expected = magic_bytes ++
+        "\x01\x04\x01\x60\x00\x00" ++
+        "\x03\x02\x01\x00" ++
+        "\x07\x08\x01\x04\x6c\x6f\x6f\x70\x00\x00" ++
+        "\x0a\x27\x01\x25\x01\x02\x7e\x42\x05\x21\x00\x42\x00\x21\x01\x02\x40" ++
+        "\x03\x40\x20\x01\x20\x00\x53\x45\x0d\x01\x20\x01\x20\x01\x42\x01\x7c\x21\x01\x0c\x00\x0b\x0b\x0b"; // loop starts at 0x03
 
     try testWasm(input, expected, .{});
 }
