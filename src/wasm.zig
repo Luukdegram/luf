@@ -708,3 +708,23 @@ test "IR to Wasm - main func" {
 
     try testWasm(input, expected, .{});
 }
+
+test "IR to Wasm - Function call" {
+    const input =
+        \\const addOne = fn(x: int) int {
+        \\  return x + 1
+        \\}
+        \\const main = fn() void {
+        \\  const x = addOne(1)
+        \\}
+    ;
+
+    const expected = magic_bytes ++
+        "\x01\x09\x02\x60\x01\x7e\x01\x7e\x60\x00\x00" ++
+        "\x03\x03\x02\x00\x01" ++
+        "\x07\x11\x02\x06\x61\x64\x64\x4f\x6e\x65\x00\x00\x04\x6d\x61\x69\x6e\x00\x01" ++
+        "\x08\x01\x01\x0a\x15\x02\x08\x00\x20\x00\x42\x01\x7c\x0f\x0b" ++
+        "\x0a\x01\x01\x7e\x42\x01\x10\x00\x21\x00\x0b";
+
+    try testWasm(input, expected, .{});
+}

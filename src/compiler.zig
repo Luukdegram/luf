@@ -334,7 +334,8 @@ pub const Compiler = struct {
                         .{index.left.identifier.value},
                     );
 
-                    const mod: *Module = self.modules.get(symbol.node.declaration.value.import.value.string_lit.value).?;
+                    const mod: *Module = self.modules.get(symbol.node.declaration.value.import.value.string_lit.value) orelse
+                        return Type.function; // Module imported by VM, therefore just return it as a function
 
                     const function_symbol: *Symbol = mod.symbols.get(function_name) orelse
                         return self.fail("Module does not contain function '{}'", index.index.tokenPos(), .{function_name});
@@ -599,7 +600,7 @@ pub const Compiler = struct {
         } else blk: {
             const s = (try self.defineSymbol(decl.name.identifier.value, decl.mutable, node, false, decl.is_pub)).?;
             s.ident = try self.ir.emitIdent(
-                try self.resolveType(decl.value),
+                try self.resolveScalarType(decl.value),
                 node.tokenPos(),
                 s.name,
                 switch (s.scope) {
@@ -611,11 +612,9 @@ pub const Compiler = struct {
             break :blk s;
         };
 
-        //const symbol = (try self.defineSymbol(decl.name.identifier.value, decl.mutable, node, false)).?;
-
         const decl_value = try self.resolveInst(decl.value);
 
-        const decl_ir = try self.ir.emitDecl(
+        return try self.ir.emitDecl(
             decl.token.start,
             symbol.name,
             symbol.index,
@@ -627,7 +626,6 @@ pub const Compiler = struct {
             symbol.mutable,
             decl_value,
         );
-        return decl_ir;
     }
 
     /// Compiles an `ast.Node.Identifier` node into a `lir.Inst.Ident`
@@ -768,7 +766,12 @@ pub const Compiler = struct {
                 args[i] = try self.resolveInst(arg);
             }
             const func = try self.resolveInst(call.function);
-            return self.ir.emitCall(call.token.start, func, args);
+            return self.ir.emitCall(
+                try self.resolveScalarType(call.function),
+                call.token.start,
+                func,
+                args,
+            );
         }
         //if it's an identifier, we first do a lookup to retrieve it's declaration node
         //then return the function declaration. else we return the function itself
@@ -797,7 +800,11 @@ pub const Compiler = struct {
                 const module_name = symbol.node.declaration.value.import.value.string_lit.value;
                 if (self.modules.get(module_name)) |mod| {
                     const decl_symbol: *Symbol = mod.symbols.get(function_name) orelse
-                        return self.fail("Module does not contain function '{}'", call.function.tokenPos(), .{function_name});
+                        return self.fail(
+                        "Module does not contain function '{}'",
+                        call.function.tokenPos(),
+                        .{function_name},
+                    );
 
                     break :blk decl_symbol.node.declaration.value.func_lit;
                 } else {
@@ -814,7 +821,12 @@ pub const Compiler = struct {
 
             const func = try self.resolveInst(call.function);
 
-            return self.ir.emitCall(call.token.start, func, args);
+            return self.ir.emitCall(
+                try self.resolveScalarType(call.function),
+                call.token.start,
+                func,
+                args,
+            );
         };
 
         if (function_node.params.len != call.arguments.len)
@@ -837,7 +849,12 @@ pub const Compiler = struct {
         }
 
         const func = try self.resolveInst(call.function);
-        return self.ir.emitCall(call.token.start, func, args);
+        return self.ir.emitCall(
+            try self.resolveScalarType(call.function),
+            call.token.start,
+            func,
+            args,
+        );
     }
 
     /// Compiles an `ast.Node.ReturnStatement` into a `lir.Inst.Single`

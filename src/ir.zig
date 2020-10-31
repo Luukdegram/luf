@@ -610,13 +610,13 @@ pub const Module = struct {
     }
 
     /// Emits a `Call` instruction which calls a function
-    pub fn emitCall(self: *Module, pos: usize, func: *Inst, args: []*Inst) Error!*Inst {
+    pub fn emitCall(self: *Module, ty: Type, pos: usize, func: *Inst, args: []*Inst) Error!*Inst {
         const inst = try self.gpa.create(Inst.Call);
         inst.* = .{
             .base = .{
                 .tag = .call,
                 .pos = pos,
-                .ty = ._void,
+                .ty = ty,
             },
             .args = try self.gpa.dupe(*Inst, args),
             .func = func,
