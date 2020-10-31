@@ -120,9 +120,14 @@ const Section = struct {
         // section id
         try leb.writeULEB128(writer, @enumToInt(self.ty));
 
-        // full payload length. + 1 for `count`
-        try leb.writeULEB128(writer, @intCast(u32, self.code.items.len + 1));
-        try leb.writeULEB128(writer, self.count);
+        // start section always has 1 element, therefore no need to emit counter
+        if (self.ty == .start) {
+            try leb.writeULEB128(writer, @intCast(u32, self.code.items.len));
+        } else {
+            // full payload length. + 1 for `count`
+            try leb.writeULEB128(writer, @intCast(u32, self.code.items.len + 1));
+            try leb.writeULEB128(writer, self.count);
+        }
 
         try writer.writeAll(self.code.items);
         self.code.deinit();
@@ -188,7 +193,12 @@ pub const Wasm = struct {
     /// funcidx of the main function. Cannot be 'null' after iterating our declarations
     main_index: ?usize,
 
-    pub const Error = error{ OutOfMemory, MissingMainFunction };
+    /// Errors emitted while generating the Wasm bytecode
+    pub const Error = error{
+        OutOfMemory,
+        InvalidType,
+        ParametersDisallowed,
+    };
 
     /// Creates a new instance of `Instructions`
     pub fn init(gpa: *Allocator) Wasm {
@@ -221,8 +231,12 @@ pub const Wasm = struct {
                 try wasm.emitGlobal(decl);
         }
 
-        // After iterating all declarations and no
-        if (wasm.main_index == null) return Error.MissingMainFunction;
+        // if main function defined, insert it into start section
+        if (wasm.main_index) |start_index| {
+            const start = wasm.section(.start);
+            try wasm.emitUnsigned(start.code.writer(), start_index);
+            start.count += 1;
+        }
 
         // sort our sections so they will be emitted in correct order
         std.sort.sort(Section, wasm.sections[0..wasm.section_size], {}, sortSections);
@@ -455,6 +469,14 @@ pub const Wasm = struct {
         const name = decl.name;
         self.func = func;
 
+        // if main is declared, ensure no parameters and return type are set
+        const is_main = if (std.mem.eql(u8, "main", name)) blk: {
+            if (func.ret_type.ty != ._void) return Error.InvalidType;
+            if (func.args.len > 0) return Error.ParametersDisallowed;
+
+            break :blk true;
+        } else false;
+
         // register the function type
         const type_section = self.section(.@"type");
         const type_idx = try emitFuncType(type_section, func);
@@ -465,7 +487,7 @@ pub const Wasm = struct {
         try leb.writeULEB128(func_section.code.writer(), func_idx);
         func_section.count += 1; // manually increase as no helper function here
 
-        if (std.mem.eql(u8, "main", name)) self.main_index = func_idx;
+        if (is_main) self.main_index = func_idx;
 
         // register the code section, this will contain the body of the function
         const code_section = self.section(.code);
@@ -575,6 +597,7 @@ fn sortSections(context: void, lhs: Section, rhs: Section) bool {
 /// which can be used by external tools to expect the output
 const TestOutput = struct {
     file_name: ?[]const u8 = null,
+    print_output: bool = false,
 };
 
 /// compiles input and checks if it matches the expected output
@@ -595,20 +618,23 @@ fn testWasm(input: []const u8, expected: []const u8, with_output: TestOutput) !v
         try file.writeAll(wasm);
     }
 
+    if (with_output.print_output) {
+        for (wasm) |c| std.debug.print("\\x{x:0>2}", .{c});
+        std.debug.print("\n", .{});
+    }
+
     testing.expectEqualSlices(u8, expected, wasm);
 }
-
-fn outputWasm(input: []const u8, name: []const u8) !void {}
 
 const magic_bytes = &[_]u8{ 0, 'a', 's', 'm', 1, 0, 0, 0 };
 
 test "IR to Wasm - Functions" {
-    const input = "const main = fn(x: int, y: int) int { return x + y }";
+    const input = "const add = fn(x: int, y: int) int { return x + y }";
 
     const expected = magic_bytes ++ // \0asm                (module
         "\x01\x07\x01\x60\x02\x7e\x7e\x01\x7e" ++ //            (type (i64 i64) (func (result i64)))
         "\x03\x02\x01\x00" ++ //                            (func (i64 i64) (type 0))
-        "\x07\x08\x01\x04\x6d\x61\x69\x6e\x00\x00" ++ //                (export "main" (func 0))
+        "\x07\x07\x01\x03\x61\x64\x64\x00\x00" ++ //                (export "add" (func 0))
         "\x0a\x0a\x01\x08\x00\x20\x00\x20\x01\x7c\x0f\x0b"; //      load_local load_local i64.add)
 
     try testWasm(input, expected, .{});
@@ -616,7 +642,7 @@ test "IR to Wasm - Functions" {
 
 test "IR to Wasm - Conditional" {
     const input =
-        \\const main = fn(x: int) int { 
+        \\const con = fn(x: int) int { 
         \\  if (x == 2) {
         \\      return 5
         \\  } else {
@@ -628,7 +654,7 @@ test "IR to Wasm - Conditional" {
     const expected = magic_bytes ++
         "\x01\x06\x01\x60\x01\x7e\x01\x7e" ++
         "\x03\x02\x01\x00" ++
-        "\x07\x08\x01\x04\x6d\x61\x69\x6e\x00\x00" ++
+        "\x07\x07\x01\x03\x63\x6f\x6e\x00\x00" ++
         "\x0a\x13\x01\x11\x00\x20\x00\x42\x02\x51\x04\x7e\x42\x05\x0f\x05\x42\x0a\x0f\x0b\x0b";
 
     try testWasm(input, expected, .{});
@@ -636,7 +662,7 @@ test "IR to Wasm - Conditional" {
 
 test "IR to Wasm - Function locals" {
     const input =
-        \\const main = fn(x: int) int { 
+        \\const loc = fn(x: int) int { 
         \\  const y = 20
         \\  if (x == 2) {
         \\      return 5
@@ -649,7 +675,7 @@ test "IR to Wasm - Function locals" {
     const expected = magic_bytes ++
         "\x01\x06\x01\x60\x01\x7e\x01\x7e" ++
         "\x03\x02\x01\x00" ++
-        "\x07\x08\x01\x04\x6d\x61\x69\x6e\x00\x00" ++
+        "\x07\x07\x01\x03\x6c\x6f\x63\x00\x00" ++
         "\x0a\x19\x01\x17\x01\x01\x7E\x42\x14\x21\x01" ++ // locals section
         "\x20\x00\x42\x02\x51\x04\x7e\x42\x05\x0f\x05\x42\x0a\x0f\x0b\x0b";
 
@@ -659,13 +685,25 @@ test "IR to Wasm - Function locals" {
 test "IR to Wasm - Globals" {
     const input =
         \\const x = 5
-        \\const main = fn()void{}
+        \\const test = fn()void{}
     ;
     const expected = magic_bytes ++
         "\x01\x04\x01\x60\x00\x00" ++
         "\x03\x02\x01\x00" ++
         "\x06\x06\x01\x7e\x00\x42\x05\x0b" ++ // globals section
+        "\x07\x08\x01\x04\x74\x65\x73\x74\x00\x00" ++
+        "\x0a\x04\x01\x02\x00\x0b";
+
+    try testWasm(input, expected, .{});
+}
+
+test "IR to Wasm - main func" {
+    const input = "const main = fn()void{}";
+    const expected = magic_bytes ++
+        "\x01\x04\x01\x60\x00\x00" ++
+        "\x03\x02\x01\x00" ++
         "\x07\x08\x01\x04\x6d\x61\x69\x6e\x00\x00" ++
+        "\x08\x01\x00" ++ // start section
         "\x0a\x04\x01\x02\x00\x0b";
 
     try testWasm(input, expected, .{});
