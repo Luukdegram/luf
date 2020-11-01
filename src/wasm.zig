@@ -59,10 +59,10 @@ const Op = enum(u8) {
     /// i.e. generates .64_add if `wanted` = .add and `ty` = .integer
     fn fromTagAndType(wanted: lir.Inst.Tag, ty: LufType) Op {
         return switch (wanted) {
-            .add => .i64_add,
-            .sub => .i64_sub,
-            .mul => .i64_mul,
-            .div => .i64_div,
+            .add, .assign_add => .i64_add,
+            .sub, .assign_sub => .i64_sub,
+            .mul, .assign_mul => .i64_mul,
+            .div, .assign_div => .i64_div,
             .eql => .i64_eq,
             .nql => .i64_ne,
             .lt => .i64_lt,
@@ -292,10 +292,6 @@ pub const Wasm = struct {
             .nql,
             .lt,
             .gt,
-            .assign_add,
-            .assign_sub,
-            .assign_mul,
-            .assign_div,
             .bitwise_xor,
             .bitwise_or,
             .bitwise_and,
@@ -315,7 +311,12 @@ pub const Wasm = struct {
             .expr => try self.gen(writer, inst.as(lir.Inst.Single).rhs),
             .decl => try self.emitDecl(writer, inst.as(lir.Inst.Decl)),
             .@"return" => try self.emitRet(writer, inst.as(lir.Inst.Single)),
-            .assign => try self.emitAssign(writer, inst.as(lir.Inst.Double)),
+            .assign,
+            .assign_add,
+            .assign_sub,
+            .assign_mul,
+            .assign_div,
+            => try self.emitAssign(writer, inst.as(lir.Inst.Double)),
             .store => {},
             .load => {},
             .list, .map => {},
@@ -392,12 +393,17 @@ pub const Wasm = struct {
     fn emitAssign(self: *Wasm, writer: anytype, double: *lir.Inst.Double) !void {
         const ident = double.lhs.as(lir.Inst.Ident);
 
-        // first get the local or global variable
-        try self.emit(writer, if (ident.scope == .global) Op.global_get else Op.local_get);
-        try self.emitUnsigned(writer, ident.index);
+        // get the local/global
+        try self.gen(writer, double.lhs);
 
         // generate the new value
         try self.gen(writer, double.rhs);
+
+        // if operator, first apply it
+        switch (double.base.tag) {
+            .assign => {},
+            else => try self.emit(writer, Op.fromTagAndType(double.base.tag, ident.base.ty)),
+        }
 
         // set the new value to the local/global
         try self.emit(writer, if (ident.scope == .global) Op.global_set else Op.local_set);
