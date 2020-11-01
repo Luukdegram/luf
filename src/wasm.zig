@@ -303,7 +303,7 @@ pub const Wasm = struct {
             .eql_gt,
             .mod,
             => try self.emitInfix(writer, inst.as(lir.Inst.Double)),
-            .not, .bitwise_not, .negate => {},
+            .not, .bitwise_not, .negate => try self.emitPrefix(writer, inst.as(lir.Inst.Single)),
             .int => try self.emitInt(writer, inst.as(lir.Inst.Int)),
             .string => {},
             .primitive => {},
@@ -365,10 +365,33 @@ pub const Wasm = struct {
         try self.gen(writer, double.rhs);
 
         switch (double.base.tag) {
-            .assign_add, .assign_sub, .assign_mul, .assign_div, .@"and", .@"or" => @panic("TODO Add support for assignments and logical AND/OR"),
+            .@"and", .@"or" => @panic("TODO Add support for logical AND/OR"),
             else => try self.emit(writer, Op.fromTagAndType(double.base.tag, double.lhs.ty)),
         }
-        //try self.emit(writer, .i64_add);
+    }
+
+    /// Emits a prefix operator such as negate, mod, etc
+    fn emitPrefix(self: *Wasm, writer: anytype, single: *lir.Inst.Single) !void {
+        // Wasm does not have bytecodes for prefix operands
+        // therefore we apply it manually
+        switch (single.base.tag) {
+            .negate => {
+                try self.emit(writer, .i64_const);
+                try self.emitSigned(writer, @as(i64, 0));
+                try self.gen(writer, single.rhs);
+                try self.emit(writer, .i64_sub);
+            },
+            .not => {
+                try self.gen(writer, single.rhs);
+                try self.emit(writer, .i32_eqz);
+            },
+            .bitwise_not => {
+                try self.gen(writer, single.rhs);
+                try self.emit(writer, .i64_const);
+                try self.emitUnsigned(writer, @as(i64, -1));
+                try self.emit(writer, .i64_xor);
+            },
+        }
     }
 
     /// Emits a Wasm block instruction
