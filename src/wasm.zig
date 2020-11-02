@@ -200,7 +200,7 @@ pub const Wasm = struct {
     /// returns the offset of a particular string if found
     const Data = struct {
         /// map of strings as key and offset as value
-        strings: std.StringHashMapUnmanaged(u32),
+        strings: std.StringHashMapUnmanaged(i32),
         /// wasm offset expects i32
         offset: i32,
 
@@ -215,9 +215,9 @@ pub const Wasm = struct {
         }
 
         /// Puts a new key string into `strings`, asserts key does not exist
-        fn put(self: Data, gpa: *Allocator, key: []const u8) void {
+        fn put(self: *Data, gpa: *Allocator, key: []const u8) !void {
             try self.strings.putNoClobber(gpa, key, self.offset);
-            self.offset += key.len;
+            self.offset += @intCast(i32, key.len);
         }
     };
 
@@ -238,7 +238,7 @@ pub const Wasm = struct {
             .func = undefined,
             .main_index = null,
             .data = .{
-                .strings = std.StringHashMapUnmanaged(u32),
+                .strings = std.StringHashMapUnmanaged(i32){},
                 .offset = 0,
             },
         };
@@ -309,6 +309,7 @@ pub const Wasm = struct {
     fn resolveValType(ty: LufType) Types.Value {
         return switch (ty) {
             .integer => Types.Value.I64,
+            .boolean => Types.Value.I32,
             else => @panic("TODO: Implement more types for wasm"),
         };
     }
@@ -337,7 +338,7 @@ pub const Wasm = struct {
             => try self.emitInfix(writer, inst.as(lir.Inst.Double)),
             .not, .bitwise_not, .negate => try self.emitPrefix(writer, inst.as(lir.Inst.Single)),
             .int => try self.emitInt(writer, inst.as(lir.Inst.Int)),
-            .string => try self.emitString(writer, inst.as(lir.Inst.String)),
+            .string => try self.emitString(inst.as(lir.Inst.String)),
             .primitive => {},
             .ident => try self.emitIdent(writer, inst.as(lir.Inst.Ident)),
             .expr => try self.gen(writer, inst.as(lir.Inst.Single).rhs),
@@ -445,9 +446,10 @@ pub const Wasm = struct {
             .bitwise_not => {
                 try self.gen(writer, single.rhs);
                 try self.emit(writer, .i64_const);
-                try self.emitUnsigned(writer, @as(i64, -1));
+                try self.emitSigned(writer, @as(i64, -1));
                 try self.emit(writer, .i64_xor);
             },
+            else => unreachable,
         }
     }
 
