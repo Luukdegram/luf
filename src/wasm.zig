@@ -32,6 +32,7 @@ const Op = enum(u8) {
     i64_store = 0x37,
     mem_size = 0x3F,
     mem_grow = 0x40,
+    i32_const = 0x41,
     i64_const = 0x42,
     i32_eqz = 0x45,
     i32_eq = 0x46,
@@ -192,6 +193,33 @@ pub const Wasm = struct {
     func: *lir.Inst.Function,
     /// funcidx of the main function. Cannot be 'null' after iterating our declarations
     main_index: ?usize,
+    /// Struct to save strings for use in Data section
+    data: Data,
+
+    /// Struct to handle strings inside data section
+    /// returns the offset of a particular string if found
+    const Data = struct {
+        /// map of strings as key and offset as value
+        strings: std.StringHashMapUnmanaged(u32),
+        /// wasm offset expects i32
+        offset: i32,
+
+        /// Returns `true` if the string already exists
+        fn contains(self: Data, key: []const u8) bool {
+            return self.strings.contains(key);
+        }
+
+        /// Returns a string's offset if found, else returns null
+        fn get(self: Data, key: []const u8) ?u32 {
+            return self.strings.get(key);
+        }
+
+        /// Puts a new key string into `strings`, asserts key does not exist
+        fn put(self: Data, gpa: *Allocator, key: []const u8) void {
+            try self.strings.putNoClobber(gpa, key, self.offset);
+            self.offset += key.len;
+        }
+    };
 
     /// Errors emitted while generating the Wasm bytecode
     pub const Error = error{
@@ -209,6 +237,10 @@ pub const Wasm = struct {
             .gpa = gpa,
             .func = undefined,
             .main_index = null,
+            .data = .{
+                .strings = std.StringHashMapUnmanaged(u32),
+                .offset = 0,
+            },
         };
     }
 
@@ -305,7 +337,7 @@ pub const Wasm = struct {
             => try self.emitInfix(writer, inst.as(lir.Inst.Double)),
             .not, .bitwise_not, .negate => try self.emitPrefix(writer, inst.as(lir.Inst.Single)),
             .int => try self.emitInt(writer, inst.as(lir.Inst.Int)),
-            .string => {},
+            .string => try self.emitString(writer, inst.as(lir.Inst.String)),
             .primitive => {},
             .ident => try self.emitIdent(writer, inst.as(lir.Inst.Ident)),
             .expr => try self.gen(writer, inst.as(lir.Inst.Single).rhs),
@@ -352,6 +384,31 @@ pub const Wasm = struct {
     fn emitInt(self: *Wasm, writer: anytype, int: *lir.Inst.Int) !void {
         try self.emit(writer, .i64_const);
         try self.emitSigned(writer, @intCast(i64, int.value));
+    }
+
+    /// Saves the string in the Data section
+    fn emitString(self: *Wasm, string: *lir.Inst.String) !void {
+        if (self.data.contains(string.value)) return;
+
+        // string does not exist yet, so add it to our data section, as well as to
+        // our data struct
+        const data = self.section(.data);
+        const writer = data.code.writer();
+
+        // index is always 0
+        try self.emitUnsigned(writer, @as(u32, 0));
+
+        // offset
+        try self.emit(writer, .i32_const);
+        try self.emitSigned(writer, self.data.offset);
+
+        // length + value
+        try self.emitUnsigned(writer, @intCast(u32, string.value.len));
+        try writer.writeAll(string.value);
+        data.count += 1;
+
+        // save it in our data struct to calculate the offset for later
+        try self.data.put(self.gpa, string.value);
     }
 
     /// Emits a single opcode
