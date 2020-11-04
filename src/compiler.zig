@@ -373,7 +373,13 @@ pub const Compiler = struct {
                 .{decl.name.identifier.value},
             );
 
-            symbol.ident = try self.ir.emitIdent(node.tokenPos(), symbol.name, .global, symbol.index);
+            symbol.ident = try self.ir.emitIdent(
+                try self.resolveType(node),
+                node.tokenPos(),
+                symbol.name,
+                .global,
+                symbol.index,
+            );
         }
         for (self.scope.symbols.items()) |entry| {
             const symbol: *Symbol = entry.value;
@@ -735,7 +741,7 @@ pub const Compiler = struct {
         const name = arg.value;
 
         // function arguments are not mutable by default
-        const symbol = (try self.defineSymbol(name, false, arg.arg_type, false)) orelse
+        const symbol = (try self.defineSymbol(name, false, arg.arg_type, false, false)) orelse
             return self.fail(
             "Identifier '{}' has already been declared",
             arg.token.start,
