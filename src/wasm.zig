@@ -270,6 +270,14 @@ pub const Wasm = struct {
             start.count += 1;
         }
 
+        // emit memory and export it
+        {
+            const mem = wasm.section(.memory);
+            try wasm.emitUnsigned(mem.code.writer(), @as(u1, 0));
+            try wasm.emitUnsigned(mem.code.writer(), @as(u32, 1));
+            mem.count += 1;
+        }
+
         // sort our sections so they will be emitted in correct order
         std.sort.sort(Section, wasm.sections[0..wasm.section_size], {}, sortSections);
 
@@ -406,6 +414,7 @@ pub const Wasm = struct {
         // length + value
         try self.emitUnsigned(writer, @intCast(u32, string.value.len));
         try writer.writeAll(string.value);
+        try self.emit(writer, .end);
         data.count += 1;
 
         // save it in our data struct to calculate the offset for later
@@ -566,13 +575,14 @@ pub const Wasm = struct {
         // mutability: 0 immutable, 1 mutable
         try self.emitUnsigned(writer, @boolToInt(decl.is_mut));
 
-        // TODO: For now we only support init expr for integers
-        if (decl.value.ty == .integer)
-            try self.emitInt(writer, decl.value.as(lir.Inst.Int))
-        else {
-            // for now just emit a 0 value
-            try self.emit(writer, .i64_const);
-            try self.emitSigned(writer, @as(i64, 0));
+        switch (decl.value.ty) {
+            .integer => try self.emitInt(writer, decl.value.as(lir.Inst.Int)),
+            .boolean => {
+                try self.emit(writer, .i32_const);
+                const prim = decl.value.as(lir.Inst.Primitive);
+                try self.emitSigned(writer, @as(i32, if (prim.prim_type == .@"true") 1 else 0));
+            },
+            else => @panic("TODO: Implement globals for non-integer/bool types"),
         }
 
         // emit 'end' so wasm is aware where our global ends
@@ -765,8 +775,9 @@ test "IR to Wasm - Functions" {
 
     const expected = magic_bytes ++ // \0asm                (module
         "\x01\x07\x01\x60\x02\x7e\x7e\x01\x7e" ++ //            (type (i64 i64) (func (result i64)))
-        "\x03\x02\x01\x00" ++ //                            (func (i64 i64) (type 0))
-        "\x07\x07\x01\x03\x61\x64\x64\x00\x00" ++ //                (export "add" (func 0))
+        "\x03\x02\x01\x00" ++ //                                (func (i64 i64) (type 0))
+        "\x05\x03\x01\x00\x01" ++ //                            (memory 0 1)
+        "\x07\x07\x01\x03\x61\x64\x64\x00\x00" ++ //            (export "add" (func 0))
         "\x0a\x0a\x01\x08\x00\x20\x00\x20\x01\x7c\x0f\x0b"; //      load_local load_local i64.add)
 
     try testWasm(input, expected, .{});
@@ -786,6 +797,7 @@ test "IR to Wasm - Conditional" {
     const expected = magic_bytes ++
         "\x01\x06\x01\x60\x01\x7e\x01\x7e" ++
         "\x03\x02\x01\x00" ++
+        "\x05\x03\x01\x00\x01" ++
         "\x07\x07\x01\x03\x63\x6f\x6e\x00\x00" ++
         "\x0a\x13\x01\x11\x00\x20\x00\x42\x02\x51\x04\x7e\x42\x05\x0f\x05\x42\x0a\x0f\x0b\x0b";
 
@@ -807,6 +819,7 @@ test "IR to Wasm - Function locals" {
     const expected = magic_bytes ++
         "\x01\x06\x01\x60\x01\x7e\x01\x7e" ++
         "\x03\x02\x01\x00" ++
+        "\x05\x03\x01\x00\x01" ++
         "\x07\x07\x01\x03\x6c\x6f\x63\x00\x00" ++
         "\x0a\x19\x01\x17\x01\x01\x7E\x42\x14\x21\x01" ++ // locals section
         "\x20\x00\x42\x02\x51\x04\x7e\x42\x05\x0f\x05\x42\x0a\x0f\x0b\x0b";
@@ -822,6 +835,7 @@ test "IR to Wasm - Globals" {
     const expected = magic_bytes ++
         "\x01\x04\x01\x60\x00\x00" ++
         "\x03\x02\x01\x00" ++
+        "\x05\x03\x01\x00\x01" ++
         "\x06\x06\x01\x7e\x00\x42\x05\x0b" ++ // globals section
         "\x07\x08\x01\x04\x74\x65\x73\x74\x00\x00" ++
         "\x0a\x04\x01\x02\x00\x0b";
@@ -834,6 +848,7 @@ test "IR to Wasm - main func" {
     const expected = magic_bytes ++
         "\x01\x04\x01\x60\x00\x00" ++
         "\x03\x02\x01\x00" ++
+        "\x05\x03\x01\x00\x01" ++
         "\x07\x08\x01\x04\x6d\x61\x69\x6e\x00\x00" ++
         "\x08\x01\x00" ++ // start section
         "\x0a\x04\x01\x02\x00\x0b";
@@ -854,6 +869,7 @@ test "IR to Wasm - Function call" {
     const expected = magic_bytes ++
         "\x01\x09\x02\x60\x01\x7e\x01\x7e\x60\x00\x00" ++
         "\x03\x03\x02\x00\x01" ++
+        "\x05\x03\x01\x00\x01" ++
         "\x07\x11\x02\x06\x61\x64\x64\x4f\x6e\x65\x00\x00\x04\x6d\x61\x69\x6e\x00\x01" ++
         "\x08\x01\x01\x0a\x15\x02\x08\x00\x20\x00\x42\x01\x7c\x0f\x0b" ++
         "\x0a\x01\x01\x7e\x42\x01\x10\x00\x21\x00\x0b";
@@ -875,6 +891,7 @@ test "IR to Wasm - Loop" {
     const expected = magic_bytes ++
         "\x01\x04\x01\x60\x00\x00" ++
         "\x03\x02\x01\x00" ++
+        "\x05\x03\x01\x00\x01" ++
         "\x07\x08\x01\x04\x6c\x6f\x6f\x70\x00\x00" ++
         "\x0a\x27\x01\x25\x01\x02\x7e\x42\x05\x21\x00\x42\x00\x21\x01\x02\x40" ++
         "\x03\x40\x20\x01\x20\x00\x53\x45\x0d\x01\x20\x01\x20\x01\x42\x01\x7c\x21\x01\x0c\x00\x0b\x0b\x0b"; // loop starts at 0x03
