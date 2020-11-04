@@ -2,7 +2,7 @@
     "name": "luf",
     "displayName": "Luf",
     "description": "Syntax highlighting for the Luf programming language",
-    "version": "0.1.1",
+    "version": "0.1.2",
     "publisher": "luukdegram",
     "repository": {
         "type": "git",

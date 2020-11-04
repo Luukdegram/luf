@@ -199,6 +199,7 @@ pub const Node = union(NodeType) {
         value: Node,
         type_def: ?Node,
         mutable: bool = false,
+        is_pub: bool = false,
     };
 
     /// Identifier node -> x

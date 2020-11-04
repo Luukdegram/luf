@@ -130,6 +130,10 @@
                     "name": "keyword.control.repeat.luf"
                 },
                 {
+                    "name": "keyword.storage.luf",
+                    "match": "\\b(pub)\\b"
+                },
+                {
                     "name": "keyword.structure.luf",
                     "match": "\\b(enum|import)\\b"
                 },

@@ -66,7 +66,7 @@ fn findPrecedence(token_type: Token.TokenType) Precedence {
 }
 
 /// Parses source code into an AST tree
-pub fn parse(allocator: *Allocator, source: []const u8, _errors: *Errors) Parser.Error!Tree {
+pub fn parse(allocator: *Allocator, source: []const u8, err: *Errors) Parser.Error!Tree {
     var lexer = Lexer.init(source);
 
     var arena = std.heap.ArenaAllocator.init(allocator);
@@ -78,7 +78,8 @@ pub fn parse(allocator: *Allocator, source: []const u8, _errors: *Errors) Parser
         .allocator = &arena.allocator,
         .lexer = &lexer,
         .source = source,
-        .err = _errors,
+        .err = err,
+        .depth = 0,
     };
 
     var nodes = ArrayList(Node).init(parser.allocator);
@@ -98,12 +99,19 @@ pub fn parse(allocator: *Allocator, source: []const u8, _errors: *Errors) Parser
 /// Parser retrieves tokens from our Lexer and turns them into
 /// nodes to create an AST.
 pub const Parser = struct {
+    /// Current token that has been parsed
     current_token: Token,
+    /// The next token that will be set as current when calling .next() or .expectPeek()
     peek_token: Token,
     allocator: *Allocator,
+    /// Lexer that tokenized all tokens and is used to retrieve the next token
     lexer: *Lexer,
+    /// Original source code. Memory is not owned by the parser.
     source: []const u8,
+    /// List of errors that can be filled with Parser errors
     err: *Errors,
+    /// Current scope depth. Increased and decreased by blocks
+    depth: usize,
 
     pub const Error = error{
         ParserError,
@@ -129,7 +137,7 @@ pub const Parser = struct {
     fn parseStatement(self: *Parser) Error!Node {
         return switch (self.current_token.token_type) {
             .comment => self.parseComment(),
-            .constant, .mutable => self.parseDeclaration(),
+            .constant, .mutable, .@"pub" => self.parseDeclaration(),
             .@"return" => self.parseReturn(),
             .@"switch" => self.parseSwitchStatement(),
             .while_loop => self.parseWhile(),
@@ -142,13 +150,27 @@ pub const Parser = struct {
 
     /// Parses a declaration
     fn parseDeclaration(self: *Parser) Error!Node {
+        const is_pub = if (self.currentIsType(.@"pub")) blk: {
+            if (self.depth > 0) {
+                return self.fail(
+                    "Public declaration not allowed outside global scope",
+                    self.current_token.start,
+                    .{},
+                );
+            }
+
+            self.next();
+            break :blk true;
+        } else false;
+
         const decl = try self.allocator.create(Node.Declaration);
         decl.* = .{
             .token = self.current_token,
             .name = undefined,
             .value = undefined,
             .type_def = null,
-            .mutable = self.current_token.token_type == .mutable,
+            .mutable = self.currentIsType(.mutable),
+            .is_pub = is_pub,
         };
 
         try self.expectPeek(.identifier);
@@ -379,6 +401,9 @@ pub const Parser = struct {
     /// Indirectly asserts a closing bracket is found
     /// Parse statements using this function do not have to assert for it.
     fn parseBlockStatement(self: *Parser) !Node {
+        self.depth += 1;
+        defer self.depth -= 1;
+
         const block = try self.allocator.create(Node.BlockStatement);
         block.* = .{
             .token = self.current_token,
@@ -868,12 +893,13 @@ pub const Parser = struct {
     }
 };
 
-test "Parse Delcaration" {
+test "Parse Declaration" {
     var allocator = testing.allocator;
     const test_cases = .{
-        .{ .input = "const x = 5", .id = "x", .expected = 5, .mutable = false },
-        .{ .input = "mut y = 50", .id = "y", .expected = 50, .mutable = true },
-        .{ .input = "mut x = 2 const y = 5", .id = "y", .expected = 5, .mutable = false },
+        .{ .input = "const x = 5", .id = "x", .expected = 5, .mutable = false, .is_pub = false },
+        .{ .input = "mut y = 50", .id = "y", .expected = 50, .mutable = true, .is_pub = false },
+        .{ .input = "mut x = 2 const y = 5", .id = "y", .expected = 5, .mutable = false, .is_pub = false },
+        .{ .input = "pub const x = 2 pub const y = 5", .id = "y", .expected = 5, .mutable = false, .is_pub = true },
     };
 
     inline for (test_cases) |case| {
@@ -885,7 +911,18 @@ test "Parse Delcaration" {
         testing.expectEqualSlices(u8, case.id, node.name.identifier.value);
         testing.expect(case.expected == node.value.int_lit.value);
         testing.expect(case.mutable == node.mutable);
+        testing.expect(case.is_pub == node.is_pub);
     }
+}
+
+test "Parse public declaration outside global scope" {
+    var allocator = testing.allocator;
+    const input = "if(1<2){ pub const x = 2 }";
+
+    var errors = Errors.init(allocator);
+    defer errors.deinit();
+    testing.expectError(Parser.Error.ParserError, parse(allocator, input, &errors));
+    testing.expectEqual(@as(usize, 1), errors.list.items.len);
 }
 
 test "Parse Return statment" {

@@ -78,6 +78,7 @@ pub const Token = struct {
         @"break",
         @"enum",
         @"switch",
+        @"pub",
         // types
         bool_type,
         int_type,
@@ -109,6 +110,7 @@ pub const Token = struct {
         .{ "int", .int_type },
         .{ "string", .string_type },
         .{ "void", .void_type },
+        .{ "pub", .@"pub" },
     });
 
     /// Returns the string value of the token
@@ -179,6 +181,7 @@ pub const Token = struct {
             .@"continue" => "continue",
             .@"enum" => "enum",
             .@"switch" => "switch",
+            .@"pub" => "pub",
             // types
             .bool_type => "bool",
             .string_type => "string",
@@ -219,6 +222,7 @@ test "Keywords" {
         "int",
         "string",
         "void",
+        "pub",
     };
 
     for (keywords) |keyword| {

@@ -98,6 +98,8 @@ pub const Compiler = struct {
         name: []const u8,
         /// Not mutable by default
         mutable: bool = false,
+        /// Not public by default
+        is_pub: bool = false,
         /// Index of symbol table
         index: u16 = 0,
         /// The scope the symbol belongs to
@@ -164,7 +166,15 @@ pub const Compiler = struct {
 
         /// Defines a new symbol and saves it in the symbol table
         /// Returns an error if Symbol already exists
-        fn define(self: *Scope, name: []const u8, mutable: bool, node: ast.Node, forward_declared: bool, index: ?u16) !?*Symbol {
+        fn define(
+            self: *Scope,
+            name: []const u8,
+            mutable: bool,
+            node: ast.Node,
+            forward_declared: bool,
+            is_pub: bool,
+            index: ?u16,
+        ) !?*Symbol {
             if (self.symbols.contains(name)) return null;
 
             const new_index = index orelse @intCast(u16, self.symbols.items().len);
@@ -178,6 +188,7 @@ pub const Compiler = struct {
                 .node = node,
                 .forward_declared = forward_declared,
                 .ident = undefined,
+                .is_pub = is_pub,
             };
 
             try self.symbols.putNoClobber(self.allocator, name, symbol);
@@ -256,9 +267,16 @@ pub const Compiler = struct {
     }
 
     /// Defines a new symbol in the current scope
-    fn defineSymbol(self: *Compiler, name: []const u8, mutable: bool, node: ast.Node, forward_declared: bool) !?*Symbol {
+    fn defineSymbol(
+        self: *Compiler,
+        name: []const u8,
+        mutable: bool,
+        node: ast.Node,
+        forward_declared: bool,
+        is_pub: bool,
+    ) !?*Symbol {
         const index: ?u16 = if (self.scope.id == .global or self.scope.id == .module) self.gc else null;
-        if (try self.scope.define(name, mutable, node, forward_declared, index)) |symbol| {
+        if (try self.scope.define(name, mutable, node, forward_declared, is_pub, index)) |symbol| {
             if (index != null) self.gc += 1;
             return symbol;
         } else return null;
@@ -342,8 +360,18 @@ pub const Compiler = struct {
                 continue;
             } else if (decl.value != .func_lit) continue;
 
-            const symbol = (try self.defineSymbol(decl.name.identifier.value, decl.mutable, node, true)) orelse
-                return self.fail("'{}' has already been declared", node.tokenPos(), .{decl.name.identifier.value});
+            const symbol = (try self.defineSymbol(
+                decl.name.identifier.value,
+                decl.mutable,
+                node,
+                true,
+                decl.is_pub,
+            )) orelse return self.fail(
+                "'{}' has already been declared",
+                node.tokenPos(),
+                .{decl.name.identifier.value},
+            );
+
             symbol.ident = try self.ir.emitIdent(node.tokenPos(), symbol.name, .global, symbol.index);
         }
         for (self.scope.symbols.items()) |entry| {
@@ -355,7 +383,7 @@ pub const Compiler = struct {
                 symbol.name,
                 symbol.index,
                 .global,
-                false,
+                symbol.is_pub,
                 symbol.mutable,
                 value,
             );
@@ -394,6 +422,7 @@ pub const Compiler = struct {
 
         for (tree.nodes) |n| {
             if (n != .declaration or n.declaration.value != .func_lit) continue;
+            if (!n.declaration.is_pub) continue; // only public declarations
 
             const decl = n.declaration;
             const name = decl.name.identifier.value;
@@ -410,6 +439,7 @@ pub const Compiler = struct {
                 .forward_declared = true,
                 .index = self.gc,
                 .ident = undefined,
+                .is_pub = decl.is_pub,
             };
 
             try module.symbols.putNoClobber(self.allocator, name, symbol);
@@ -568,7 +598,7 @@ pub const Compiler = struct {
                     .{decl.name.identifier.value},
                 );
         } else blk: {
-            const s = (try self.defineSymbol(decl.name.identifier.value, decl.mutable, node, false)).?;
+            const s = (try self.defineSymbol(decl.name.identifier.value, decl.mutable, node, false, decl.is_pub)).?;
             s.ident = try self.ir.emitIdent(
                 node.tokenPos(),
                 s.name,
@@ -593,7 +623,7 @@ pub const Compiler = struct {
                 .global, .module => .global,
                 else => .local,
             },
-            false,
+            symbol.is_pub,
             symbol.mutable,
             decl_value,
         );
@@ -668,7 +698,7 @@ pub const Compiler = struct {
 
         for (function.params) |param| {
             // function arguments are not mutable by default
-            const symbol = (try self.defineSymbol(param.func_arg.value, false, param, false)) orelse
+            const symbol = (try self.defineSymbol(param.func_arg.value, false, param, false, false)) orelse
                 return self.fail(
                 "Identifier '{}' has already been declared",
                 function.token.start,
@@ -834,8 +864,17 @@ pub const Compiler = struct {
             const index_node = &ast.Node.ForLoop.index_node;
             index_node.token = i.identifier.token;
 
-            const symbol = (try self.defineSymbol(i.identifier.value, false, ast.Node{ .int_lit = index_node }, false)) orelse
-                return self.fail("Identifier '{}' has already been declared", loop.token.start, .{i.identifier.value});
+            const symbol = (try self.defineSymbol(
+                i.identifier.value,
+                false, // not mutable
+                ast.Node{ .int_lit = index_node },
+                false, // not forward declared
+                false, // not public
+            )) orelse return self.fail(
+                "Identifier '{}' has already been declared",
+                loop.token.start,
+                .{i.identifier.value},
+            );
 
             // generate an identifier to attach to the symbol
             symbol.ident = try self.ir.emitIdent(i.tokenPos(), symbol.name, .local, symbol.index);
@@ -843,7 +882,13 @@ pub const Compiler = struct {
         } else null;
 
         // parser already parses it as an identifier, no need to check here again
-        const capture = (try self.defineSymbol(loop.capture.identifier.value, false, loop.iter, false)) orelse return self.fail(
+        const capture = (try self.defineSymbol(
+            loop.capture.identifier.value,
+            false, // not mutable
+            loop.iter,
+            false, // not forward declared
+            false, // not public
+        )) orelse return self.fail(
             "Capture identifier '{}' has already been declared",
             loop.token.start,
             .{loop.capture.identifier.value},
@@ -939,6 +984,7 @@ pub const Compiler = struct {
                     symbol.mutable,
                     symbol.node,
                     true,
+                    symbol.is_pub,
                     symbol.index,
                 );
                 new_symbol.?.ident = try self.ir.emitIdent(symbol.node.tokenPos(), symbol.name, .global, symbol.index);
