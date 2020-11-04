@@ -1,4 +1,4 @@
-const sum = fn(x:int, y:int) int {
+pub const sum = fn(x:int, y:int) int {
     return x + y
 }
 
