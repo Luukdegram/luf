@@ -26,9 +26,7 @@ const Op = enum(u8) {
     local_tee = 0x22,
     global_get = 0x23,
     global_set = 0x24,
-    // luf uses i64's so for now support just that
     i64_load = 0x29,
-    // same as above, just i64 for now
     i64_store = 0x37,
     mem_size = 0x3F,
     mem_grow = 0x40,
@@ -614,7 +612,7 @@ pub const Wasm = struct {
         self.func = func;
 
         // if main is declared, ensure no parameters and return type are set
-        const is_main = if (std.mem.eql(u8, "main", name)) blk: {
+        const is_main = if (std.mem.eql(u8, "main", name) and decl.is_pub) blk: {
             if (func.ret_type.ty != ._void) return Error.InvalidType;
             if (func.args.len > 0) return Error.ParametersDisallowed;
 
@@ -637,10 +635,10 @@ pub const Wasm = struct {
         const code_section = self.section(.code);
         try self.emitFuncBody(code_section, func);
 
-        // export the function to make it available to other modules/browser
-        // TODO, make this dependent on decl.is_pub
-        const export_section = self.section(.@"export");
-        try exportFunc(export_section, decl);
+        if (decl.is_pub) {
+            const export_section = self.section(.@"export");
+            try exportFunc(export_section, decl);
+        }
     }
 
     /// Appends a function body into the given section
@@ -771,7 +769,7 @@ fn testWasm(input: []const u8, expected: []const u8, with_output: TestOutput) !v
 const magic_bytes = &[_]u8{ 0, 'a', 's', 'm', 1, 0, 0, 0 };
 
 test "IR to Wasm - Functions" {
-    const input = "const add = fn(x: int, y: int) int { return x + y }";
+    const input = "pub const add = fn(x: int, y: int) int { return x + y }";
 
     const expected = magic_bytes ++ // \0asm                (module
         "\x01\x07\x01\x60\x02\x7e\x7e\x01\x7e" ++ //            (type (i64 i64) (func (result i64)))
@@ -785,7 +783,7 @@ test "IR to Wasm - Functions" {
 
 test "IR to Wasm - Conditional" {
     const input =
-        \\const con = fn(x: int) int { 
+        \\pub const con = fn(x: int) int { 
         \\  if (x == 2) {
         \\      return 5
         \\  } else {
@@ -806,7 +804,7 @@ test "IR to Wasm - Conditional" {
 
 test "IR to Wasm - Function locals" {
     const input =
-        \\const loc = fn(x: int) int { 
+        \\pub const loc = fn(x: int) int { 
         \\  const y = 20
         \\  if (x == 2) {
         \\      return 5
@@ -830,7 +828,7 @@ test "IR to Wasm - Function locals" {
 test "IR to Wasm - Globals" {
     const input =
         \\const x = 5
-        \\const test = fn()void{}
+        \\pub const test = fn()void{}
     ;
     const expected = magic_bytes ++
         "\x01\x04\x01\x60\x00\x00" ++
@@ -844,7 +842,7 @@ test "IR to Wasm - Globals" {
 }
 
 test "IR to Wasm - main func" {
-    const input = "const main = fn()void{}";
+    const input = "pub const main = fn()void{}";
     const expected = magic_bytes ++
         "\x01\x04\x01\x60\x00\x00" ++
         "\x03\x02\x01\x00" ++
@@ -858,10 +856,10 @@ test "IR to Wasm - main func" {
 
 test "IR to Wasm - Function call" {
     const input =
-        \\const addOne = fn(x: int) int {
+        \\pub const addOne = fn(x: int) int {
         \\  return x + 1
         \\}
-        \\const main = fn() void {
+        \\pub const main = fn() void {
         \\  const x = addOne(1)
         \\}
     ;
@@ -879,7 +877,7 @@ test "IR to Wasm - Function call" {
 
 test "IR to Wasm - Loop" {
     const input =
-        \\const loop = fn() void {
+        \\pub const loop = fn() void {
         \\  const x = 5
         \\  mut i = 0
         \\  while(i < x) {
