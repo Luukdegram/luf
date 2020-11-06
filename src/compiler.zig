@@ -334,7 +334,8 @@ pub const Compiler = struct {
                         .{index.left.identifier.value},
                     );
 
-                    const mod: *Module = self.modules.get(symbol.node.declaration.value.import.value.string_lit.value).?;
+                    const mod: *Module = self.modules.get(symbol.node.declaration.value.import.value.string_lit.value) orelse
+                        return Type.function; // Module imported by VM, therefore just return it as a function
 
                     const function_symbol: *Symbol = mod.symbols.get(function_name) orelse
                         return self.fail("Module does not contain function '{}'", index.index.tokenPos(), .{function_name});
@@ -372,7 +373,13 @@ pub const Compiler = struct {
                 .{decl.name.identifier.value},
             );
 
-            symbol.ident = try self.ir.emitIdent(node.tokenPos(), symbol.name, .global, symbol.index);
+            symbol.ident = try self.ir.emitIdent(
+                try self.resolveType(node),
+                node.tokenPos(),
+                symbol.name,
+                .global,
+                symbol.index,
+            );
         }
         for (self.scope.symbols.items()) |entry| {
             const symbol: *Symbol = entry.value;
@@ -483,7 +490,7 @@ pub const Compiler = struct {
             .switch_prong => |prong| self.comileProng(prong),
             .comment => |cmt| self.ir.emitString(.comment, node.tokenPos(), cmt.value),
             .type_def => |td| self.compileTypeDef(td),
-            else => unreachable,
+            .func_arg => |arg| self.compileFuncArg(arg),
         };
     }
 
@@ -496,12 +503,11 @@ pub const Compiler = struct {
 
     /// Compiles a `ast.Node.BlockStatement` node into a list of instructions
     fn compileBlock(self: *Compiler, block: *ast.Node.BlockStatement) !*lir.Inst {
-        var list = try std.ArrayList(*lir.Inst).initCapacity(self.allocator, block.nodes.len);
-        defer list.deinit();
+        const list = try self.ir.gpa.alloc(*lir.Inst, block.nodes.len);
 
-        for (block.nodes) |node| list.appendAssumeCapacity(try self.resolveInst(node));
+        for (block.nodes) |node, i| list[i] = try self.resolveInst(node);
 
-        return self.ir.emitBlock(block.token.start, list.items);
+        return self.ir.emitBlock(block.token.start, list);
     }
 
     /// Compiles an `ast.Node.Infix` node into a `lir.Inst.Double`
@@ -600,6 +606,7 @@ pub const Compiler = struct {
         } else blk: {
             const s = (try self.defineSymbol(decl.name.identifier.value, decl.mutable, node, false, decl.is_pub)).?;
             s.ident = try self.ir.emitIdent(
+                try self.resolveScalarType(decl.value),
                 node.tokenPos(),
                 s.name,
                 switch (s.scope) {
@@ -611,11 +618,9 @@ pub const Compiler = struct {
             break :blk s;
         };
 
-        //const symbol = (try self.defineSymbol(decl.name.identifier.value, decl.mutable, node, false)).?;
-
         const decl_value = try self.resolveInst(decl.value);
 
-        const decl_ir = try self.ir.emitDecl(
+        return try self.ir.emitDecl(
             decl.token.start,
             symbol.name,
             symbol.index,
@@ -627,7 +632,6 @@ pub const Compiler = struct {
             symbol.mutable,
             decl_value,
         );
-        return decl_ir;
     }
 
     /// Compiles an `ast.Node.Identifier` node into a `lir.Inst.Ident`
@@ -643,8 +647,7 @@ pub const Compiler = struct {
     fn compileData(self: *Compiler, ds: *ast.Node.DataStructure) !*lir.Inst {
         const inner_type = try self.resolveScalarType(ds.type_def_key);
 
-        var elements = try std.ArrayList(*lir.Inst).initCapacity(self.allocator, ds.value.?.len);
-        defer elements.deinit();
+        const elements = try self.ir.gpa.alloc(*lir.Inst, ds.value.?.len);
 
         // ds.value will only be null if it's specified as a type rather than an expression
         for (ds.value.?) |element, i| {
@@ -656,13 +659,13 @@ pub const Compiler = struct {
                     .{ inner_type, el_type, i },
                 );
 
-            elements.appendAssumeCapacity(try self.resolveInst(element));
+            elements[i] = try self.resolveInst(element);
         }
 
         return self.ir.emitList(
             if (ds.d_type == .array) .list else .map,
             ds.token.start,
-            elements.items,
+            elements,
         );
     }
 
@@ -682,7 +685,13 @@ pub const Compiler = struct {
                 const func_name = index.index.string_lit.value;
                 var func: *Symbol = module.symbols.get(func_name).?;
 
-                return try self.ir.emitIdent(index.token.start, func.name, .global, func.index);
+                return try self.ir.emitIdent(
+                    try self.resolveType(func.node),
+                    index.token.start,
+                    func.name,
+                    .global,
+                    func.index,
+                );
             }
         }
 
@@ -696,16 +705,10 @@ pub const Compiler = struct {
         try self.createScope(.function);
         self.scope.id.function = function;
 
-        for (function.params) |param| {
-            // function arguments are not mutable by default
-            const symbol = (try self.defineSymbol(param.func_arg.value, false, param, false, false)) orelse
-                return self.fail(
-                "Identifier '{}' has already been declared",
-                function.token.start,
-                .{param.func_arg.value},
-            );
+        const args = try self.ir.gpa.alloc(*lir.Inst, function.params.len);
 
-            symbol.ident = try self.ir.emitIdent(param.tokenPos(), symbol.name, .local, symbol.index);
+        for (function.params) |param, i| {
+            args[i] = try self.resolveInst(param);
         }
 
         const body = try self.resolveInst(function.body orelse return self.fail(
@@ -714,27 +717,67 @@ pub const Compiler = struct {
             .{},
         ));
 
-        const locals = self.scope.symbols.items().len;
+        // get locals
+        const locals = try self.ir.gpa.alloc(*lir.Inst, self.scope.symbols.items().len);
+        for (self.scope.symbols.items()) |entry, i|
+            locals[i] = entry.value.ident;
+
         self.exitScope();
 
-        return self.ir.emitFunc(function.token.start, body, locals, function.params.len);
+        const ret_type = try self.resolveInst(function.ret_type);
+
+        return self.ir.emitFunc(
+            function.token.start,
+            body,
+            locals,
+            args,
+            ret_type,
+        );
+    }
+
+    /// Compiles an `ast.Node.FunctionArgument` into a `lir.Inst.FuncArg`
+    fn compileFuncArg(self: *Compiler, arg: *ast.Node.FunctionArgument) !*lir.Inst {
+        const ty = try self.resolveType(arg.arg_type);
+        const name = arg.value;
+
+        // function arguments are not mutable by default
+        const symbol = (try self.defineSymbol(name, false, arg.arg_type, false, false)) orelse
+            return self.fail(
+            "Identifier '{}' has already been declared",
+            arg.token.start,
+            .{name},
+        );
+
+        symbol.ident = try self.ir.emitIdent(
+            ty,
+            arg.token.start,
+            symbol.name,
+            .local,
+            symbol.index,
+        );
+
+        return self.ir.emitFuncArg(arg.token.start, ty, name);
     }
 
     /// Compiles an `ast.Node.CallExpression` node into a `lir.Inst.Call`
     fn compileCall(self: *Compiler, call: *ast.Node.CallExpression) !*lir.Inst {
         const initial_function_type = try self.resolveType(call.function);
 
-        var args = try std.ArrayList(*lir.Inst).initCapacity(self.allocator, call.arguments.len);
-        defer args.deinit();
+        const args = try self.ir.gpa.alloc(*lir.Inst, call.arguments.len);
 
         // function is either builtin or defined on a type
         // for now this can only be checked at runtime as the compiler is unaware of builtins
         if (call.function == .index and initial_function_type != .module) {
-            for (call.arguments) |arg| {
-                args.appendAssumeCapacity(try self.resolveInst(arg));
+            for (call.arguments) |arg, i| {
+                args[i] = try self.resolveInst(arg);
             }
             const func = try self.resolveInst(call.function);
-            return self.ir.emitCall(call.token.start, func, args.items);
+            return self.ir.emitCall(
+                try self.resolveScalarType(call.function),
+                call.token.start,
+                func,
+                args,
+            );
         }
         //if it's an identifier, we first do a lookup to retrieve it's declaration node
         //then return the function declaration. else we return the function itself
@@ -763,7 +806,11 @@ pub const Compiler = struct {
                 const module_name = symbol.node.declaration.value.import.value.string_lit.value;
                 if (self.modules.get(module_name)) |mod| {
                     const decl_symbol: *Symbol = mod.symbols.get(function_name) orelse
-                        return self.fail("Module does not contain function '{}'", call.function.tokenPos(), .{function_name});
+                        return self.fail(
+                        "Module does not contain function '{}'",
+                        call.function.tokenPos(),
+                        .{function_name},
+                    );
 
                     break :blk decl_symbol.node.declaration.value.func_lit;
                 } else {
@@ -774,13 +821,18 @@ pub const Compiler = struct {
             }
 
             // not a module, so expect a library
-            for (call.arguments) |arg| {
-                args.appendAssumeCapacity(try self.resolveInst(arg));
+            for (call.arguments) |arg, i| {
+                args[i] = try self.resolveInst(arg);
             }
 
             const func = try self.resolveInst(call.function);
 
-            return self.ir.emitCall(call.token.start, func, args.items);
+            return self.ir.emitCall(
+                try self.resolveScalarType(call.function),
+                call.token.start,
+                func,
+                args,
+            );
         };
 
         if (function_node.params.len != call.arguments.len)
@@ -799,11 +851,16 @@ pub const Compiler = struct {
                     arg.tokenPos(),
                     .{ func_arg_type, arg_type },
                 );
-            args.appendAssumeCapacity(try self.resolveInst(arg));
+            args[i] = try self.resolveInst(arg);
         }
 
         const func = try self.resolveInst(call.function);
-        return self.ir.emitCall(call.token.start, func, args.items);
+        return self.ir.emitCall(
+            try self.resolveScalarType(call.function),
+            call.token.start,
+            func,
+            args,
+        );
     }
 
     /// Compiles an `ast.Node.ReturnStatement` into a `lir.Inst.Single`
@@ -877,7 +934,7 @@ pub const Compiler = struct {
             );
 
             // generate an identifier to attach to the symbol
-            symbol.ident = try self.ir.emitIdent(i.tokenPos(), symbol.name, .local, symbol.index);
+            symbol.ident = try self.ir.emitIdent(.integer, i.tokenPos(), symbol.name, .local, symbol.index);
             break :blk symbol.ident;
         } else null;
 
@@ -894,7 +951,13 @@ pub const Compiler = struct {
             .{loop.capture.identifier.value},
         );
 
-        capture.ident = try self.ir.emitIdent(loop.capture.tokenPos(), capture.name, .local, capture.index);
+        capture.ident = try self.ir.emitIdent(
+            try self.resolveScalarType(capture.node),
+            loop.capture.tokenPos(),
+            capture.name,
+            .local,
+            capture.index,
+        );
 
         const body = try self.resolveInst(loop.block);
 
@@ -987,7 +1050,13 @@ pub const Compiler = struct {
                     symbol.is_pub,
                     symbol.index,
                 );
-                new_symbol.?.ident = try self.ir.emitIdent(symbol.node.tokenPos(), symbol.name, .global, symbol.index);
+                new_symbol.?.ident = try self.ir.emitIdent(
+                    try self.resolveType(symbol.node),
+                    symbol.node.tokenPos(),
+                    symbol.name,
+                    .global,
+                    symbol.index,
+                );
             }
 
             // we can't do it in the loop above because all symbols need to be defined first so we
@@ -1026,10 +1095,9 @@ pub const Compiler = struct {
 
     /// Compiles an `ast.Node.Enum` node into a `lir.Inst.Enum`
     fn compileEnum(self: *Compiler, enm: *ast.Node.EnumLiteral) !*lir.Inst {
-        var list = try std.ArrayList(*lir.Inst).initCapacity(self.allocator, enm.nodes.len);
-        defer list.deinit();
+        const list = try self.ir.gpa.alloc(*lir.Inst, enm.nodes.len);
 
-        for (enm.nodes) |n| {
+        for (enm.nodes) |n, i| {
             if (n != .identifier)
                 return self.fail(
                     "Expected an identifier but found type '{}' inside the Enum declaration",
@@ -1037,16 +1105,15 @@ pub const Compiler = struct {
                     .{try self.resolveType(n)},
                 );
 
-            list.appendAssumeCapacity(try self.ir.emitString(.string, n.tokenPos(), n.identifier.value));
+            list[i] = try self.ir.emitString(.string, n.tokenPos(), n.identifier.value);
         }
 
-        return self.ir.emitEnum(enm.token.start, list.items);
+        return self.ir.emitEnum(enm.token.start, list);
     }
 
     /// Compiles an `ast.Node.SwitchLiteral` into a `lir.Inst.Switch`
     fn compileSwitch(self: *Compiler, sw: *ast.Node.SwitchLiteral) !*lir.Inst {
-        var prongs = try std.ArrayList(*lir.Inst).initCapacity(self.allocator, sw.prongs.len);
-        defer prongs.deinit();
+        const prongs = try self.ir.gpa.alloc(*lir.Inst, sw.prongs.len);
 
         const capture = try self.resolveInst(sw.capture);
 
@@ -1055,11 +1122,11 @@ pub const Compiler = struct {
         if (capture_type != .integer and capture_type != .string)
             return self.fail("Switches are only allowed for integers, enums and strings. Found type '{}'", sw.capture.tokenPos(), .{capture_type});
 
-        for (sw.prongs) |p| {
-            prongs.appendAssumeCapacity(try self.resolveInst(p));
+        for (sw.prongs) |p, i| {
+            prongs[i] = try self.resolveInst(p);
         }
 
-        return self.ir.emitSwitch(sw.token.start, capture, prongs.items);
+        return self.ir.emitSwitch(sw.token.start, capture, prongs);
     }
 
     /// Compiles an `ast.Node.SwitchProng` into a `lir.Inst.Double`
@@ -1081,7 +1148,7 @@ pub const Compiler = struct {
     /// This is only used for the compiler to ensure type safety
     /// and generates a no op instruction that codegen can ignore
     fn compileTypeDef(self: *Compiler, node: *ast.Node.TypeDef) !*lir.Inst {
-        return self.ir.emitNoOp(node.token.start, .type_def);
+        return self.ir.emitType(node.getType().?, node.token.start);
     }
 };
 
