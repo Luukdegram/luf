@@ -2,7 +2,7 @@ pub const std = @import("std");
 pub const lir = @import("ir.zig");
 pub const LufType = @import("value.zig").Value.Type;
 const Allocator = std.mem.Allocator;
-const leb = std.debug.leb;
+const leb = std.leb;
 const testing = std.testing;
 
 const Op = enum(u8) {
