@@ -15,7 +15,7 @@ The goal of this project is to create a simple, expressive scripting language th
 [![Windows](https://github.com/Luukdegram/luf/workflows/Windows/badge.svg)](https://github.com/Luukdegram/luf/actions) [![MacOS](https://github.com/Luukdegram/luf/workflows/MacOS/badge.svg)](https://github.com/Luukdegram/luf/actions)
 
 I try to keep up with the latest version of Zig to be able to use all of its features (and bug fixes).
-Currently, you'll need atleast version 0.6.0+12ce6eb8f to build Luf.
+Currently, you'll need atleast version 0.7.1 to build Luf.
 
 ### Building
 
