@@ -1,5 +1,5 @@
 const std = @import("std");
-const Value = @import("value.zig").Value;
+const Value = @import("Value.zig");
 const Gc = @import("gc.zig").GarbageCollector;
 
 pub const BuiltinError = error{ OutOfMemory, UnsupportedType, MismatchingTypes };

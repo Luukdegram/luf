@@ -1302,7 +1302,7 @@ test "Array index" {
 }
 
 test "Map Literal" {
-    const Type = @import("value.zig").Value.Type;
+    const Type = @import("Value.zig").Type;
     const input = "[]string:int{\"foo\": 1, \"bar\": 5}";
     const allocator = testing.allocator;
 
@@ -1453,7 +1453,7 @@ test "Enum" {
 }
 
 test "Type definitions" {
-    const Type = @import("value.zig").Value.Type;
+    const Type = @import("Value.zig").Type;
 
     const cases = [_][]const u8{
         "fn(x: int, y: int)void{}",

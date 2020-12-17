@@ -1,6 +1,6 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-const Value = @import("value.zig").Value;
+const Value = @import("Value.zig");
 const Vm = @import("vm.zig").Vm;
 
 const root = @import("root");

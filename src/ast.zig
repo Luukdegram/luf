@@ -1,7 +1,7 @@
 const std = @import("std");
 const Token = @import("token.zig").Token;
 const Errors = @import("error.zig").Errors;
-const Type = @import("value.zig").Value.Type;
+const Type = @import("Value.zig").Type;
 
 //! All AST Nodes are defined here
 //! The `Parser` parses all of the `Lexer`'s tokens into these nodes

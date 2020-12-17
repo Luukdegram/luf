@@ -1,5 +1,5 @@
 const std = @import("std");
-const Type = @import("value.zig").Value.Type;
+const Type = @import("Value.zig").Type;
 const Allocator = std.mem.Allocator;
 
 //! This file contains Luf's typed intermediate representation

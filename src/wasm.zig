@@ -1,6 +1,6 @@
 pub const std = @import("std");
 pub const lir = @import("ir.zig");
-pub const LufType = @import("value.zig").Value.Type;
+pub const LufType = @import("Value.zig").Type;
 const Allocator = std.mem.Allocator;
 const leb = std.leb;
 const testing = std.testing;
