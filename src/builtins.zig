@@ -1,6 +1,6 @@
 const std = @import("std");
 const Value = @import("Value.zig");
-const Gc = @import("gc.zig").GarbageCollector;
+const Gc = @import("Gc.zig");
 
 pub const BuiltinError = error{ OutOfMemory, UnsupportedType, MismatchingTypes };
 const BuiltinFn = Value.NativeFn;

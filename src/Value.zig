@@ -1,7 +1,7 @@
 const std = @import("std");
 const ast = @import("ast.zig");
 const Allocator = std.mem.Allocator;
-const GarbageCollector = @import("gc.zig").GarbageCollector;
+const Gc = @import("Gc.zig");
 
 //! `Value` represents a primitive value for Luf
 
@@ -28,7 +28,7 @@ pub var Nil = Value{ .l_type = .nil };
 
 /// Signature for native functions, has access to garbage collector so values created
 /// by a native function can be cleaned up as well
-pub const NativeFn = fn (gc: *GarbageCollector, args: []*Value) anyerror!*Value;
+pub const NativeFn = fn (gc: *Gc, args: []*Value) anyerror!*Value;
 
 /// Build in types supported by Luf
 pub const Type = enum {
@@ -186,7 +186,7 @@ pub fn toZig(self: *Value, comptime T: type) error{InvalidType}!T {
 
 /// Creates a Luf `Value` from a Zig value
 /// Memory is owned by caller and must be freed by caller
-pub fn fromZig(gc: *GarbageCollector, val: anytype) !*Value {
+pub fn fromZig(gc: *Gc, val: anytype) !*Value {
     switch (@TypeOf(val)) {
         // todo have a global void value
         void => return &Void,
@@ -234,7 +234,7 @@ pub fn fromZig(gc: *GarbageCollector, val: anytype) !*Value {
                     // this is needed as `val` is not accessible from inner function
                     var innerFunc: @TypeOf(val) = undefined;
 
-                    fn call(_gc: *GarbageCollector, args: []*Value) !*Value {
+                    fn call(_gc: *Gc, args: []*Value) !*Value {
                         if (args.len != args_len) return error.IncorrectArgumentCount;
 
                         const ArgsTuple = comptime blk: {
@@ -325,7 +325,7 @@ pub const Integer = struct {
 
     /// Creates a new `Integer` using the given `val`. Returns
     /// the pointer to its `Value`
-    pub fn create(gc: *GarbageCollector, val: i64) !*Value {
+    pub fn create(gc: *Gc, val: i64) !*Value {
         return try gc.newValue(
             Integer,
             .{
@@ -351,7 +351,7 @@ pub const String = struct {
 
     /// Creates a new `Integer` using the given `val`. Returns
     /// the pointer to its `Value`
-    pub fn create(gc: *GarbageCollector, val: []const u8) !*Value {
+    pub fn create(gc: *Gc, val: []const u8) !*Value {
         return try gc.newValue(
             String,
             .{
@@ -379,7 +379,7 @@ pub const Module = struct {
     base: Value,
     value: []const u8,
 
-    pub fn create(gc: *GarbageCollector, val: []const u8) !*Value {
+    pub fn create(gc: *Gc, val: []const u8) !*Value {
         return try gc.newValue(
             Module,
             .{
@@ -410,7 +410,7 @@ pub const Function = struct {
     /// Creates a new `Integer` using the given `val`. Returns
     /// the pointer to its `Value`
     pub fn create(
-        gc: *GarbageCollector,
+        gc: *Gc,
         name: ?[]const u8,
         locals: usize,
         arg_len: usize,
@@ -441,7 +441,7 @@ pub const List = struct {
 
     pub const ListType = std.ArrayListUnmanaged(*Value);
 
-    pub fn create(gc: *GarbageCollector, len: ?usize) !*Value {
+    pub fn create(gc: *Gc, len: ?usize) !*Value {
         var self = List{
             .base = .{ .l_type = .list, .next = null, .is_marked = false },
             .value = ListType{},
@@ -463,7 +463,7 @@ pub const Map = struct {
 
     pub const MapType = std.ArrayHashMapUnmanaged(*Value, *Value, hash, eql, true);
 
-    pub fn create(gc: *GarbageCollector, len: ?usize) !*Value {
+    pub fn create(gc: *Gc, len: ?usize) !*Value {
         var self = Map{
             .base = .{ .l_type = .map, .next = null, .is_marked = false },
             .value = MapType{},
@@ -494,7 +494,7 @@ pub const Range = struct {
     start: i64,
     end: i64,
 
-    pub fn create(gc: *GarbageCollector, start: i64, end: i64) !*Value {
+    pub fn create(gc: *Gc, start: i64, end: i64) !*Value {
         return try gc.newValue(
             Range,
             .{
@@ -515,7 +515,7 @@ pub const Enum = struct {
     value: [][]const u8,
 
     /// Creates a new `Enum` value. Takes ownership of the memory of the slice
-    pub fn create(gc: *GarbageCollector, enums: [][]const u8) !*Value {
+    pub fn create(gc: *Gc, enums: [][]const u8) !*Value {
         for (enums) |*enm| enm.* = try gc.gpa.dupe(u8, enm.*);
         return try gc.newValue(
             Enum,
@@ -539,7 +539,7 @@ pub const Iterable = struct {
     index: usize,
     value: *Value,
 
-    pub fn create(gc: *GarbageCollector, expose: bool, index: usize, value: *Value) !*Value {
+    pub fn create(gc: *Gc, expose: bool, index: usize, value: *Value) !*Value {
         return try gc.newValue(
             Iterable,
             .{
@@ -557,7 +557,7 @@ pub const Iterable = struct {
 
     /// Returns a new Value, returns null if end of iterator is reached
     /// This creates a copy of the actual value
-    pub fn next(self: *@This(), gc: *GarbageCollector) !?*Value {
+    pub fn next(self: *@This(), gc: *Gc) !?*Value {
         switch (self.value.l_type) {
             .list => {
                 const list = self.value.toList().value;

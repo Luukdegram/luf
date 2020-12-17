@@ -9,7 +9,7 @@ const BuiltinError = _builtin.BuiltinError;
 const testing = std.testing;
 const Allocator = std.mem.Allocator;
 const Errors = @import("error.zig").Errors;
-const Gc = @import("gc.zig").GarbageCollector;
+const Gc = @import("Gc.zig");
 
 //! The Virtual Machine of Luf is stack-based.
 //! Currently the stack has a size of 2048 (pre-allocated)
