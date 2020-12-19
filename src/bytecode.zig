@@ -1112,7 +1112,7 @@ test "IR to Bytecode - Control flow" {
             },
         },
         .{
-            .input = "for(0..1)|x|{}",
+            .input = "for x: 0..1 {}",
             .opcodes = &[_]Opcode{
                 .load_integer,
                 .load_integer,
@@ -1127,7 +1127,7 @@ test "IR to Bytecode - Control flow" {
             },
         },
         .{
-            .input = "for(0..1)|x, i|{}",
+            .input = "for x, i: 0..1 {}",
             .opcodes = &[_]Opcode{
                 .load_integer,
                 .load_integer,

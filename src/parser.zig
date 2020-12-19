@@ -663,24 +663,22 @@ pub const Parser = struct {
             .index = undefined,
             .block = undefined,
         };
-        try self.expectPeek(.left_parenthesis);
-        self.next();
-        node.iter = try self.parseExpression(.lowest);
-
-        try self.expectPeek(.right_parenthesis);
-        try self.expectPeek(.pipe);
         self.next();
 
         node.capture = try self.parseIdentifier();
 
-        // incase there's a 2nd capture for the index identifier i.e. |id, index|
+        // Check if index capture exists i.e. for x, i: range {}
         if (self.peekIsType(.comma)) {
-            self.next();
-            self.next();
+            self.next(); // skip comma
+            self.next(); // next identifier
             node.index = try self.parseIdentifier();
         }
 
-        try self.expectPeek(.pipe);
+        try self.expectPeek(.colon);
+
+        self.next();
+        node.iter = try self.parseExpression(.lowest);
+
         try self.expectPeek(.left_brace);
 
         node.block = try self.parseBlockStatement();
@@ -1382,7 +1380,7 @@ test "Comment expression" {
 }
 
 test "For loop" {
-    const input = "for(x)|id,i|{ id }";
+    const input = "for id, i: x { id }";
     const allocator = testing.allocator;
 
     var errors = Errors.init(allocator);

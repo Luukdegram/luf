@@ -1,10 +1,10 @@
 const list = []int{1,2,3}
 mut sum = 0
-for(list) |element, index| {
+for element, index: list {
     sum += element + index
 }
 
-for(20..50) |i| {
+for i: 20..50 {
     sum += i
 }
 

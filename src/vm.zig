@@ -527,9 +527,7 @@ pub const Vm = struct {
         var list_type: Type = undefined;
         var i: usize = 1;
 
-        while (i <= len) : ({
-            i += 1;
-        }) {
+        while (i <= len) : (i += 1) {
             const val = self.pop();
 
             if (i == 1)
@@ -555,9 +553,7 @@ pub const Vm = struct {
         var value_type: Type = undefined;
         var i: usize = 0;
 
-        while (i < len) : ({
-            i += 1;
-        }) {
+        while (i < len) : (i += 1) {
             const value = self.pop();
             const key = self.pop();
 
@@ -1239,7 +1235,7 @@ test "Tail recursion" {
 test "Basic For loop" {
     const input =
         \\mut sum = 0
-        \\for([]int{1, 3, 5, 7, 9}) |item| {
+        \\for item: []int{1, 3, 5, 7, 9} {
         \\  sum += item
         \\}
         \\sum
@@ -1254,7 +1250,7 @@ test "Basic For loop" {
 test "For loop continue + break" {
     const input =
         \\mut sum = 0
-        \\for([]int{1, 3, 5, 7, 9}) |item, i| {
+        \\for item, i: []int{1, 3, 5, 7, 9} {
         \\  if (item == 3) {
         \\      continue
         \\  }
@@ -1275,7 +1271,7 @@ test "For loop continue + break" {
 test "Range" {
     const input =
         \\mut sum = 0
-        \\for(1..100) |e, i| {
+        \\for e, i: 1..100 {
         \\  if (e % 2 == 0) {
         \\      continue
         \\  }
@@ -1292,7 +1288,7 @@ test "Range" {
 }
 
 test "For loop - String" {
-    const input = "mut result = \"hello\" const w = \"world\" for(w)|c, i|{result+=c}result";
+    const input = "mut result = \"hello\" const w = \"world\" for c, i: w {result+=c}result";
     var vm = try Vm.init(testing.allocator);
     defer vm.deinit();
     try vm.compileAndRun(input);
