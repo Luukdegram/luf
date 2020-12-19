@@ -798,9 +798,8 @@ pub const Vm = struct {
         const val = self.pop();
 
         if (val.isType(.native) or val.isType(.module)) return self.execNativeFuncCall(val);
-
         if (val.l_type != .function)
-            return self.fail("Unknown symbol for function call");
+            return self.push(val); //put it back on stack
 
         if (arg_len != val.toFunction().arg_len) return self.fail("Mismatching argument length");
 
@@ -1186,17 +1185,17 @@ test "Functions with arguments" {
 
 test "Builtins" {
     const test_cases = .{
-        // .{ .input = "\"Hello world\".len", .expected = 11 },
-        // .{ .input = "[]int{1,5,2}.len", .expected = 3 },
-        // .{ .input = "const x = []int{1} x.add(2) x.len", .expected = 2 },
-        // .{ .input = "const x = []int{1, 2} x.pop() x.len", .expected = 1 },
+        .{ .input = "\"Hello world\".len", .expected = 11 },
+        .{ .input = "[]int{1,5,2}.len", .expected = 3 },
+        .{ .input = "const x = []int{1} x.add(2) x.len", .expected = 2 },
+        .{ .input = "const x = []int{1, 2} x.pop() x.len", .expected = 1 },
     };
 
     inline for (test_cases) |case| {
         var vm = try Vm.init(testing.allocator);
         defer vm.deinit();
-        try vm.compileAndRun(case.input);
 
+        try vm.compileAndRun(case.input);
         testing.expectEqual(@as(i64, case.expected), vm.peek().toInteger().value);
         testing.expectEqual(@as(usize, 0), vm.sp);
     }

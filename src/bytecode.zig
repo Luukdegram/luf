@@ -424,8 +424,6 @@ pub const Instructions = struct {
 
             if (self.lastIs(.pop)) self.pop();
         }
-        // else
-        // try self.emit(.load_void);
 
         self.patch(jump_label, self.len());
     }
