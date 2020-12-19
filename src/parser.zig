@@ -144,6 +144,7 @@ pub const Parser = struct {
             .for_loop => self.parseFor(),
             .@"break" => self.parseBreak(),
             .@"continue" => self.parseContinue(),
+            .@"if" => self.parseIfExpression(),
             else => self.parseExpressionStatement(),
         };
     }
@@ -236,7 +237,7 @@ pub const Parser = struct {
             .left_bracket => try self.parseDataStructure(false),
             .nil => try self.parseNil(),
             .@"enum" => try self.parseEnum(),
-            else => return self.fail("Unexpected token", self.current_token.start, .{}),
+            else => return self.fail("Unexpected token: {}", self.current_token.start, .{self.current_token.token_type}),
         };
 
         while (prec.val() < findPrecedence(self.peek_token.token_type).val()) {
@@ -369,12 +370,9 @@ pub const Parser = struct {
             .true_pong = undefined,
             .false_pong = undefined,
         };
-        try self.expectPeek(.left_parenthesis);
 
         self.next();
         exp.condition = try self.parseExpression(.lowest);
-
-        try self.expectPeek(.right_parenthesis);
 
         try self.expectPeek(.left_brace);
 
@@ -1104,14 +1102,14 @@ test "Boolean expression" {
 
 test "If expression" {
     const allocator = testing.allocator;
-    const input = "if (x < y) { x }";
+    const input = "if x < y { x }";
     var errors = Errors.init(allocator);
     defer errors.deinit();
     const tree = try parse(allocator, input, &errors);
     defer tree.deinit();
 
     testing.expect(tree.nodes.len == 1);
-    const if_exp = tree.nodes[0].expression.value.if_expression;
+    const if_exp = tree.nodes[0].if_expression;
     testing.expect(if_exp.true_pong.block_statement.nodes[0] == .expression);
     testing.expectEqualSlices(
         u8,
@@ -1122,14 +1120,14 @@ test "If expression" {
 
 test "If else expression" {
     const allocator = testing.allocator;
-    const input = "if (x < y) { x } else { y }";
+    const input = "if x < y { x } else { y }";
     var errors = Errors.init(allocator);
     defer errors.deinit();
     const tree = try parse(allocator, input, &errors);
     defer tree.deinit();
 
     testing.expect(tree.nodes.len == 1);
-    const if_exp = tree.nodes[0].expression.value.if_expression;
+    const if_exp = tree.nodes[0].if_expression;
     testing.expect(if_exp.true_pong.block_statement.nodes[0] == .expression);
     testing.expectEqualSlices(
         u8,
@@ -1147,14 +1145,14 @@ test "If else expression" {
 
 test "If else-if expression" {
     const allocator = testing.allocator;
-    const input = "if (x < y) { x } else if(x == 0) { y } else { z }";
+    const input = "if x < y { x } else if x == 0 { y } else { z }";
     var errors = Errors.init(allocator);
     defer errors.deinit();
     const tree = try parse(allocator, input, &errors);
     defer tree.deinit();
 
     testing.expect(tree.nodes.len == 1);
-    const if_exp = tree.nodes[0].expression.value.if_expression;
+    const if_exp = tree.nodes[0].if_expression;
     testing.expect(if_exp.true_pong.block_statement.nodes[0] == .expression);
     testing.expectEqualSlices(
         u8,
@@ -1162,8 +1160,7 @@ test "If else-if expression" {
         "x",
     );
     testing.expect(if_exp.false_pong != null);
-    testing.expect(if_exp.false_pong.?.expression.value == .if_expression);
-    testing.expect(if_exp.false_pong.?.expression.value.if_expression.false_pong != null);
+    testing.expect(if_exp.false_pong.?.if_expression.false_pong != null);
 }
 
 test "Function literal" {

@@ -1229,11 +1229,11 @@ test "Conditional" {
     const test_cases = .{
         .{
             .input = "if (true) { 5 } 10",
-            .tags = &[_]lir.Inst.Tag{ .expr, .expr },
+            .tags = &[_]lir.Inst.Tag{ .condition, .expr },
         },
         .{
             .input = "if (true) { 5 } else { 7 } 10",
-            .tags = &[_]lir.Inst.Tag{ .expr, .expr },
+            .tags = &[_]lir.Inst.Tag{ .condition, .expr },
         },
     };
 

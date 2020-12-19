@@ -423,8 +423,9 @@ pub const Instructions = struct {
             try self.gen(block);
 
             if (self.lastIs(.pop)) self.pop();
-        } else
-            try self.emit(.load_void);
+        }
+        // else
+        // try self.emit(.load_void);
 
         self.patch(jump_label, self.len());
     }
@@ -630,6 +631,25 @@ pub const ByteCode = struct {
         }
         self.allocator.free(self.instructions);
         self.* = undefined;
+    }
+
+    /// Dumps human-readable bytecode representation to the given `writer` interface
+    pub fn dump(self: ByteCode, writer: anytype) @TypeOf(writer).Error!void {
+        for (self.instructions) |inst| {
+            switch (inst) {
+                .op => |op| try writer.print("{}\n", .{op}),
+                .ptr => |ptr| try writer.print("{} {}\n", .{ ptr.op, ptr.pos }),
+                .integer => |int| try writer.print("{} {d}\n", .{ inst.getOp(), int }),
+                .string => |string| try writer.print("{} {s}\n", .{ inst.getOp(), string }),
+                .function => |func| try writer.print("{} {s} {d} {d} {d}\n", .{
+                    inst.getOp(),
+                    func.name,
+                    func.locals,
+                    func.arg_len,
+                    func.entry,
+                }),
+            }
+        }
     }
 };
 
@@ -1009,9 +1029,7 @@ test "IR to Bytecode - Control flow" {
                 .load_integer,
                 .jump,
                 .load_integer,
-                .pop,
                 .load_integer,
-                .pop,
             },
         },
         .{
