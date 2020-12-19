@@ -1199,9 +1199,9 @@ test "Builtins" {
 
 test "While loop" {
     const test_cases = .{
-        .{ .input = "mut i = 0 while (i > 10) {i = 10} i", .expected = 0 },
-        .{ .input = "mut i = 0 while (i < 10) {i = 10} i", .expected = 10 },
-        .{ .input = "mut i = 0 while (i < 10) { if(i==5) { break } i = 5} i", .expected = 5 },
+        .{ .input = "mut i = 0 while i > 10 {i = 10} i", .expected = 0 },
+        .{ .input = "mut i = 0 while i < 10 {i = 10} i", .expected = 10 },
+        .{ .input = "mut i = 0 while i < 10 { if i==5 { break } i = 5} i", .expected = 5 },
     };
 
     inline for (test_cases) |case| {

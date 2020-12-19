@@ -636,14 +636,9 @@ pub const Parser = struct {
             .block = undefined,
         };
 
-        try self.expectPeek(.left_parenthesis);
-
-        // skip ( token
         self.next();
 
         node.condition = try self.parseExpression(.lowest);
-
-        try self.expectPeek(.right_parenthesis);
 
         try self.expectPeek(.left_brace);
 
@@ -1328,7 +1323,7 @@ test "Map Literal" {
 }
 
 test "While loop" {
-    const input = "while(x < y) { x }";
+    const input = "while x < y { x }";
     const allocator = testing.allocator;
 
     var errors = Errors.init(allocator);

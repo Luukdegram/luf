@@ -1309,7 +1309,7 @@ test "Functions" {
 }
 
 test "Loop" {
-    const input = "while (true) { 10 }";
+    const input = "while true { 10 }";
 
     const alloc = testing.allocator;
     var err = errors.Errors.init(alloc);

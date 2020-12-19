@@ -1020,7 +1020,7 @@ test "IR to Bytecode - Non control flow" {
 test "IR to Bytecode - Control flow" {
     const test_cases = .{
         .{
-            .input = "if (true) { 5 } else { 7 } 10",
+            .input = "if true { 5 } else { 7 } 10",
             .opcodes = &[_]Opcode{
                 .load_true,
                 .jump_false,
@@ -1101,7 +1101,7 @@ test "IR to Bytecode - Control flow" {
             },
         },
         .{
-            .input = "while(true){break continue}",
+            .input = "while true {break continue}",
             .opcodes = &[_]Opcode{
                 .load_true,
                 .jump_false,
