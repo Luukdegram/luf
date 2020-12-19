@@ -132,6 +132,7 @@ pub fn next(self: *Lexer) Token {
         },
         '%' => .percent,
         '~' => .tilde,
+        '?' => .query,
         0 => .eof,
         else => |c| if (isLetter(c)) {
             const start = self.position;

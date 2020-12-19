@@ -45,6 +45,7 @@ pub const Type = enum {
     range,
     _enum,
     _void,
+    optional,
 
     /// Returns Luf's Type struct representing the enum value
     pub fn LufType(self: Type) type {
@@ -62,6 +63,7 @@ pub const Type = enum {
             .range => Range,
             ._enum => Enum,
             ._void => void,
+            .optional => Optional,
         };
     }
 
@@ -80,6 +82,7 @@ pub const Type = enum {
             Iterable => .iterable,
             Range => .range,
             Enum => ._enum,
+            Optional => .optional,
             else => unreachable,
         };
     }
@@ -157,6 +160,12 @@ pub fn toIterable(self: *Value) *Iterable {
 /// User must ensure Value contains correct type
 pub fn toModule(self: *Value) *Module {
     return @fieldParentPtr(Module, "base", self);
+}
+
+/// Casts `Value` to `Optional`
+/// User must ensure Value contains correct type
+pub fn toOptional(self: *Value) *Optional {
+    return @fieldParentPtr(Optional, "base", self);
 }
 
 /// Returns true if the `Type` of the given `Value` is equal
@@ -588,6 +597,26 @@ pub const Iterable = struct {
     }
 };
 
+pub const Optional = struct {
+    base: Value,
+    child: ?*Value,
+
+    pub fn create(gc: *Gc, value: ?*Value) !*Value {
+        return try gc.newValue(
+            Optional,
+            .{
+                .base = .{ .l_type = .optional, .next = null, .is_marked = false },
+                .child = value,
+            },
+        );
+    }
+
+    /// Only destroys itself, not the pointer to the child value
+    pub fn destroy(self: *Optional, gpa: *Allocator) void {
+        gpa.destroy(self);
+    }
+};
+
 fn hash(key: *Value) u32 {
     const hashFn = std.hash.autoHash;
     var hasher = std.hash.Wyhash.init(0);
@@ -704,6 +733,12 @@ pub fn print(self: *Value, writer: anytype) @TypeOf(writer).Error!void {
                     try writer.writeAll(",\n");
             }
             try writer.writeAll("}\n");
+        },
+        .optional => {
+            if (self.toOptional().child) |child|
+                try self.print(child)
+            else
+                try writer.writeAll("nil");
         },
         else => try writer.writeAll("void"),
     }

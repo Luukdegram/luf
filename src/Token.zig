@@ -59,6 +59,7 @@ pub const TokenType = enum {
     left_bracket,
     right_bracket,
     colon,
+    query,
     // keywords
     function,
     mutable,
@@ -162,6 +163,7 @@ pub fn fmtString(token_type: comptime Token.TokenType) []const u8 {
         .left_bracket => "[",
         .right_bracket => "]",
         .colon => ":",
+        .query => "?",
         // keywords
         .function => "fn",
         .mutable => "mut",

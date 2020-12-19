@@ -439,6 +439,7 @@ pub const Node = union(NodeType) {
                 .string_type => .string,
                 .int_type => .integer,
                 .void_type => ._void,
+                .query => .optional,
                 .function => self.value.?.getType(),
                 .left_bracket => self.value.?.getType(),
                 else => null,

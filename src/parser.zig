@@ -853,6 +853,10 @@ pub const Parser = struct {
             .bool_type, .int_type, .string_type, .void_type => {},
             .left_bracket => node.value = try self.parseDataStructure(true),
             .function => node.value = try self.parseFunctionLiteral(false),
+            .query => node.value = blk: {
+                self.next();
+                break :blk try self.parseTypeExpression();
+            },
             else => return self.fail("Unexpected token, expected a type definition", self.current_token.start, .{}),
         }
 
@@ -1449,6 +1453,7 @@ test "Type definitions" {
         "fn(x: int, y: int)void{}",
         "const x: int = 10",
         "fn(x: []int)fn()string{}",
+        "mut y: ?int = nil",
     };
 
     const allocator = testing.allocator;
@@ -1478,4 +1483,13 @@ test "Type definitions" {
     testing.expectEqual(Type.list, array_type.?);
     testing.expectEqual(Type.integer, scalar_type.?);
     testing.expectEqual(Type.string, ret_type.?);
+
+    const optional = try parse(allocator, cases[3], &errors);
+    defer optional.deinit();
+
+    const optional_type = optional.nodes[0].getType();
+    const optional_child_type = optional.nodes[0].getInnerType();
+
+    testing.expectEqual(Type.optional, optional_type.?);
+    testing.expectEqual(Type.integer, optional_child_type.?);
 }
