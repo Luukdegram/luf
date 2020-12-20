@@ -581,28 +581,30 @@ pub const Compiler = struct {
     fn compileDecl(self: *Compiler, decl: *ast.Node.Declaration, node: ast.Node) !*lir.Inst {
         if (decl.type_def) |td| {
             const explicit_type = try self.resolveType(td);
-            var rhs_type = try self.resolveType(decl.value);
-            // if function, get the return type of the function
-            if (rhs_type == .function or rhs_type == .module) rhs_type = try self.resolveScalarType(decl.value);
 
-            if (explicit_type != rhs_type)
-                return self.fail(
-                    "Expected type {} but found type {}",
-                    decl.value.tokenPos(),
-                    .{ explicit_type, rhs_type },
-                );
+            const rhs_type = blk: {
+                const tmp = try self.resolveType(decl.value);
+
+                // if function, get the return type of the function
+                if (tmp == .function or tmp == .module) break :blk try self.resolveScalarType(decl.value);
+
+                break :blk tmp;
+            };
+
+            if (rhs_type == .nil and explicit_type != .optional)
+                return self.fail("Cannot assign `nil` value to non-optional", decl.value.tokenPos(), .{})
+            else if (explicit_type != .optional and explicit_type != rhs_type) {
+                return self.fail("Expected type {} but found type {}", decl.value.tokenPos(), .{ explicit_type, rhs_type });
+            }
         }
 
         const symbol = if (self.resolveSymbol(self.scope, decl.name.identifier.value)) |s| blk: {
             if (decl.value == .func_lit and s.forward_declared) {
                 s.forward_declared = false;
                 break :blk s;
-            } else
-                return self.fail(
-                    "Identifier '{}' has already been declared",
-                    decl.token.start,
-                    .{decl.name.identifier.value},
-                );
+            } else {
+                return self.fail("Identifier '{}' has already been declared", decl.token.start, .{decl.name.identifier.value});
+            }
         } else blk: {
             const s = (try self.defineSymbol(decl.name.identifier.value, decl.mutable, node, false, decl.is_pub)).?;
             s.ident = try self.ir.emitIdent(
@@ -984,7 +986,18 @@ pub const Compiler = struct {
 
             const right_type = try self.resolveType(asg.right);
             const left_type = try self.resolveType(symbol.node);
-            if (left_type != right_type)
+
+            if (right_type == .nil and left_type != .optional) {
+                return self.fail("Cannot assign `nil` to non-optional", asg.token.start, .{});
+            } else if (left_type == .optional) {
+                const child_type = try self.resolveScalarType(symbol.node);
+                if (child_type != right_type and right_type != .nil) {
+                    return self.fail("Assignment expected type '{}' but found type '{}'", asg.token.start, .{
+                        child_type,
+                        right_type,
+                    });
+                }
+            } else if (left_type != right_type)
                 return self.fail("Assignment expected type '{}' but found type '{}'", asg.token.start, .{
                     left_type,
                     right_type,
@@ -1159,7 +1172,10 @@ fn testInput(input: []const u8, expected: []const lir.Inst.Tag) !void {
     var err = errors.Errors.init(alloc);
     defer err.deinit();
 
-    var result = try compile(alloc, input, &err);
+    var result = compile(alloc, input, &err) catch |_err| {
+        try err.write(input, std.io.getStdOut().writer());
+        return _err;
+    };
     defer result.deinit();
 
     testing.expectEqual(expected.len, result.instructions.len);
@@ -1346,4 +1362,27 @@ test "Assign" {
     inline for (test_cases) |case| {
         try testInput(case.input, case.tags);
     }
+}
+
+test "Optionals" {
+    const test_cases = .{
+        .{
+            .input = "mut x: ?int = nil",
+            .tags = &[_]lir.Inst.Tag{.decl},
+        },
+        .{
+            .input = "mut x: ?int = 5",
+            .tags = &[_]lir.Inst.Tag{.decl},
+        },
+        .{
+            .input = "mut x: ?int = nil x = 5",
+            .tags = &[_]lir.Inst.Tag{ .decl, .expr },
+        },
+        .{
+            .input = "mut x: ?int = 5 x = nil",
+            .tags = &[_]lir.Inst.Tag{ .decl, .expr },
+        },
+    };
+
+    inline for (test_cases) |case| try testInput(case.input, case.tags);
 }
