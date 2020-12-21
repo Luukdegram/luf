@@ -281,12 +281,14 @@ pub const Vm = struct {
                     if (inst.ptr.pos >= self.globals.items.len)
                         try self.globals.resize(inst.ptr.pos + 1);
                     self.globals.items[inst.ptr.pos] = val;
+                    try self.push(&Value.Void);
                 },
                 .assign_local => {
                     const val = self.pop();
                     if (inst.ptr.pos >= self.locals.items.len)
                         try self.locals.resize(inst.ptr.pos + 1);
                     self.locals.items[inst.ptr.pos] = val;
+                    try self.push(&Value.Void);
                 },
                 .load_module => {
                     const string = self.pop().unwrap(.string) orelse
@@ -969,9 +971,10 @@ test "Conditional expression" {
         .{ .input = "if true { 10 } else { 20 }", .expected = 10 },
         .{ .input = "if false { 10 } else { 20 }", .expected = 20 },
         .{ .input = "if 1 < 2 { 10 }", .expected = 10 },
-        .{ .input = "if 1 > 2 { 10 }", .expected = {} },
+        .{ .input = "if 1 > 2 { 10 }", .expected = &Value.Void },
         .{ .input = "if 1 > 2 { 10 } else if 2 > 3 { 20 } else { 5 }", .expected = 5 },
         .{ .input = "if 1 > 2 { 10 } else if 2 < 3 { 20 } else { 5 }", .expected = 20 },
+        .{ .input = "mut x = 5 if x < 10 { x = 2  } else if x < 3 { x = 1 } else { x = 0 } x", .expected = 2 },
     };
 
     inline for (test_cases) |case| {
@@ -979,24 +982,14 @@ test "Conditional expression" {
         defer vm.deinit();
 
         try vm.compileAndRun(case.input);
+
         if (@TypeOf(case.expected) == comptime_int) {
-            testing.expectEqual(@as(i64, case.expected), vm.pop().toInteger().value);
+            testing.expectEqual(@as(i64, case.expected), vm.peek().toInteger().value);
         } else {
-            testing.expectEqual(@as(usize, 0), vm.sp); //empty stack
+            testing.expectEqual(case.expected, vm.peek());
         }
         testing.expectEqual(@as(usize, 0), vm.sp);
     }
-}
-
-test "Conditional statement" {
-    const input = "mut x = 5 if x < 10 { x = 2  } else if x < 3 { x = 1 } else { x = 0 } ";
-
-    var vm = try Vm.init(testing.allocator);
-    defer vm.deinit();
-
-    try vm.compileAndRun(input);
-    testing.expectEqual(@as(i64, 2), vm.peek().toInteger().value);
-    testing.expectEqual(@as(usize, 0), vm.sp);
 }
 
 test "Declaration" {
@@ -1201,7 +1194,7 @@ test "While loop" {
     const test_cases = .{
         .{ .input = "mut i = 0 while i > 10 {i = 10} i", .expected = 0 },
         .{ .input = "mut i = 0 while i < 10 {i = 10} i", .expected = 10 },
-        .{ .input = "mut i = 0 while i < 10 { if i==5 { break } i = 5} i", .expected = 5 },
+        .{ .input = "mut i = 0 while i < 10 { if i == 5 { break } i = 5} i", .expected = 5 },
     };
 
     inline for (test_cases) |case| {
@@ -1311,7 +1304,7 @@ test "Enum expression and comparison" {
     try vm.compileAndRun(input);
 
     testing.expectEqual(@as(i64, 1), vm.peek().toInteger().value);
-    testing.expectEqual(@as(usize, 1), vm.sp);
+    testing.expectEqual(@as(usize, 0), vm.sp);
 }
 
 test "Switch case" {
@@ -1436,5 +1429,21 @@ test "Luf std" {
     defer vm.deinit();
     try vm.compileAndRun(input);
     testing.expectEqual(@as(i64, 3), vm.peek().toInteger().value);
+    testing.expectEqual(@as(usize, 0), vm.sp);
+}
+
+test "Optionals" {
+    const input =
+        \\ mut x: ?int = nil
+        \\ x = 5
+        \\ x = nil
+        \\ x
+    ;
+
+    var vm = try Vm.init(testing.allocator);
+    defer vm.deinit();
+
+    try vm.compileAndRun(input);
+    testing.expectEqual(&Value.Nil, vm.peek());
     testing.expectEqual(@as(usize, 0), vm.sp);
 }

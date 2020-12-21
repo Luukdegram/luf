@@ -415,6 +415,8 @@ pub const Instructions = struct {
 
         try self.gen(condition.then_block);
 
+        if (self.lastIs(.pop)) self.pop();
+
         const jump_label = try self.label(.jump);
 
         self.patch(false_label, self.len());
@@ -423,7 +425,7 @@ pub const Instructions = struct {
             try self.gen(block);
 
             if (self.lastIs(.pop)) self.pop();
-        }
+        } else try self.emit(.load_void);
 
         self.patch(jump_label, self.len());
     }
@@ -457,6 +459,8 @@ pub const Instructions = struct {
         const false_jump = try self.label(.jump_false);
 
         try self.gen(loop.rhs);
+
+        try self.emit(.pop);
 
         try self.emitPtr(.jump, start);
 
@@ -500,8 +504,12 @@ pub const Instructions = struct {
         const end_jump = try self.label(.jump_false);
 
         // index and capture
-        if (loop.index) |index| try self.emitPtr(.assign_local, index.as(lir.Inst.Ident).index);
+        if (loop.index) |index| {
+            try self.emitPtr(.assign_local, index.as(lir.Inst.Ident).index);
+            try self.emit(.pop);
+        }
         try self.emitPtr(.assign_local, loop.capture.as(lir.Inst.Ident).index);
+        try self.emit(.pop);
 
         try self.gen(loop.block);
 
@@ -1027,7 +1035,9 @@ test "IR to Bytecode - Control flow" {
                 .load_integer,
                 .jump,
                 .load_integer,
+                .pop,
                 .load_integer,
+                .pop,
             },
         },
         .{
@@ -1080,6 +1090,7 @@ test "IR to Bytecode - Control flow" {
                 .jump_false,
                 .load_integer,
                 .assign_global,
+                .pop,
                 .jump,
             },
         },
@@ -1108,6 +1119,7 @@ test "IR to Bytecode - Control flow" {
                 .jump,
                 .jump,
                 .load_void,
+                .pop,
                 .jump,
             },
         },
@@ -1121,7 +1133,6 @@ test "IR to Bytecode - Control flow" {
                 .iter_next,
                 .jump_false,
                 .assign_local,
-                .load_void,
                 .pop,
                 .jump,
             },
@@ -1136,8 +1147,8 @@ test "IR to Bytecode - Control flow" {
                 .iter_next,
                 .jump_false,
                 .assign_local,
+                .pop,
                 .assign_local,
-                .load_void,
                 .pop,
                 .jump,
             },

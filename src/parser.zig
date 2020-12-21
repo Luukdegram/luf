@@ -144,7 +144,6 @@ pub const Parser = struct {
             .for_loop => self.parseFor(),
             .@"break" => self.parseBreak(),
             .@"continue" => self.parseContinue(),
-            .@"if" => self.parseIfExpression(),
             else => self.parseExpressionStatement(),
         };
     }
@@ -1106,7 +1105,7 @@ test "If expression" {
     defer tree.deinit();
 
     testing.expect(tree.nodes.len == 1);
-    const if_exp = tree.nodes[0].if_expression;
+    const if_exp = tree.nodes[0].expression.value.if_expression;
     testing.expect(if_exp.true_pong.block_statement.nodes[0] == .expression);
     testing.expectEqualSlices(
         u8,
@@ -1124,7 +1123,7 @@ test "If else expression" {
     defer tree.deinit();
 
     testing.expect(tree.nodes.len == 1);
-    const if_exp = tree.nodes[0].if_expression;
+    const if_exp = tree.nodes[0].expression.value.if_expression;
     testing.expect(if_exp.true_pong.block_statement.nodes[0] == .expression);
     testing.expectEqualSlices(
         u8,
@@ -1149,7 +1148,7 @@ test "If else-if expression" {
     defer tree.deinit();
 
     testing.expect(tree.nodes.len == 1);
-    const if_exp = tree.nodes[0].if_expression;
+    const if_exp = tree.nodes[0].expression.value.if_expression;
     testing.expect(if_exp.true_pong.block_statement.nodes[0] == .expression);
     testing.expectEqualSlices(
         u8,
@@ -1157,7 +1156,7 @@ test "If else-if expression" {
         "x",
     );
     testing.expect(if_exp.false_pong != null);
-    testing.expect(if_exp.false_pong.?.if_expression.false_pong != null);
+    testing.expect(if_exp.false_pong.?.expression.value.if_expression.false_pong != null);
 }
 
 test "Function literal" {
