@@ -51,6 +51,7 @@ pub const Node = union(NodeType) {
     switch_statement: *SwitchLiteral,
     switch_prong: *SwitchProng,
     type_def: *TypeDef,
+    slice: *SliceExpression,
 
     /// Possible Nodes which are supported
     pub const NodeType = enum {
@@ -84,6 +85,7 @@ pub const Node = union(NodeType) {
         switch_statement,
         switch_prong,
         type_def,
+        slice,
     };
 
     /// Returns the Luf `Type` that Node corresponds to
@@ -445,5 +447,13 @@ pub const Node = union(NodeType) {
                 else => null,
             };
         }
+    };
+
+    /// Represents a slice node i.e. array[x:y]
+    pub const SliceExpression = struct {
+        token: Token,
+        left: Node,
+        start: ?Node,
+        end: ?Node,
     };
 };

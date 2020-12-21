@@ -608,20 +608,26 @@ pub const Parser = struct {
     /// Parses the selector to retreive a value from an Array or Map
     fn parseIndexExpression(self: *Parser, left: Node) Error!Node {
         const token = self.current_token;
-        const index = try self.allocator.create(Node.IndexExpression);
-        index.* = .{ .token = token, .left = left, .index = undefined };
+
         self.next();
 
-        index.index = if (token.token_type == .period) blk: {
+        const index_node = if (token.token_type == .period) blk: {
             if (!self.currentIsType(.identifier))
                 return self.fail("Expected identifier", self.current_token.start, .{});
             break :blk try self.parseStringLiteral();
-        } else
-            try self.parseExpression(.lowest);
+        } else if (!self.currentIsType(.colon))
+            try self.parseExpression(.lowest)
+        else
+            null;
 
         if (token.token_type != .period) {
+            if (self.currentIsType(.colon) or self.peekIsType(.colon))
+                return self.parseSliceExpression(token, left, index_node);
             try self.expectPeek(.right_bracket);
         }
+
+        const index = try self.allocator.create(Node.IndexExpression);
+        index.* = .{ .token = token, .left = left, .index = index_node.? };
 
         return Node{ .index = index };
     }
@@ -860,6 +866,23 @@ pub const Parser = struct {
         }
 
         return Node{ .type_def = node };
+    }
+
+    /// Parses a slice expression into `Node.SliceExpression`
+    /// i.e. Parses list[0:5], [:5] or [0:] to create a new slice from an array
+    fn parseSliceExpression(self: *Parser, token: Token, left: Node, start: ?Node) Error!Node {
+        const node = try self.allocator.create(Node.SliceExpression);
+        node.* = .{ .token = token, .left = left, .start = start, .end = null };
+
+        if (self.peekIsType(.colon)) self.next();
+
+        if (!self.peekIsType(.right_bracket)) {
+            self.next();
+            node.end = try self.parseExpression(.lowest);
+        }
+
+        try self.expectPeek(.right_bracket);
+        return Node{ .slice = node };
     }
 
     /// Determines if the next token is the expected token or not.
@@ -1491,4 +1514,24 @@ test "Type definitions" {
 
     testing.expectEqual(Type.optional, optional_type.?);
     testing.expectEqual(Type.integer, optional_child_type.?);
+}
+
+test "Parse slice expression" {
+    const cases = .{
+        .{ .input = "const list = []int{1,2,3} const slice = list[1:2]", .expected = .{ 1, 2 } },
+        .{ .input = "const list = []int{1,2,3} const slice = list[0:]", .expected = .{ 0, null } },
+        .{ .input = "const list = []int{1,2,3} const slice = list[:1]", .expected = .{ null, 1 } },
+    };
+
+    inline for (cases) |case| {
+        var errors = Errors.init(testing.allocator);
+        defer errors.deinit();
+
+        const parsed = try parse(testing.allocator, case.input, &errors);
+        defer parsed.deinit();
+
+        const node = parsed.nodes[1].declaration.value.slice;
+        testing.expectEqual(@as(?u64, case.expected[0]), if (node.start) |n| n.int_lit.value else null);
+        testing.expectEqual(@as(?u64, case.expected[1]), if (node.end) |n| n.int_lit.value else null);
+    }
 }
