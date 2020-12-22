@@ -301,6 +301,7 @@ pub const Vm = struct {
                 .iter_next => try self.execNextIter(),
                 .make_range => try self.makeRange(),
                 .match => try self.execSwitchProng(),
+                .make_slice => try self.makeSlice(),
             }
         }
 
@@ -872,6 +873,33 @@ pub const Vm = struct {
             },
             else => return self.fail("Unsupported type, switching are only allowed for integers, strings and ranges"),
         }
+    }
+
+    /// Creates a new list from a slice expression, and then pushes this value
+    /// to the stack
+    fn makeSlice(self: *Vm) Error!void {
+        const end = self.pop();
+        const start = self.pop();
+        const list = self.pop();
+
+        if (!list.isType(.list)) return self.fail("Expected a list, but instead found a different type");
+
+        const start_num = @intCast(usize, start.toInteger().value);
+        const end_num = if (end.unwrap(.integer)) |int| @intCast(usize, int.value) else list.toList().value.items.len;
+
+        const len = end_num - start_num;
+
+        // create our new list and fill it with values from the original list
+        const ret = try Value.List.create(self.gc, len);
+        const new_list = ret.toList();
+        new_list.value.items.len = len;
+
+        var i: usize = start_num;
+        while (i < end_num) : (i += 1) {
+            new_list.value.items[i - start_num] = list.toList().value.items[i];
+        }
+
+        return self.push(ret);
     }
 
     /// Appends an error message to `errors` and returns a `Vm.Error`
@@ -1446,4 +1474,24 @@ test "Optionals" {
     try vm.compileAndRun(input);
     testing.expectEqual(&Value.Nil, vm.peek());
     testing.expectEqual(@as(usize, 0), vm.sp);
+}
+
+test "Slices" {
+    const cases = .{
+        .{ .input = "const list = []int{2, 4, 6} const slice = list[1:3]", .expected = .{ 4, 6 } },
+        .{ .input = "const list = []int{2, 4, 6} const slice = list[:2]", .expected = .{ 2, 4 } },
+        .{ .input = "const list = []int{2, 4, 6} const slice = list[1:]", .expected = .{ 4, 6 } },
+    };
+
+    inline for (cases) |case| {
+        var vm = try Vm.init(testing.allocator);
+        defer vm.deinit();
+
+        try vm.compileAndRun(case.input);
+
+        const list = vm.peek().toList().value;
+        testing.expectEqual(@as(usize, 2), list.items.len);
+        testing.expectEqual(@as(i64, case.expected[0]), list.items[0].toInteger().value);
+        testing.expectEqual(@as(i64, case.expected[1]), list.items[1].toInteger().value);
+    }
 }
