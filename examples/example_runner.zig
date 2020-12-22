@@ -38,7 +38,7 @@ pub fn main() !void {
     const source = try file.readToEndAlloc(allocator, size);
     defer allocator.free(source);
 
-    const writer = std.io.getStdErr().writer();
+    const writer = std.io.getStdOut().writer();
     var vm = try luf.Vm.init(allocator);
     defer vm.deinit();
     vm.compileAndRun(source) catch |err| {

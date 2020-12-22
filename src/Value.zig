@@ -736,7 +736,7 @@ pub fn print(self: *Value, writer: anytype) @TypeOf(writer).Error!void {
         },
         .optional => {
             if (self.toOptional().child) |child|
-                try self.print(child)
+                try child.print(writer)
             else
                 try writer.writeAll("nil");
         },
