@@ -1028,8 +1028,6 @@ test "IR to Bytecode - Non control flow" {
                 .load_integer,
                 .bind_global,
                 .load_integer,
-                .bind_global,
-                .load_integer,
                 .assign_global,
                 .pop,
             },
@@ -1098,8 +1096,6 @@ test "IR to Bytecode - Control flow" {
         .{
             .input = "mut i = 0 while (i > 10) { i = 10 }",
             .opcodes = &[_]Opcode{
-                .load_integer,
-                .bind_global,
                 .load_integer,
                 .bind_global,
                 .load_global,

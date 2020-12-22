@@ -53,7 +53,7 @@ pub fn compile(
     try compiler.forwardDeclareNodes(tree.nodes);
 
     for (tree.nodes) |node| {
-        if (node == .declaration and node.declaration.value == .func_lit) continue; // already compiled above
+        if (node == .declaration and canBeForwardDeclared(node.declaration.value)) continue; // already compiled above
         try compiler.instructions.append(allocator, try compiler.resolveInst(node));
     }
 
@@ -61,6 +61,20 @@ pub fn compile(
         .gpa = allocator,
         .state = arena.state,
         .instructions = compiler.instructions.toOwnedSlice(allocator),
+    };
+}
+
+/// Returns true if the given `Node` can be forward declared
+fn canBeForwardDeclared(node: ast.Node) bool {
+    return switch (node) {
+        .int_lit,
+        .string_lit,
+        .func_lit,
+        .data_structure,
+        .nil,
+        .slice,
+        => true,
+        else => false,
     };
 }
 
@@ -359,16 +373,7 @@ pub const Compiler = struct {
             if (decl.value == .import) {
                 try self.forwardDeclareImport(decl.value.import);
                 continue;
-            } else if (switch (decl.value) {
-                .int_lit,
-                .string_lit,
-                .func_lit,
-                .data_structure,
-                .nil,
-                .slice,
-                => false,
-                else => true,
-            }) continue;
+            } else if (!canBeForwardDeclared(decl.value)) continue;
 
             const symbol = (try self.defineSymbol(
                 decl.name.identifier.value,
@@ -1314,21 +1319,19 @@ test "Lists" {
     const test_cases = .{
         .{
             .input = "const x = []int{1, 2, 3}",
-            .tags = &[_]lir.Inst.Tag{ .decl, .decl },
+            .tags = &[_]lir.Inst.Tag{.decl},
         },
         .{
             .input = "const x = []int{1, 2, 3}[0]",
-            .tags = &[_]lir.Inst.Tag{
-                .decl,
-            },
+            .tags = &[_]lir.Inst.Tag{.decl},
         },
         .{
             .input = "const x = []int:int{1: 2, 2: 1, 5: 6}",
-            .tags = &[_]lir.Inst.Tag{ .decl, .decl },
+            .tags = &[_]lir.Inst.Tag{.decl},
         },
         .{
             .input = "const list = []int{1, 2, 3} list[1] = 10 list[1]",
-            .tags = &[_]lir.Inst.Tag{ .decl, .decl, .expr, .expr },
+            .tags = &[_]lir.Inst.Tag{ .decl, .expr, .expr },
         },
     };
 
@@ -1385,11 +1388,11 @@ test "Assign" {
     const test_cases = .{
         .{
             .input = "mut x = 5 x = 6",
-            .tags = &[_]lir.Inst.Tag{ .decl, .decl, .expr },
+            .tags = &[_]lir.Inst.Tag{ .decl, .expr },
         },
         .{
             .input = "mut x = 5 x += 6 x",
-            .tags = &[_]lir.Inst.Tag{ .decl, .decl, .expr, .expr },
+            .tags = &[_]lir.Inst.Tag{ .decl,  .expr, .expr },
         },
     };
 
@@ -1402,19 +1405,19 @@ test "Optionals" {
     const test_cases = .{
         .{
             .input = "mut x: ?int = nil",
-            .tags = &[_]lir.Inst.Tag{ .decl, .decl },
+            .tags = &[_]lir.Inst.Tag{ .decl  },
         },
         .{
             .input = "mut x: ?int = 5",
-            .tags = &[_]lir.Inst.Tag{ .decl, .decl },
+            .tags = &[_]lir.Inst.Tag{ .decl },
         },
         .{
             .input = "mut x: ?int = nil x = 5",
-            .tags = &[_]lir.Inst.Tag{ .decl, .decl, .expr },
+            .tags = &[_]lir.Inst.Tag{ .decl, .expr },
         },
         .{
             .input = "mut x: ?int = 5 x = nil",
-            .tags = &[_]lir.Inst.Tag{ .decl, .decl, .expr },
+            .tags = &[_]lir.Inst.Tag{ .decl, .expr },
         },
     };
 
@@ -1430,10 +1433,6 @@ test "Slices" {
     ;
 
     const tags = &[_]lir.Inst.Tag{
-        .decl,
-        .decl,
-        .decl,
-        .decl,
         .decl,
         .decl,
         .decl,
