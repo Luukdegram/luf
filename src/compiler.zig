@@ -252,18 +252,15 @@ pub const Compiler = struct {
     /// Recursively looks for the scope with the given Tag
     fn findScope(self: *Compiler, scope: *const Scope, tag: Scope.Id) ?*const Scope {
         if (scope.id == tag) return scope;
-        return if (self.scope.parent) |parent| self.findScope(parent, tag) else null;
+        return if (scope.parent) |parent| self.findScope(parent, tag) else null;
     }
 
     /// Attempts to resolve a symbol from the symbol table
     /// If not found, will attempt to resolve it from a parent scope
     fn resolveSymbol(self: *Compiler, scope: *const Scope, name: []const u8) ?*Symbol {
-        return if (scope.resolve(name)) |symbol|
-            symbol
-        else if (scope.id != .global and scope.parent != null)
+        return scope.resolve(name) orelse if (scope.parent != null)
             self.resolveSymbol(scope.parent.?, name)
-        else
-            null;
+        else null;
     }
 
     /// Defines a new symbol in the current scope
@@ -361,7 +358,7 @@ pub const Compiler = struct {
             if (decl.value == .import) {
                 try self.forwardDeclareImport(decl.value.import);
                 continue;
-            } else if (decl.value != .func_lit) continue;
+            }
 
             const symbol = (try self.defineSymbol(
                 decl.name.identifier.value,
@@ -602,7 +599,7 @@ pub const Compiler = struct {
         }
 
         const symbol = if (self.resolveSymbol(self.scope, decl.name.identifier.value)) |s| blk: {
-            if (decl.value == .func_lit and s.forward_declared) {
+            if (s.forward_declared) {
                 s.forward_declared = false;
                 break :blk s;
             } else {
@@ -899,11 +896,12 @@ pub const Compiler = struct {
         );
 
         const func_ret_type = scope.id.function.ret_type.getType();
-        var ret_type = try self.resolveType(ret.value);
+        const ret_type = blk: {
+            const tmp = try self.resolveType(ret.value);
 
-        if (ret_type == .function) {
-            ret_type = try self.resolveScalarType(ret.value);
-        }
+            if (tmp == .function or tmp == .list) break :blk try self.resolveScalarType(ret.value);
+            break :blk tmp;
+        };
 
         if (func_ret_type != ret_type)
             return self.fail(

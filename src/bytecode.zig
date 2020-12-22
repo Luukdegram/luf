@@ -76,6 +76,7 @@ pub const Instructions = struct {
     list: std.ArrayListUnmanaged(Instruction),
     gpa: *std.mem.Allocator,
     scope: Scope,
+    prev_scope: Scope = Scope.none,
 
     pub const Error = error{OutOfMemory};
 
@@ -455,6 +456,8 @@ pub const Instructions = struct {
     /// Generates the bytecode for a while loop
     fn emitWhile(self: *Instructions, loop: *lir.Inst.Double) !void {
         const start = self.len();
+
+        self.prev_scope = self.scope;
         self.scope = Scope.createLoop(start);
 
         try self.gen(loop.lhs);
@@ -473,7 +476,10 @@ pub const Instructions = struct {
         }
 
         self.scope.loop.jumps.deinit(self.gpa);
-        self.scope = Scope.none;
+
+        const prev = self.prev_scope;
+        self.prev_scope = self.scope;
+        self.scope = prev;
     }
 
     /// Generates the full bytecode for a switch statement
@@ -501,6 +507,8 @@ pub const Instructions = struct {
 
         // start of loop
         try self.emit(.iter_next);
+
+        self.prev_scope = self.scope;
         self.scope = Scope.createLoop(self.len() - 1);
 
         const end_jump = try self.label(.jump_false);
@@ -528,7 +536,10 @@ pub const Instructions = struct {
         if (self.scope.loop.jumps.items.len > 0) try self.emit(.pop);
 
         self.scope.loop.jumps.deinit(self.gpa);
-        self.scope = Scope.none;
+        
+        const prev = self.prev_scope;
+        self.prev_scope = self.scope;
+        self.scope = prev;
     }
 
     /// Generates the bytecode to create a slice from a string
