@@ -194,7 +194,7 @@ fn skipWhitespace(self: *Lexer) void {
 /// Reads the next characters as identifier and returns the identifier
 fn readIdentifier(self: *Lexer) []const u8 {
     const pos = self.position;
-    while (isLetter(self.char)) {
+    while (isLetter(self.char) or isDigit(self.char)) {
         self.readChar();
     }
     return self.source[pos..self.position];

@@ -1414,9 +1414,9 @@ test "Optionals" {
 test "Slices" {
     const test_case =
         \\ const list = []int{1, 2, 3}
-        \\ const s = list[1:2]
-        \\ const sl = list[:1]
-        \\ const sli = list[0:]
+        \\ const slice1 = list[1:2]
+        \\ const slice2 = list[:1]
+        \\ const slice3 = list[0:]
     ;
 
     const tags = &[_]lir.Inst.Tag{
