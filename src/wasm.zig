@@ -373,6 +373,7 @@ pub const Wasm = struct {
             .@"break" => {},
             .@"continue" => {},
             .@"for" => {},
+            .slice => {},
             .comment, .type_def, .func_arg => {}, //ignore those
         }
     }

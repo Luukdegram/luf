@@ -31,6 +31,7 @@ pub const Opcode = enum(u8) {
     make_iter = 23,
     make_range = 24,
     make_enum = 54,
+    make_slice = 55,
 
     //bin op
     add = 25,
@@ -167,6 +168,7 @@ pub const Instructions = struct {
             .@"break" => try self.scope.loop.jumps.append(self.gpa, try self.label(.jump)),
             .@"continue" => try self.emitPtr(.jump, self.scope.loop.start),
             .@"for" => try self.emitLoop(inst.as(lir.Inst.Loop)),
+            .slice => try self.emitSlice(inst.as(lir.Inst.Triple)),
             .comment, .type_def, .func_arg => {}, //VM doesn't do anything with this
         }
     }
@@ -523,11 +525,18 @@ pub const Instructions = struct {
         for (self.scope.loop.jumps.items) |jump_pos| {
             self.patch(jump_pos, self.len());
         }
-
         if (self.scope.loop.jumps.items.len > 0) try self.emit(.pop);
 
         self.scope.loop.jumps.deinit(self.gpa);
         self.scope = Scope.none;
+    }
+
+    /// Generates the bytecode to create a slice from a string
+    pub fn emitSlice(self: *Instructions, slice: *lir.Inst.Triple) !void {
+        try self.gen(slice.lhs);
+        try self.gen(slice.index);
+        try self.gen(slice.rhs);
+        try self.emit(.make_slice);
     }
 
     /// Creates a `ByteCode` object from the current instructions
@@ -1151,6 +1160,20 @@ test "IR to Bytecode - Control flow" {
                 .assign_local,
                 .pop,
                 .jump,
+            },
+        },
+        .{
+            .input = "const list = []int{0,1} const slice = list[0:1]",
+            .opcodes = &[_]Opcode{
+                .load_integer,
+                .load_integer,
+                .make_array,
+                .bind_global,
+                .load_global,
+                .load_integer,
+                .load_integer,
+                .make_slice,
+                .bind_global,
             },
         },
     };
