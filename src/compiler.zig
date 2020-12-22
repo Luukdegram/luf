@@ -258,9 +258,10 @@ pub const Compiler = struct {
     /// Attempts to resolve a symbol from the symbol table
     /// If not found, will attempt to resolve it from a parent scope
     fn resolveSymbol(self: *Compiler, scope: *const Scope, name: []const u8) ?*Symbol {
-        return scope.resolve(name) orelse if (scope.parent != null)
+        return scope.resolve(name) orelse if (scope.id != .global and scope.parent != null)
             self.resolveSymbol(scope.parent.?, name)
-        else null;
+        else
+            null;
     }
 
     /// Defines a new symbol in the current scope
@@ -358,7 +359,16 @@ pub const Compiler = struct {
             if (decl.value == .import) {
                 try self.forwardDeclareImport(decl.value.import);
                 continue;
-            }
+            } else if (switch (decl.value) {
+                .int_lit,
+                .string_lit,
+                .func_lit,
+                .data_structure,
+                .nil,
+                .slice,
+                => false,
+                else => true,
+            }) continue;
 
             const symbol = (try self.defineSymbol(
                 decl.name.identifier.value,
@@ -599,7 +609,7 @@ pub const Compiler = struct {
         }
 
         const symbol = if (self.resolveSymbol(self.scope, decl.name.identifier.value)) |s| blk: {
-            if (s.forward_declared) {
+            if (s.forward_declared and (self.scope.id == .global or self.scope.id == .module)) {
                 s.forward_declared = false;
                 break :blk s;
             } else {
@@ -1304,19 +1314,21 @@ test "Lists" {
     const test_cases = .{
         .{
             .input = "const x = []int{1, 2, 3}",
-            .tags = &[_]lir.Inst.Tag{.decl},
+            .tags = &[_]lir.Inst.Tag{ .decl, .decl },
         },
         .{
             .input = "const x = []int{1, 2, 3}[0]",
-            .tags = &[_]lir.Inst.Tag{.decl},
+            .tags = &[_]lir.Inst.Tag{
+                .decl,
+            },
         },
         .{
             .input = "const x = []int:int{1: 2, 2: 1, 5: 6}",
-            .tags = &[_]lir.Inst.Tag{.decl},
+            .tags = &[_]lir.Inst.Tag{ .decl, .decl },
         },
         .{
             .input = "const list = []int{1, 2, 3} list[1] = 10 list[1]",
-            .tags = &[_]lir.Inst.Tag{ .decl, .expr, .expr },
+            .tags = &[_]lir.Inst.Tag{ .decl, .decl, .expr, .expr },
         },
     };
 
@@ -1373,11 +1385,11 @@ test "Assign" {
     const test_cases = .{
         .{
             .input = "mut x = 5 x = 6",
-            .tags = &[_]lir.Inst.Tag{ .decl, .expr },
+            .tags = &[_]lir.Inst.Tag{ .decl, .decl, .expr },
         },
         .{
             .input = "mut x = 5 x += 6 x",
-            .tags = &[_]lir.Inst.Tag{ .decl, .expr, .expr },
+            .tags = &[_]lir.Inst.Tag{ .decl, .decl, .expr, .expr },
         },
     };
 
@@ -1390,19 +1402,19 @@ test "Optionals" {
     const test_cases = .{
         .{
             .input = "mut x: ?int = nil",
-            .tags = &[_]lir.Inst.Tag{.decl},
+            .tags = &[_]lir.Inst.Tag{ .decl, .decl },
         },
         .{
             .input = "mut x: ?int = 5",
-            .tags = &[_]lir.Inst.Tag{.decl},
+            .tags = &[_]lir.Inst.Tag{ .decl, .decl },
         },
         .{
             .input = "mut x: ?int = nil x = 5",
-            .tags = &[_]lir.Inst.Tag{ .decl, .expr },
+            .tags = &[_]lir.Inst.Tag{ .decl, .decl, .expr },
         },
         .{
             .input = "mut x: ?int = 5 x = nil",
-            .tags = &[_]lir.Inst.Tag{ .decl, .expr },
+            .tags = &[_]lir.Inst.Tag{ .decl, .decl, .expr },
         },
     };
 
@@ -1418,6 +1430,10 @@ test "Slices" {
     ;
 
     const tags = &[_]lir.Inst.Tag{
+        .decl,
+        .decl,
+        .decl,
+        .decl,
         .decl,
         .decl,
         .decl,

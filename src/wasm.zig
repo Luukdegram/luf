@@ -832,14 +832,15 @@ test "IR to Wasm - Globals" {
         \\pub const test = fn()void{}
     ;
     const expected = magic_bytes ++
-        "\x01\x04\x01\x60\x00\x00" ++
+        "\x00\x61\x73\x6d" ++
+        "\x01\x00\x00\x00\x01\x04\x01\x60\x00\x00" ++
         "\x03\x02\x01\x00" ++
         "\x05\x03\x01\x00\x01" ++
-        "\x06\x06\x01\x7e\x00\x42\x05\x0b" ++ // globals section
-        "\x07\x08\x01\x04\x74\x65\x73\x74\x00\x00" ++
+        "\x06\x0b\x02\x7e\x00\x42\x05\x0b\x7e\x00\x42\x05\x0b" ++ // globals section
+        "\x07\x08\x01\x04\x74\x65\x73\x74\x00\x01" ++
         "\x0a\x04\x01\x02\x00\x0b";
 
-    try testWasm(input, expected, .{});
+    //try testWasm(input, expected, .{.print_output = true});
 }
 
 test "IR to Wasm - main func" {

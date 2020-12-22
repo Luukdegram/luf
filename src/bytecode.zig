@@ -75,8 +75,7 @@ pub const Opcode = enum(u8) {
 pub const Instructions = struct {
     list: std.ArrayListUnmanaged(Instruction),
     gpa: *std.mem.Allocator,
-    scope: Scope,
-    prev_scope: Scope = Scope.none,
+    scope: Scope = Scope.none,
 
     pub const Error = error{OutOfMemory};
 
@@ -102,7 +101,6 @@ pub const Instructions = struct {
         return .{
             .list = std.ArrayListUnmanaged(Instruction){},
             .gpa = gpa,
-            .scope = .{ .none = {} },
         };
     }
 
@@ -457,7 +455,7 @@ pub const Instructions = struct {
     fn emitWhile(self: *Instructions, loop: *lir.Inst.Double) !void {
         const start = self.len();
 
-        self.prev_scope = self.scope;
+        const prev = self.scope;
         self.scope = Scope.createLoop(start);
 
         try self.gen(loop.lhs);
@@ -477,8 +475,6 @@ pub const Instructions = struct {
 
         self.scope.loop.jumps.deinit(self.gpa);
 
-        const prev = self.prev_scope;
-        self.prev_scope = self.scope;
         self.scope = prev;
     }
 
@@ -508,7 +504,7 @@ pub const Instructions = struct {
         // start of loop
         try self.emit(.iter_next);
 
-        self.prev_scope = self.scope;
+        const prev = self.scope;
         self.scope = Scope.createLoop(self.len() - 1);
 
         const end_jump = try self.label(.jump_false);
@@ -536,9 +532,7 @@ pub const Instructions = struct {
         if (self.scope.loop.jumps.items.len > 0) try self.emit(.pop);
 
         self.scope.loop.jumps.deinit(self.gpa);
-        
-        const prev = self.prev_scope;
-        self.prev_scope = self.scope;
+
         self.scope = prev;
     }
 
@@ -1034,6 +1028,8 @@ test "IR to Bytecode - Non control flow" {
                 .load_integer,
                 .bind_global,
                 .load_integer,
+                .bind_global,
+                .load_integer,
                 .assign_global,
                 .pop,
             },
@@ -1102,6 +1098,8 @@ test "IR to Bytecode - Control flow" {
         .{
             .input = "mut i = 0 while (i > 10) { i = 10 }",
             .opcodes = &[_]Opcode{
+                .load_integer,
+                .bind_global,
                 .load_integer,
                 .bind_global,
                 .load_global,
