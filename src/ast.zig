@@ -107,6 +107,7 @@ pub const Node = union(NodeType) {
             .@"enum" => ._enum,
             .type_def => |td| td.getType(),
             .infix => |inf| inf.left.getType(),
+            .slice => .list,
             else => null,
         };
     }
@@ -124,6 +125,7 @@ pub const Node = union(NodeType) {
             .map_pair => |pair| pair.key.getInnerType(),
             .declaration => |decl| if (decl.type_def) |td| td.getInnerType() else decl.value.getInnerType(),
             .range => .integer,
+            .slice => |slice| slice.left.getInnerType(),
             else => self.getType(),
         };
     }
@@ -161,6 +163,7 @@ pub const Node = union(NodeType) {
             .switch_statement => |x| x.token.start,
             .switch_prong => |x| x.token.start,
             .type_def => |x| x.token.start,
+            .slice => |x| x.token.start,
         };
     }
 

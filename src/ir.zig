@@ -73,6 +73,7 @@ pub const Inst = struct {
         type_def,
         branch,
         expr,
+        slice,
 
         /// Returns the type of that belongs to a `Tag`
         /// Can be used to cast to the correct Type from a `Tag`.
@@ -113,7 +114,7 @@ pub const Inst = struct {
                 .branch,
                 .assign,
                 => Double,
-                .store => Triple,
+                .store, .slice => Triple,
                 .condition => Condition,
                 .primitive => Primitive,
                 .func => Function,
@@ -636,6 +637,22 @@ pub const Module = struct {
                 .pos = pos,
                 .ty = ty,
             },
+        };
+        return &inst.base;
+    }
+
+    /// Emits a slice instruction
+    pub fn emitSlice(self: *Module, pos: usize, left: *Inst, start: *Inst, end: *Inst) Error!*Inst {
+        const inst = try self.gpa.create(Inst.Triple);
+        inst.* = .{
+            .base = .{
+                .tag = .slice,
+                .pos = pos,
+                .ty = .list,
+            },
+            .lhs = left,
+            .index = start,
+            .rhs = end,
         };
         return &inst.base;
     }

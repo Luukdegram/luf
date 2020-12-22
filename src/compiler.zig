@@ -301,6 +301,7 @@ pub const Compiler = struct {
             },
             .index => |index| return self.resolveType(index.left),
             .call_expression => |cal| return self.resolveType(cal.function),
+            .slice => |slice| return self.resolveType(slice.left),
             else => std.debug.panic("TODO, implement type resolving for type: {}\n", .{node}),
         };
     }
@@ -346,7 +347,8 @@ pub const Compiler = struct {
                 return self.resolveScalarType(index.left);
             },
             .call_expression => |cal| return self.resolveScalarType(cal.function),
-            else => std.debug.panic("TODO, implement scalar type resolving for type: {}\n", .{node}),
+            .slice => |slice| return self.resolveScalarType(slice.left),
+            else => std.debug.panic("TODO, implement scalar type resolving for type: {}\n", .{node.getType()}),
         };
     }
 
@@ -491,6 +493,7 @@ pub const Compiler = struct {
             .comment => |cmt| self.ir.emitString(.comment, node.tokenPos(), cmt.value),
             .type_def => |td| self.compileTypeDef(td),
             .func_arg => |arg| self.compileFuncArg(arg),
+            .slice => |slice| self.compileSlice(slice),
         };
     }
 
@@ -759,6 +762,27 @@ pub const Compiler = struct {
         );
 
         return self.ir.emitFuncArg(arg.token.start, ty, name);
+    }
+
+    /// Compiles a slice expression `ast.Node.SliceExpression` into a `lir.Inst.Triple`
+    fn compileSlice(self: *Compiler, slice: *ast.Node.SliceExpression) !*lir.Inst {
+        const ty = try self.resolveType(slice.left);
+        if (ty != .list) return self.fail("Expected a list but instead found type '{}'", slice.left.tokenPos(), .{ty});
+
+        const left = try self.resolveInst(slice.left);
+        const start = blk: {
+            if (slice.start) |start| break :blk try self.resolveInst(start);
+
+            break :blk try self.ir.emitInt(slice.token.start, 0);
+        };
+
+        const end = blk: {
+            if (slice.end) |end| break :blk try self.resolveInst(end);
+
+            break :blk try self.ir.emitPrimitive(slice.token.start, .nil);
+        };
+
+        return self.ir.emitSlice(slice.token.start, left, start, end);
     }
 
     /// Compiles an `ast.Node.CallExpression` node into a `lir.Inst.Call`
@@ -1385,4 +1409,22 @@ test "Optionals" {
     };
 
     inline for (test_cases) |case| try testInput(case.input, case.tags);
+}
+
+test "Slices" {
+    const test_case =
+        \\ const list = []int{1, 2, 3}
+        \\ const s = list[1:2]
+        \\ const sl = list[:1]
+        \\ const sli = list[0:]
+    ;
+
+    const tags = &[_]lir.Inst.Tag{
+        .decl,
+        .decl,
+        .decl,
+        .decl,
+    };
+
+    try testInput(test_case, tags);
 }
