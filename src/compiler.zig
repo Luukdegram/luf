@@ -144,6 +144,8 @@ pub const Compiler = struct {
         parent: ?*Scope = null,
         /// used to create child scopes
         allocator: *Allocator,
+        /// The offset used to calculate symbol indices
+        offset: u16 = 0,
 
         /// The type of the scope
         const Id = enum {
@@ -172,6 +174,7 @@ pub const Compiler = struct {
                     .function => .{ .function = undefined },
                     .loop => .{ .loop = {} },
                 },
+                .offset = if (self.id == .loop) @truncate(u16, self.symbols.items().len) else 0,
                 .parent = self,
                 .allocator = self.allocator,
             };
@@ -197,7 +200,7 @@ pub const Compiler = struct {
             symbol.* = .{
                 .name = name,
                 .mutable = mutable,
-                .index = new_index,
+                .index = new_index + self.offset,
                 .scope = self.id,
                 .node = node,
                 .forward_declared = forward_declared,
