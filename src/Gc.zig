@@ -70,7 +70,7 @@ pub fn mark(self: *Gc, val: *Value) void {
     if (val.is_marked) return;
 
     val.is_marked = true;
-    switch (val.l_type) {
+    switch (val.ty) {
         .iterable => self.mark(val.toIterable().value),
         .list => for (val.toList().value.items) |item| self.mark(item),
         .map => {

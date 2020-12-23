@@ -11,16 +11,16 @@ pub const builtins = std.ComptimeStringMap(*Value, .{
     .{ "pop", &pop_func.base },
 });
 
-var len_func = Value.Native{ .base = .{ .l_type = .native, .is_marked = false, .next = null }, .func = len, .arg_len = 0 };
-var add_func = Value.Native{ .base = .{ .l_type = .native, .is_marked = false, .next = null }, .func = add, .arg_len = 1 };
-var pop_func = Value.Native{ .base = .{ .l_type = .native, .is_marked = false, .next = null }, .func = pop, .arg_len = 0 };
+var len_func = Value.Native{ .base = .{ .ty = .native, .is_marked = false, .next = null }, .func = len, .arg_len = 0 };
+var add_func = Value.Native{ .base = .{ .ty = .native, .is_marked = false, .next = null }, .func = add, .arg_len = 1 };
+var pop_func = Value.Native{ .base = .{ .ty = .native, .is_marked = false, .next = null }, .func = pop, .arg_len = 0 };
 
 /// Returns the length of the `Value`.
 /// Supports strings, arrays and maps.
 fn len(gc: *Gc, args: []*Value) BuiltinError!*Value {
     std.debug.assert(args.len == 1);
     const arg = args[0];
-    const length: i64 = switch (arg.l_type) {
+    const length: i64 = switch (arg.ty) {
         .string => @intCast(i64, arg.toString().value.len),
         .list => @intCast(i64, arg.toList().value.items.len),
         .map => @intCast(i64, arg.toMap().value.items().len),
@@ -33,12 +33,12 @@ fn len(gc: *Gc, args: []*Value) BuiltinError!*Value {
 /// Appends a new value to the list
 fn add(gc: *Gc, args: []*Value) BuiltinError!*Value {
     std.debug.assert(args.len >= 2);
-    return switch (args[0].l_type) {
+    return switch (args[0].ty) {
         .list => {
             var list = args[0].toList();
             const val = args[args.len - 1];
             if (list.value.items.len > 0) {
-                if (list.value.items[0].l_type != val.l_type) {
+                if (list.value.items[0].ty != val.ty) {
                     return BuiltinError.MismatchingTypes;
                 }
             }
@@ -51,10 +51,10 @@ fn add(gc: *Gc, args: []*Value) BuiltinError!*Value {
             const val = args[args.len - 1];
             if (map.value.items().len > 0) {
                 const entry = map.value.items()[0];
-                if (entry.key.l_type != key.l_type) {
+                if (entry.key.ty != key.ty) {
                     return BuiltinError.MismatchingTypes;
                 }
-                if (entry.value.l_type != val.l_type) {
+                if (entry.value.ty != val.ty) {
                     return BuiltinError.MismatchingTypes;
                 }
             }
@@ -69,7 +69,7 @@ fn add(gc: *Gc, args: []*Value) BuiltinError!*Value {
 /// Assures the list as atleast 1 value
 fn pop(gc: *Gc, args: []*Value) BuiltinError!*Value {
     std.debug.assert(args.len == 1);
-    return switch (args[0].l_type) {
+    return switch (args[0].ty) {
         .list => {
             return args[0].toList().value.pop();
         },

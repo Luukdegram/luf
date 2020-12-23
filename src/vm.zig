@@ -138,7 +138,7 @@ pub const Vm = struct {
 
         var maybe_func: *Value = blk: {
             for (self.globals.items) |global, i| {
-                if (global.l_type == .function and
+                if (global.ty == .function and
                     global.toFunction().name != null and
                     std.mem.eql(u8, func_name, global.toFunction().name.?))
                     break :blk global;
@@ -401,7 +401,7 @@ pub const Vm = struct {
         const right = self.pop();
         const left = self.pop();
 
-        if (left.l_type != right.l_type) return self.fail("Mismatching types");
+        if (left.ty != right.ty) return self.fail("Mismatching types");
 
         if (left.isType(.integer)) {
             try self.execIntOp(switch (op) {
@@ -435,11 +435,11 @@ pub const Vm = struct {
         const right = self.pop();
         const left = self.pop();
 
-        if (left.l_type == right.l_type and left.isType(.integer)) {
+        if (left.ty == right.ty and left.isType(.integer)) {
             return self.execIntCmp(op, left.toInteger().value, right.toInteger().value);
         }
 
-        if (left.l_type == right.l_type and left.isType(.string)) {
+        if (left.ty == right.ty and left.isType(.string)) {
             return self.execStringCmp(op, left.toString().value, right.toString().value);
         }
 
@@ -497,7 +497,7 @@ pub const Vm = struct {
     fn execNot(self: *Vm) Error!void {
         const right = self.pop();
 
-        const val = switch (right.l_type) {
+        const val = switch (right.ty) {
             .boolean => !right.toBool().value,
             .nil => true,
             else => false,
@@ -534,7 +534,7 @@ pub const Vm = struct {
             const val = self.pop();
 
             if (i == 1)
-                list_type = val.l_type
+                list_type = val.ty
             else if (!val.isType(list_type)) return self.fail("Mismatching types");
             list.value.items[len - i] = val;
         }
@@ -561,8 +561,8 @@ pub const Vm = struct {
             const key = self.pop();
 
             if (i == 0) {
-                key_type = key.l_type;
-                value_type = value.l_type;
+                key_type = key.ty;
+                value_type = value.ty;
             } else {
                 if (!key.isType(key_type)) return self.fail("Mismatching types");
                 if (!value.isType(value_type)) return self.fail("Mismatching types");
@@ -596,7 +596,7 @@ pub const Vm = struct {
     fn makeIterable(self: *Vm, inst: byte_code.Instruction) Error!void {
         const iterable = self.pop();
 
-        switch (iterable.l_type) {
+        switch (iterable.ty) {
             .list, .range, .string => {},
             else => return self.fail("Unsupported value for iterable"),
         }
@@ -660,10 +660,10 @@ pub const Vm = struct {
         const index = self.pop();
         const left = self.pop();
 
-        switch (left.l_type) {
+        switch (left.ty) {
             .list => {
                 var list = left.toList().value;
-                switch (index.l_type) {
+                switch (index.ty) {
                     .integer => {
                         const int = index.toInteger().value;
                         if (int < 0 or int > list.items.len) return self.fail("Out of bounds");
@@ -701,7 +701,7 @@ pub const Vm = struct {
             },
             .string => {
                 const string = left.toString().value;
-                switch (index.l_type) {
+                switch (index.ty) {
                     .integer => {
                         const int = index.toInteger().value;
                         if (int < 0 or int > string.len) return self.fail("Out of bounds");
@@ -797,7 +797,7 @@ pub const Vm = struct {
         const val = self.pop();
 
         if (val.isType(.native) or val.isType(.module)) return self.execNativeFuncCall(val);
-        if (val.l_type != .function)
+        if (val.ty != .function)
             return self.push(val); //put it back on stack
 
         if (arg_len != val.toFunction().arg_len) return self.fail("Mismatching argument length");
@@ -855,7 +855,7 @@ pub const Vm = struct {
         const prong_value = self.pop();
         const capture_value = self.stack[self.sp - 1];
 
-        switch (prong_value.l_type) {
+        switch (prong_value.ty) {
             .integer => {
                 const capture = capture_value.unwrap(.integer) orelse return self.fail("Expected an integer");
                 return self.execIntCmp(.equal, capture.value, prong_value.toInteger().value);
@@ -912,7 +912,7 @@ pub const Vm = struct {
     /// Checks each given type if they are equal or not
     fn resolveType(self: *Vm, values: []*const Value) Error!Type {
         std.debug.assert(values.len > 0);
-        const cur_tag: Type = values[0].l_type;
+        const cur_tag: Type = values[0].ty;
         if (values.len == 1) return cur_tag;
 
         for (values[1..]) |value|
@@ -925,7 +925,7 @@ pub const Vm = struct {
 /// Evalutes if the given `Value` is truthy.
 /// Only accepts booleans and 'Nil'.
 fn isTrue(value: *Value) bool {
-    return switch (value.l_type) {
+    return switch (value.ty) {
         .nil => false,
         .boolean => value.toBool().value,
         else => true,

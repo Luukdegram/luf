@@ -8,23 +8,23 @@ const Gc = @import("Gc.zig");
 const Value = @This();
 
 /// actual type of the `Value`
-l_type: Type,
+ty: Type,
 /// is marked by the gc?
 is_marked: bool = false,
 /// Next Value in the Linked List
 next: ?*Value = null,
 
 /// Global True value, saves memory by having it as a globally available 'constant'
-pub var True = Boolean{ .base = .{ .l_type = .boolean }, .value = true };
+pub var True = Boolean{ .base = .{ .ty = .boolean }, .value = true };
 
 /// Global False value, saves memory by having it as a globally available 'constant'
-pub var False = Boolean{ .base = .{ .l_type = .boolean }, .value = false };
+pub var False = Boolean{ .base = .{ .ty = .boolean }, .value = false };
 
 /// Global void value, saves memory by having it as a globally available 'constant'
-pub var Void = Value{ .l_type = ._void };
+pub var Void = Value{ .ty = ._void };
 
 /// Global Nil value, saves memory by having it as a globally available 'constant'
-pub var Nil = Value{ .l_type = .nil };
+pub var Nil = Value{ .ty = .nil };
 
 /// Signature for native functions, has access to garbage collector so values created
 /// by a native function can be cleaned up as well
@@ -91,7 +91,7 @@ pub const Type = enum {
 /// Unwraps the `Value` into the actual Type
 /// Returns null if Value is of different type
 pub fn unwrap(self: *Value, comptime l_type: Type) ?*l_type.LufType() {
-    if (self.l_type != l_type) return null;
+    if (self.ty != l_type) return null;
 
     return @fieldParentPtr(l_type.LufType(), "base", self);
 }
@@ -170,7 +170,7 @@ pub fn toOptional(self: *Value) *Optional {
 
 /// Returns true if the `Type` of the given `Value` is equal
 pub fn isType(self: *const Value, tag: Type) bool {
-    return self.l_type == tag;
+    return self.ty == tag;
 }
 
 /// Returns the `Value` as a Zig type
@@ -283,7 +283,7 @@ pub fn fromZig(gc: *Gc, val: anytype) !*Value {
                 return try gc.newValue(
                     Native,
                     .{
-                        .base = .{ .l_type = .native, .next = null, .is_marked = false },
+                        .base = .{ .ty = .native, .next = null, .is_marked = false },
                         .func = Func.call,
                         .arg_len = Fn.args.len,
                     },
@@ -313,7 +313,7 @@ pub fn fromZig(gc: *Gc, val: anytype) !*Value {
 /// Frees all memory of the `Value`.
 /// NOTE, for lists/maps it only frees the list/map itself, not the values it contains
 pub fn destroy(self: *Value, gpa: *Allocator) void {
-    switch (self.l_type) {
+    switch (self.ty) {
         .integer => self.toInteger().destroy(gpa),
         .string => self.toString().destroy(gpa),
         .function => self.toFunction().destroy(gpa),
@@ -338,7 +338,7 @@ pub const Integer = struct {
         return try gc.newValue(
             Integer,
             .{
-                .base = .{ .l_type = .integer, .next = null, .is_marked = false },
+                .base = .{ .ty = .integer, .next = null, .is_marked = false },
                 .value = val,
             },
         );
@@ -364,7 +364,7 @@ pub const String = struct {
         return try gc.newValue(
             String,
             .{
-                .base = .{ .l_type = .string, .next = null, .is_marked = false },
+                .base = .{ .ty = .string, .next = null, .is_marked = false },
                 .value = try gc.gpa.dupe(u8, val),
             },
         );
@@ -392,7 +392,7 @@ pub const Module = struct {
         return try gc.newValue(
             Module,
             .{
-                .base = .{ .l_type = .module, .next = null, .is_marked = false },
+                .base = .{ .ty = .module, .next = null, .is_marked = false },
                 .value = try gc.gpa.dupe(u8, val),
             },
         );
@@ -429,7 +429,7 @@ pub const Function = struct {
         return try gc.newValue(
             Function,
             .{
-                .base = .{ .l_type = .function, .next = null, .is_marked = false },
+                .base = .{ .ty = .function, .next = null, .is_marked = false },
                 .arg_len = arg_len,
                 .locals = locals,
                 .name = n,
@@ -452,7 +452,7 @@ pub const List = struct {
 
     pub fn create(gc: *Gc, len: ?usize) !*Value {
         var self = List{
-            .base = .{ .l_type = .list, .next = null, .is_marked = false },
+            .base = .{ .ty = .list, .next = null, .is_marked = false },
             .value = ListType{},
         };
 
@@ -474,7 +474,7 @@ pub const Map = struct {
 
     pub fn create(gc: *Gc, len: ?usize) !*Value {
         var self = Map{
-            .base = .{ .l_type = .map, .next = null, .is_marked = false },
+            .base = .{ .ty = .map, .next = null, .is_marked = false },
             .value = MapType{},
         };
 
@@ -507,7 +507,7 @@ pub const Range = struct {
         return try gc.newValue(
             Range,
             .{
-                .base = .{ .l_type = .range, .next = null, .is_marked = false },
+                .base = .{ .ty = .range, .next = null, .is_marked = false },
                 .start = start,
                 .end = end,
             },
@@ -529,7 +529,7 @@ pub const Enum = struct {
         return try gc.newValue(
             Enum,
             .{
-                .base = .{ .l_type = ._enum, .next = null, .is_marked = false },
+                .base = .{ .ty = ._enum, .next = null, .is_marked = false },
                 .value = enums,
             },
         );
@@ -552,7 +552,7 @@ pub const Iterable = struct {
         return try gc.newValue(
             Iterable,
             .{
-                .base = .{ .l_type = .iterable, .next = null, .is_marked = false },
+                .base = .{ .ty = .iterable, .next = null, .is_marked = false },
                 .expose_index = expose,
                 .index = index,
                 .value = value,
@@ -567,7 +567,7 @@ pub const Iterable = struct {
     /// Returns a new Value, returns null if end of iterator is reached
     /// This creates a copy of the actual value
     pub fn next(self: *@This(), gc: *Gc) !?*Value {
-        switch (self.value.l_type) {
+        switch (self.value.ty) {
             .list => {
                 const list = self.value.toList().value;
                 if (list.items.len == 0) return null;
@@ -605,7 +605,7 @@ pub const Optional = struct {
         return try gc.newValue(
             Optional,
             .{
-                .base = .{ .l_type = .optional, .next = null, .is_marked = false },
+                .base = .{ .ty = .optional, .next = null, .is_marked = false },
                 .child = value,
             },
         );
@@ -621,7 +621,7 @@ fn hash(key: *Value) u32 {
     const hashFn = std.hash.autoHash;
     var hasher = std.hash.Wyhash.init(0);
 
-    switch (key.l_type) {
+    switch (key.ty) {
         .integer => hashFn(&hasher, key.toInteger().value),
         .boolean => hashFn(&hasher, key.toBool().value),
         .string => hasher.update(key.toString().value),
@@ -659,7 +659,7 @@ fn hash(key: *Value) u32 {
 }
 
 fn eql(a: *Value, b: *Value) bool {
-    return switch (a.l_type) {
+    return switch (a.ty) {
         .integer => a.toInteger().value == b.toInteger().value,
         .boolean => a.toBool().value == b.toBool().value,
         .nil => true,
@@ -696,7 +696,7 @@ fn eql(a: *Value, b: *Value) bool {
 
 /// Prints a `Value` to the given `writer`
 pub fn print(self: *Value, writer: anytype) @TypeOf(writer).Error!void {
-    switch (self.l_type) {
+    switch (self.ty) {
         .integer => try writer.print("{}", .{self.toInteger().value}),
         .boolean => try writer.print("{}", .{self.toBool().value}),
         .string => try writer.writeAll(self.toString().value),

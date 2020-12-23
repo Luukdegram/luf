@@ -3,10 +3,10 @@ const Value = @import("../Value.zig");
 /// Prints input to stdout
 pub fn print(value: *Value) void {
     const writer = @import("std").io.getStdOut().writer();
-    switch (value.l_type) {
+    switch (value.ty) {
         .integer => writer.print("{d}", .{value.toInteger().value}) catch {},
         .string => writer.writeAll(value.toString().value) catch {},
-        else => @import("std").debug.panic("TODO: Implement std.fmt.print for type {s}\n", .{@tagName(value.l_type)}),
+        else => @import("std").debug.panic("TODO: Implement std.fmt.print for type {s}\n", .{@tagName(value.ty)}),
     }
 }
 
