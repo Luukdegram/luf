@@ -16,9 +16,9 @@ pub fn main() !void {
 
     const action = if (args.len >= 2) args[1] else return log.err("Missing argument 'build' or 'run'\n", .{});
 
-    if (!std.mem.eql(u8, action, "build") and !std.mem.eql(u8, action, "run")) return log.err("Invalid command '{}'\n", .{action});
+    if (!std.mem.eql(u8, action, "build") and !std.mem.eql(u8, action, "run")) return log.err("Invalid command '{s}'\n", .{action});
 
-    const file_path = if (args.len >= 3) args[2] else return log.err("Missing file path: 'luf {} <file_path>'\n", .{action});
+    const file_path = if (args.len >= 3) args[2] else return log.err("Missing file path: 'luf {s} <file_path>'\n", .{action});
 
     if (std.mem.eql(u8, action, "run")) {
         return runner(gpa, file_path);
@@ -57,7 +57,7 @@ fn runner(gpa: *std.mem.Allocator, file_path: []const u8) !void {
         return log.err("Unsupported file type, expected a '.luf' or '.blf' file\n", .{});
 
     const file = std.fs.cwd().openFile(file_path, .{}) catch |err| {
-        return log.err("Could not open file: '{}'\nError: {}\n", .{ file_path, @errorName(err) });
+        return log.err("Could not open file: '{s}'\nError: {s}\n", .{ file_path, @errorName(err) });
     };
 
     var vm = try luf.Vm.init(gpa);
@@ -74,7 +74,7 @@ fn runner(gpa: *std.mem.Allocator, file_path: []const u8) !void {
     }
 
     var byte_code = luf.byte_code.ByteCode.decodeFromStream(gpa, file.reader()) catch |err| {
-        return log.err("Could not decode bytecode: {}\n", .{@errorName(err)});
+        return log.err("Could not decode bytecode: {s}\n", .{@errorName(err)});
     };
     defer byte_code.deinit();
 
@@ -87,10 +87,10 @@ fn runner(gpa: *std.mem.Allocator, file_path: []const u8) !void {
 /// Compiles the luf source code and outputs its bytecode which can then be ran later
 fn builder(gpa: *std.mem.Allocator, file_path: []const u8, output_name: ?[]const u8) !void {
     if (!std.mem.endsWith(u8, file_path, ".luf"))
-        return log.err("Expected file with luf extension: '.luf' in path '{}'\n", .{file_path});
+        return log.err("Expected file with luf extension: '.luf' in path '{s}'\n", .{file_path});
 
     const file = std.fs.cwd().openFile(file_path, .{}) catch |err| {
-        return log.err("Could not open file with path '{}'\nError recieved: {}\n", .{ file_path, @errorName(err) });
+        return log.err("Could not open file with path '{s}'\nError recieved: {s}\n", .{ file_path, @errorName(err) });
     };
 
     const source = try file.readToEndAlloc(gpa, std.math.maxInt(u64));
@@ -118,10 +118,10 @@ fn builder(gpa: *std.mem.Allocator, file_path: []const u8, output_name: ?[]const
     defer if (output_name == null) gpa.free(final_output_name);
 
     const output_file = std.fs.cwd().createFile(final_output_name, .{}) catch |err| {
-        return log.err("Could not create output file '{}'\nError '{}'\n", .{ final_output_name, @errorName(err) });
+        return log.err("Could not create output file '{s}'\nError '{s}'\n", .{ final_output_name, @errorName(err) });
     };
 
     byte_code.encodeToStream(output_file.writer()) catch |err| {
-        return log.err("Could not write to output file '{}'\nError '{}'\n", .{ final_output_name, @errorName(err) });
+        return log.err("Could not write to output file '{s}'\nError '{s}'\n", .{ final_output_name, @errorName(err) });
     };
 }
