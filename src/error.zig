@@ -61,13 +61,13 @@ pub const Errors = struct {
                 .info => "\x1b[0;37m",
                 .warn => "\x1b[0;36m",
             };
-            try writer.print("{}error: \x1b[0m{}\n", .{ color_prefix, err.fmt });
+            try writer.print("{s}error: \x1b[0m{s}\n", .{ color_prefix, err.fmt });
 
             const start = findStart(source, err.index);
             const end = findEnd(source[err.index..]);
 
             //write the source code lines and point to token's index
-            try writer.print("{}\n", .{source[start .. err.index + end]});
+            try writer.print("{s}\n", .{source[start .. err.index + end]});
             try writer.writeByteNTimes('~', err.index - start);
             try writer.writeAll("\x1b[0;35m^\n\x1b[0m");
         }

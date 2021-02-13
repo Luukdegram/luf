@@ -304,7 +304,7 @@ pub const Compiler = struct {
         return switch (node) {
             .identifier => |id| {
                 const symbol = self.resolveSymbol(self.scope, id.value) orelse
-                    return self.fail("'{}' is undefined", id.token.start, .{id.value});
+                    return self.fail("'{s}' is undefined", id.token.start, .{id.value});
 
                 return self.resolveType(symbol.node);
             },
@@ -317,7 +317,7 @@ pub const Compiler = struct {
             .index => |index| return self.resolveType(index.left),
             .call_expression => |cal| return self.resolveType(cal.function),
             .slice => |slice| return self.resolveType(slice.left),
-            else => std.debug.panic("TODO, implement type resolving for type: {}\n", .{node}),
+            else => std.debug.panic("TODO, implement type resolving for type: {s}\n", .{node}),
         };
     }
 
@@ -329,7 +329,7 @@ pub const Compiler = struct {
                 const symbol = self.resolveSymbol(
                     self.scope,
                     id.value,
-                ) orelse return self.fail("'{}' is undefined", id.token.start, .{id.value});
+                ) orelse return self.fail("'{s}' is undefined", id.token.start, .{id.value});
 
                 return self.resolveScalarType(symbol.node);
             },
@@ -345,7 +345,7 @@ pub const Compiler = struct {
                     const function_name = index.index.string_lit.value;
                     const symbol = self.resolveSymbol(self.scope, index.left.identifier.value) orelse
                         return self.fail(
-                        "'{}' is undefined",
+                        "'{s}' is undefined",
                         index.left.tokenPos(),
                         .{index.left.identifier.value},
                     );
@@ -354,7 +354,7 @@ pub const Compiler = struct {
                         return Type.function; // Module imported by VM, therefore just return it as a function
 
                     const function_symbol: *Symbol = mod.symbols.get(function_name) orelse
-                        return self.fail("Module does not contain function '{}'", index.index.tokenPos(), .{function_name});
+                        return self.fail("Module does not contain function '{s}'", index.index.tokenPos(), .{function_name});
 
                     return self.resolveScalarType(function_symbol.node);
                 }
@@ -363,7 +363,7 @@ pub const Compiler = struct {
             },
             .call_expression => |cal| return self.resolveScalarType(cal.function),
             .slice => |slice| return self.resolveScalarType(slice.left),
-            else => std.debug.panic("TODO, implement scalar type resolving for type: {}\n", .{node.getType()}),
+            else => std.debug.panic("TODO, implement scalar type resolving for type: {s}\n", .{node.getType()}),
         };
     }
 
@@ -385,7 +385,7 @@ pub const Compiler = struct {
                 true,
                 decl.is_pub,
             )) orelse return self.fail(
-                "'{}' has already been declared",
+                "'{s}' has already been declared",
                 node.tokenPos(),
                 .{decl.name.identifier.value},
             );
@@ -424,12 +424,12 @@ pub const Compiler = struct {
         if (!std.mem.endsWith(u8, file_name, ".luf")) return;
 
         const file = std.fs.cwd().openFile(file_name, .{}) catch
-            return self.fail("Cannot open file with path '{}'", node.value.tokenPos(), .{file_name});
+            return self.fail("Cannot open file with path '{s}'", node.value.tokenPos(), .{file_name});
         defer file.close();
 
         const size = file.getEndPos() catch return self.fail("Unable to find file size", node.value.tokenPos(), .{});
         const source = file.reader().readAllAlloc(self.allocator, size) catch return self.fail(
-            "Failed to read content of file with path '{}'",
+            "Failed to read content of file with path '{s}'",
             node.value.tokenPos(),
             .{file_name},
         );
@@ -452,7 +452,7 @@ pub const Compiler = struct {
             const name = decl.name.identifier.value;
 
             if (module.symbols.contains(name))
-                return self.fail("Identifier '{}' already exists", n.declaration.name.tokenPos(), .{name});
+                return self.fail("Identifier '{s}' already exists", n.declaration.name.tokenPos(), .{name});
 
             const symbol = try self.allocator.create(Symbol);
             symbol.* = .{
@@ -537,7 +537,7 @@ pub const Compiler = struct {
         if (rhs == .list or rhs == .range or rhs == .function) rhs = try self.resolveScalarType(infix.right);
 
         if (lhs != rhs)
-            return self.fail("Expected type {} but found type {}", infix.right.tokenPos(), .{ lhs, rhs });
+            return self.fail("Expected type {s} but found type {s}", infix.right.tokenPos(), .{ lhs, rhs });
 
         const lhs_inst = try self.resolveInst(infix.left);
         const rhs_inst = try self.resolveInst(infix.right);
@@ -612,7 +612,7 @@ pub const Compiler = struct {
             if (rhs_type == .nil and explicit_type != .optional)
                 return self.fail("Cannot assign `nil` value to non-optional", decl.value.tokenPos(), .{})
             else if (explicit_type != .optional and explicit_type != rhs_type) {
-                return self.fail("Expected type {} but found type {}", decl.value.tokenPos(), .{ explicit_type, rhs_type });
+                return self.fail("Expected type {s} but found type {s}", decl.value.tokenPos(), .{ explicit_type, rhs_type });
             }
         }
 
@@ -621,7 +621,7 @@ pub const Compiler = struct {
                 s.forward_declared = false;
                 break :blk s;
             } else {
-                return self.fail("Identifier '{}' has already been declared", decl.token.start, .{decl.name.identifier.value});
+                return self.fail("Identifier '{s}' has already been declared", decl.token.start, .{decl.name.identifier.value});
             }
         } else blk: {
             const s = (try self.defineSymbol(decl.name.identifier.value, decl.mutable, node, false, decl.is_pub)).?;
@@ -657,7 +657,7 @@ pub const Compiler = struct {
     /// Compiles an `ast.Node.Identifier` node into a `lir.Inst.Ident`
     fn compileIdent(self: *Compiler, id: *ast.Node.Identifier) !*lir.Inst {
         const symbol = self.resolveSymbol(self.scope, id.value) orelse
-            return self.fail("Identifier '{}' is undefined", id.token.start, .{id.value});
+            return self.fail("Identifier '{s}' is undefined", id.token.start, .{id.value});
 
         return symbol.ident;
     }
@@ -674,7 +674,7 @@ pub const Compiler = struct {
             const el_type = try self.resolveScalarType(element);
             if (inner_type != el_type)
                 return self.fail(
-                    "Expected type {} but found type {} for element {}",
+                    "Expected type {s} but found type {s} for element {d}",
                     element.tokenPos(),
                     .{ inner_type, el_type, i },
                 );
@@ -763,7 +763,7 @@ pub const Compiler = struct {
         // function arguments are not mutable by default
         const symbol = (try self.defineSymbol(name, false, arg.arg_type, false, false)) orelse
             return self.fail(
-            "Identifier '{}' has already been declared",
+            "Identifier '{s}' has already been declared",
             arg.token.start,
             .{name},
         );
@@ -782,7 +782,7 @@ pub const Compiler = struct {
     /// Compiles a slice expression `ast.Node.SliceExpression` into a `lir.Inst.Triple`
     fn compileSlice(self: *Compiler, slice: *ast.Node.SliceExpression) !*lir.Inst {
         const ty = try self.resolveType(slice.left);
-        if (ty != .list) return self.fail("Expected a list but instead found type '{}'", slice.left.tokenPos(), .{ty});
+        if (ty != .list) return self.fail("Expected a list but instead found type '{s}'", slice.left.tokenPos(), .{ty});
 
         const left = try self.resolveInst(slice.left);
         const start = blk: {
@@ -826,7 +826,7 @@ pub const Compiler = struct {
         const function_node = if (call.function == .identifier and initial_function_type != .module) blk: {
             const function = self.resolveSymbol(self.scope, call.function.identifier.value) orelse
                 return self.fail(
-                "Function '{}' is undefined",
+                "Function '{s}' is undefined",
                 call.function.tokenPos(),
                 .{call.function.identifier.value},
             );
@@ -839,7 +839,7 @@ pub const Compiler = struct {
                 const function_name = call.function.index.index.string_lit.value;
                 const symbol = self.resolveSymbol(self.scope, call.function.index.left.identifier.value) orelse
                     return self.fail(
-                    "Identifier '{}' does not exist",
+                    "Identifier '{s}' does not exist",
                     call.function.index.left.tokenPos(),
                     .{call.function.index.left.identifier.value},
                 );
@@ -848,7 +848,7 @@ pub const Compiler = struct {
                 if (self.modules.get(module_name)) |mod| {
                     const decl_symbol: *Symbol = mod.symbols.get(function_name) orelse
                         return self.fail(
-                        "Module does not contain function '{}'",
+                        "Module does not contain function '{s}'",
                         call.function.tokenPos(),
                         .{function_name},
                     );
@@ -857,7 +857,7 @@ pub const Compiler = struct {
                 } else {
                     // check if it's a luf source file or possible library
                     if (std.mem.endsWith(u8, module_name, ".luf"))
-                        return self.fail("Module '{}' does not exist", call.token.start, .{module_name});
+                        return self.fail("Module '{s}' does not exist", call.token.start, .{module_name});
                 }
             }
 
@@ -877,7 +877,7 @@ pub const Compiler = struct {
         };
 
         if (function_node.params.len != call.arguments.len)
-            return self.fail("Expected {} arguments, but found {}", call.token.start, .{
+            return self.fail("Expected {d} arguments, but found {d}", call.token.start, .{
                 function_node.params.len,
                 call.arguments.len,
             });
@@ -888,7 +888,7 @@ pub const Compiler = struct {
 
             if (arg_type != func_arg_type)
                 return self.fail(
-                    "Expected type '{}' but found type '{}'",
+                    "Expected type '{s}' but found type '{s}'",
                     arg.tokenPos(),
                     .{ func_arg_type, arg_type },
                 );
@@ -923,7 +923,7 @@ pub const Compiler = struct {
 
         if (func_ret_type != ret_type)
             return self.fail(
-                "Expected return type '{}' but found type '{}'",
+                "Expected return type '{s}' but found type '{s}'",
                 ret.value.tokenPos(),
                 .{ func_ret_type, ret_type },
             );
@@ -950,7 +950,7 @@ pub const Compiler = struct {
 
         if (iterator_type != .list and iterator_type != .range and iterator_type != .string) {
             return self.fail(
-                "Expected a list, range or string, but found type '{}'",
+                "Expected a list, range or string, but found type '{s}'",
                 loop.iter.tokenPos(),
                 .{iterator_type},
             );
@@ -970,7 +970,7 @@ pub const Compiler = struct {
                 false, // not forward declared
                 false, // not public
             )) orelse return self.fail(
-                "Identifier '{}' has already been declared",
+                "Identifier '{s}' has already been declared",
                 loop.token.start,
                 .{i.identifier.value},
             );
@@ -988,7 +988,7 @@ pub const Compiler = struct {
             false, // not forward declared
             false, // not public
         )) orelse return self.fail(
-            "Capture identifier '{}' has already been declared",
+            "Capture identifier '{s}' has already been declared",
             loop.token.start,
             .{loop.capture.identifier.value},
         );
@@ -1017,12 +1017,12 @@ pub const Compiler = struct {
                 self.scope,
                 asg.left.identifier.value,
             ) orelse return self.fail(
-                "Identifier '{}' is undefined",
+                "Identifier '{s}' is undefined",
                 asg.token.start,
                 .{asg.left.identifier.value},
             );
 
-            if (!symbol.mutable) return self.fail("Identifier '{}' is constant", asg.token.start, .{symbol.name});
+            if (!symbol.mutable) return self.fail("Identifier '{s}' is constant", asg.token.start, .{symbol.name});
 
             const right_type = try self.resolveType(asg.right);
             const left_type = try self.resolveType(symbol.node);
@@ -1032,13 +1032,13 @@ pub const Compiler = struct {
             } else if (left_type == .optional) {
                 const child_type = try self.resolveScalarType(symbol.node);
                 if (child_type != right_type and right_type != .nil) {
-                    return self.fail("Assignment expected type '{}' but found type '{}'", asg.token.start, .{
+                    return self.fail("Assignment expected type '{s}' but found type '{s}'", asg.token.start, .{
                         child_type,
                         right_type,
                     });
                 }
             } else if (left_type != right_type)
-                return self.fail("Assignment expected type '{}' but found type '{}'", asg.token.start, .{
+                return self.fail("Assignment expected type '{s}' but found type '{s}'", asg.token.start, .{
                     left_type,
                     right_type,
                 });
@@ -1053,7 +1053,7 @@ pub const Compiler = struct {
             const rhs_type = try self.resolveScalarType(asg.right);
 
             if (lhs_type != rhs_type)
-                return self.fail("Expected type '{}' but found type '{}'", asg.right.tokenPos(), .{
+                return self.fail("Expected type '{s}' but found type '{s}'", asg.right.tokenPos(), .{
                     lhs_type,
                     rhs_type,
                 });
@@ -1084,7 +1084,7 @@ pub const Compiler = struct {
             try self.createScope(.module);
 
             const file = std.fs.cwd().openFile(file_name, .{}) catch
-                return self.fail("Could not open file at path '{}'", imp.token.start, .{file_name});
+                return self.fail("Could not open file at path '{s}'", imp.token.start, .{file_name});
             defer file.close();
             const size = file.getEndPos() catch return self.fail("Could not determine file size", imp.token.start, .{});
             const source = file.reader().readAllAlloc(self.allocator, size) catch
@@ -1138,8 +1138,8 @@ pub const Compiler = struct {
         const lhs_type = try self.resolveScalarType(range.left);
         const rhs_type = try self.resolveScalarType(range.right);
 
-        if (lhs_type != .integer) return self.fail("Expected an integer but found type '{}'", range.left.tokenPos(), .{lhs_type});
-        if (rhs_type != .integer) return self.fail("Expected an integer but found type '{}'", range.right.tokenPos(), .{rhs_type});
+        if (lhs_type != .integer) return self.fail("Expected an integer but found type '{s}'", range.left.tokenPos(), .{lhs_type});
+        if (rhs_type != .integer) return self.fail("Expected an integer but found type '{s}'", range.right.tokenPos(), .{rhs_type});
 
         const lhs = try self.resolveInst(range.left);
         const rhs = try self.resolveInst(range.right);
@@ -1153,7 +1153,7 @@ pub const Compiler = struct {
         for (enm.nodes) |n, i| {
             if (n != .identifier)
                 return self.fail(
-                    "Expected an identifier but found type '{}' inside the Enum declaration",
+                    "Expected an identifier but found type '{s}' inside the Enum declaration",
                     enm.token.start,
                     .{try self.resolveType(n)},
                 );
@@ -1173,7 +1173,7 @@ pub const Compiler = struct {
         const capture_type = try self.resolveType(sw.capture);
 
         if (capture_type != .integer and capture_type != .string)
-            return self.fail("Switches are only allowed for integers, enums and strings. Found type '{}'", sw.capture.tokenPos(), .{capture_type});
+            return self.fail("Switches are only allowed for integers, enums and strings. Found type '{s}'", sw.capture.tokenPos(), .{capture_type});
 
         for (sw.prongs) |p, i| {
             prongs[i] = try self.resolveInst(p);
@@ -1188,7 +1188,7 @@ pub const Compiler = struct {
         const prong_type = try self.resolveType(prong.left);
         switch (prong_type) {
             .integer, .string, .range => {},
-            else => return self.fail("Unpermitted type '{}' in switch case", prong.left.tokenPos(), .{prong_type}),
+            else => return self.fail("Unpermitted type '{s}' in switch case", prong.left.tokenPos(), .{prong_type}),
         }
 
         const lhs = try self.resolveInst(prong.left);
@@ -1395,7 +1395,7 @@ test "Assign" {
         },
         .{
             .input = "mut x = 5 x += 6 x",
-            .tags = &[_]lir.Inst.Tag{ .decl,  .expr, .expr },
+            .tags = &[_]lir.Inst.Tag{ .decl, .expr, .expr },
         },
     };
 
@@ -1408,11 +1408,11 @@ test "Optionals" {
     const test_cases = .{
         .{
             .input = "mut x: ?int = nil",
-            .tags = &[_]lir.Inst.Tag{ .decl  },
+            .tags = &[_]lir.Inst.Tag{.decl},
         },
         .{
             .input = "mut x: ?int = 5",
-            .tags = &[_]lir.Inst.Tag{ .decl },
+            .tags = &[_]lir.Inst.Tag{.decl},
         },
         .{
             .input = "mut x: ?int = nil x = 5",
