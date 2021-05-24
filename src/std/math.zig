@@ -1,5 +1,5 @@
 const math = @import("std").math;
 
-pub fn log(base: i64, x: i64) i64 {
-    return math.log(i64, base, x);
+pub fn log(base: u64, x: u64) u64 {
+    return math.log(u64, base, x);
 }

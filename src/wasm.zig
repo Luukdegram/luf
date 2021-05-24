@@ -764,7 +764,7 @@ fn testWasm(input: []const u8, expected: []const u8, with_output: TestOutput) !v
         std.debug.print("\n", .{});
     }
 
-    testing.expectEqualSlices(u8, expected, wasm);
+    try testing.expectEqualSlices(u8, expected, wasm);
 }
 
 const magic_bytes = &[_]u8{ 0, 'a', 's', 'm', 1, 0, 0, 0 };

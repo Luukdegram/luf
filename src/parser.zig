@@ -925,10 +925,10 @@ test "Parse Declaration" {
         const tree = try parse(allocator, case.input, &errors);
         defer tree.deinit();
         const node = tree.nodes[tree.nodes.len - 1].declaration;
-        testing.expectEqualSlices(u8, case.id, node.name.identifier.value);
-        testing.expect(case.expected == node.value.int_lit.value);
-        testing.expect(case.mutable == node.mutable);
-        testing.expect(case.is_pub == node.is_pub);
+        try testing.expectEqualSlices(u8, case.id, node.name.identifier.value);
+        try testing.expect(case.expected == node.value.int_lit.value);
+        try testing.expect(case.mutable == node.mutable);
+        try testing.expect(case.is_pub == node.is_pub);
     }
 }
 
@@ -938,8 +938,8 @@ test "Parse public declaration outside global scope" {
 
     var errors = Errors.init(allocator);
     defer errors.deinit();
-    testing.expectError(Parser.Error.ParserError, parse(allocator, input, &errors));
-    testing.expectEqual(@as(usize, 1), errors.list.items.len);
+    try testing.expectError(Parser.Error.ParserError, parse(allocator, input, &errors));
+    try testing.expectEqual(@as(usize, 1), errors.list.items.len);
 }
 
 test "Parse Return statment" {
@@ -956,14 +956,14 @@ test "Parse Return statment" {
         const tree = try parse(allocator, case.input, &errors);
         defer tree.deinit();
 
-        testing.expect(tree.nodes.len == 1);
+        try testing.expect(tree.nodes.len == 1);
 
         const node = tree.nodes[0].@"return".value;
 
         switch (@typeInfo(@TypeOf(case.expected))) {
-            .ComptimeInt => testing.expectEqual(@intCast(usize, case.expected), node.int_lit.value),
-            .Pointer => testing.expectEqualSlices(u8, case.expected, node.identifier.value),
-            .Bool => testing.expectEqual(case.expected, node.boolean.value),
+            .ComptimeInt => try testing.expectEqual(@intCast(usize, case.expected), node.int_lit.value),
+            .Pointer => try testing.expectEqualSlices(u8, case.expected, node.identifier.value),
+            .Bool => try testing.expectEqual(case.expected, node.boolean.value),
             else => @panic("Unexpected type"),
         }
     }
@@ -978,11 +978,11 @@ test "Parse identifier expression" {
     const tree = try parse(allocator, input, &errors);
     defer tree.deinit();
 
-    testing.expect(tree.nodes.len == 1);
+    try testing.expect(tree.nodes.len == 1);
 
     const identifier = tree.nodes[0].expression.value.identifier;
-    testing.expect(identifier.token.token_type == .identifier);
-    testing.expectEqualSlices(u8, identifier.value, input);
+    try testing.expect(identifier.token.token_type == .identifier);
+    try testing.expectEqualSlices(u8, identifier.value, input);
 }
 
 test "Parse integer literal" {
@@ -993,10 +993,10 @@ test "Parse integer literal" {
     const tree = try parse(allocator, input, &errors);
     defer tree.deinit();
 
-    testing.expect(tree.nodes.len == 1);
+    try testing.expect(tree.nodes.len == 1);
     const literal = tree.nodes[0].expression.value.int_lit;
-    testing.expect(literal.token.token_type == .integer);
-    testing.expect(literal.value == 124);
+    try testing.expect(literal.token.token_type == .integer);
+    try testing.expect(literal.value == 124);
 }
 
 test "Parse prefix expressions" {
@@ -1026,17 +1026,17 @@ test "Parse prefix expressions" {
         const tree = try parse(allocator, case.input, &errors);
         defer tree.deinit();
 
-        testing.expect(tree.nodes.len == 1);
+        try testing.expect(tree.nodes.len == 1);
 
         const prefix = tree.nodes[0].expression.value.prefix;
         switch (prefix.right) {
-            .int_lit => |int| testing.expect(case.expected.int == int.value),
-            .identifier => |id| testing.expectEqualSlices(u8, case.expected.string, id.value),
-            .boolean => |boolean| testing.expect(case.expected.boolean == boolean.value),
+            .int_lit => |int| try testing.expect(case.expected.int == int.value),
+            .identifier => |id| try testing.expectEqualSlices(u8, case.expected.string, id.value),
+            .boolean => |boolean| try testing.expect(case.expected.boolean == boolean.value),
             else => @panic("Unexpected Node"),
         }
 
-        testing.expectEqual(case.operator, prefix.operator);
+        try testing.expectEqual(case.operator, prefix.operator);
     }
 }
 
@@ -1066,12 +1066,12 @@ test "Parse infix expressions - integer" {
         const tree = try parse(allocator, case.input, &errors);
         defer tree.deinit();
 
-        testing.expect(tree.nodes.len == 1);
+        try testing.expect(tree.nodes.len == 1);
         const node: Node = tree.nodes[0];
         const infix: *Node.Infix = node.expression.value.infix;
-        testing.expectEqual(case.operator, infix.operator);
-        testing.expectEqual(case.left, infix.left.int_lit.value);
-        testing.expectEqual(case.right, infix.right.int_lit.value);
+        try testing.expectEqual(case.operator, infix.operator);
+        try testing.expectEqual(case.left, infix.left.int_lit.value);
+        try testing.expectEqual(case.right, infix.right.int_lit.value);
     }
 }
 
@@ -1083,12 +1083,12 @@ test "Parse infix expressions - identifier" {
     const tree = try parse(allocator, input, &errors);
     defer tree.deinit();
 
-    testing.expect(tree.nodes.len == 1);
+    try testing.expect(tree.nodes.len == 1);
     const node: Node = tree.nodes[0];
     const infix: *Node.Infix = node.expression.value.infix;
-    testing.expectEqualSlices(u8, "foobar", infix.left.identifier.value);
-    testing.expectEqualSlices(u8, "foobarz", infix.right.identifier.value);
-    testing.expect(infix.operator == .add);
+    try testing.expectEqualSlices(u8, "foobar", infix.left.identifier.value);
+    try testing.expectEqualSlices(u8, "foobarz", infix.right.identifier.value);
+    try testing.expect(infix.operator == .add);
 }
 
 test "Parse infix expressions - boolean" {
@@ -1099,12 +1099,12 @@ test "Parse infix expressions - boolean" {
     const tree = try parse(allocator, input, &errors);
     defer tree.deinit();
 
-    testing.expect(tree.nodes.len == 1);
+    try testing.expect(tree.nodes.len == 1);
     const node: Node = tree.nodes[0];
     const infix: *Node.Infix = node.expression.value.infix;
-    testing.expectEqual(true, infix.left.boolean.value);
-    testing.expectEqual(true, infix.right.boolean.value);
-    testing.expect(infix.operator == .equal);
+    try testing.expectEqual(true, infix.left.boolean.value);
+    try testing.expectEqual(true, infix.right.boolean.value);
+    try testing.expect(infix.operator == .equal);
 }
 
 test "Boolean expression" {
@@ -1115,8 +1115,8 @@ test "Boolean expression" {
     const tree = try parse(allocator, input, &errors);
     defer tree.deinit();
 
-    testing.expect(tree.nodes.len == 1);
-    testing.expect(tree.nodes[0].expression.value == .boolean);
+    try testing.expect(tree.nodes.len == 1);
+    try testing.expect(tree.nodes[0].expression.value == .boolean);
 }
 
 test "If expression" {
@@ -1127,10 +1127,10 @@ test "If expression" {
     const tree = try parse(allocator, input, &errors);
     defer tree.deinit();
 
-    testing.expect(tree.nodes.len == 1);
+    try testing.expect(tree.nodes.len == 1);
     const if_exp = tree.nodes[0].expression.value.if_expression;
-    testing.expect(if_exp.true_pong.block_statement.nodes[0] == .expression);
-    testing.expectEqualSlices(
+    try testing.expect(if_exp.true_pong.block_statement.nodes[0] == .expression);
+    try testing.expectEqualSlices(
         u8,
         if_exp.true_pong.block_statement.nodes[0].expression.value.identifier.value,
         "x",
@@ -1145,17 +1145,17 @@ test "If else expression" {
     const tree = try parse(allocator, input, &errors);
     defer tree.deinit();
 
-    testing.expect(tree.nodes.len == 1);
+    try testing.expect(tree.nodes.len == 1);
     const if_exp = tree.nodes[0].expression.value.if_expression;
-    testing.expect(if_exp.true_pong.block_statement.nodes[0] == .expression);
-    testing.expectEqualSlices(
+    try testing.expect(if_exp.true_pong.block_statement.nodes[0] == .expression);
+    try testing.expectEqualSlices(
         u8,
         if_exp.true_pong.block_statement.nodes[0].expression.value.identifier.value,
         "x",
     );
-    testing.expect(if_exp.false_pong != null);
-    testing.expect(if_exp.false_pong.?.block_statement.nodes[0] == .expression);
-    testing.expectEqualSlices(
+    try testing.expect(if_exp.false_pong != null);
+    try testing.expect(if_exp.false_pong.?.block_statement.nodes[0] == .expression);
+    try testing.expectEqualSlices(
         u8,
         if_exp.false_pong.?.block_statement.nodes[0].expression.value.identifier.value,
         "y",
@@ -1170,16 +1170,16 @@ test "If else-if expression" {
     const tree = try parse(allocator, input, &errors);
     defer tree.deinit();
 
-    testing.expect(tree.nodes.len == 1);
+    try testing.expect(tree.nodes.len == 1);
     const if_exp = tree.nodes[0].expression.value.if_expression;
-    testing.expect(if_exp.true_pong.block_statement.nodes[0] == .expression);
-    testing.expectEqualSlices(
+    try testing.expect(if_exp.true_pong.block_statement.nodes[0] == .expression);
+    try testing.expectEqualSlices(
         u8,
         if_exp.true_pong.block_statement.nodes[0].expression.value.identifier.value,
         "x",
     );
-    testing.expect(if_exp.false_pong != null);
-    testing.expect(if_exp.false_pong.?.expression.value.if_expression.false_pong != null);
+    try testing.expect(if_exp.false_pong != null);
+    try testing.expect(if_exp.false_pong.?.expression.value.if_expression.false_pong != null);
 }
 
 test "Function literal" {
@@ -1193,19 +1193,19 @@ test "Function literal" {
     };
     defer tree.deinit();
 
-    testing.expect(tree.nodes.len == 1);
+    try testing.expect(tree.nodes.len == 1);
 
     const func = tree.nodes[0].expression.value.func_lit;
-    testing.expect(func.params.len == 2);
+    try testing.expect(func.params.len == 2);
 
-    testing.expectEqualSlices(u8, func.params[0].func_arg.value, "x");
-    testing.expectEqualSlices(u8, func.params[1].func_arg.value, "y");
+    try testing.expectEqualSlices(u8, func.params[0].func_arg.value, "x");
+    try testing.expectEqualSlices(u8, func.params[1].func_arg.value, "y");
 
     const body = func.body.?.block_statement.nodes[0];
     const infix = body.expression.value.infix;
-    testing.expectEqual(infix.operator, .add);
-    testing.expectEqualSlices(u8, infix.left.identifier.value, "x");
-    testing.expectEqualSlices(u8, infix.right.identifier.value, "y");
+    try testing.expectEqual(infix.operator, .add);
+    try testing.expectEqualSlices(u8, infix.left.identifier.value, "x");
+    try testing.expectEqualSlices(u8, infix.right.identifier.value, "y");
 }
 
 test "Function parameters" {
@@ -1221,13 +1221,13 @@ test "Function parameters" {
         const tree = try parse(allocator, case.input, &errors);
         defer tree.deinit();
 
-        testing.expect(tree.nodes.len == 1);
+        try testing.expect(tree.nodes.len == 1);
 
         const func = tree.nodes[0].expression.value.func_lit;
-        testing.expect(func.params.len == case.expected.len);
+        try testing.expect(func.params.len == case.expected.len);
 
         inline for (case.expected) |exp, i| {
-            testing.expectEqualSlices(u8, exp, func.params[i].func_arg.value);
+            try testing.expectEqualSlices(u8, exp, func.params[i].func_arg.value);
         }
     }
 }
@@ -1241,15 +1241,15 @@ test "Call expression" {
     const tree = try parse(allocator, input, &errors);
     defer tree.deinit();
 
-    testing.expect(tree.nodes.len == 1);
+    try testing.expect(tree.nodes.len == 1);
 
     const call = tree.nodes[0].expression.value.call_expression;
-    testing.expectEqualSlices(u8, call.function.identifier.value, "add");
-    testing.expect(call.arguments.len == 3);
+    try testing.expectEqualSlices(u8, call.function.identifier.value, "add");
+    try testing.expect(call.arguments.len == 3);
 
-    testing.expect(call.arguments[0].int_lit.value == 1);
-    testing.expectEqual(call.arguments[1].infix.operator, .multiply);
-    testing.expect(call.arguments[2].infix.right.int_lit.value == 5);
+    try testing.expect(call.arguments[0].int_lit.value == 1);
+    try testing.expectEqual(call.arguments[1].infix.operator, .multiply);
+    try testing.expect(call.arguments[2].infix.right.int_lit.value == 5);
 }
 
 test "String expression" {
@@ -1261,10 +1261,10 @@ test "String expression" {
     const tree = try parse(allocator, input, &errors);
     defer tree.deinit();
 
-    testing.expect(tree.nodes.len == 1);
+    try testing.expect(tree.nodes.len == 1);
 
     const string = tree.nodes[0].expression.value.string_lit;
-    testing.expectEqualSlices(u8, "Hello, world", string.value);
+    try testing.expectEqualSlices(u8, "Hello, world", string.value);
 }
 
 test "Member expression" {
@@ -1276,12 +1276,12 @@ test "Member expression" {
     const tree = try parse(allocator, input, &errors);
     defer tree.deinit();
 
-    testing.expect(tree.nodes.len == 1);
+    try testing.expect(tree.nodes.len == 1);
 
     const index = tree.nodes[0].expression.value.index;
-    testing.expectEqualSlices(u8, "bar", index.index.string_lit.value);
-    testing.expectEqualSlices(u8, "foo", index.left.identifier.value);
-    testing.expect(index.token.token_type == .period);
+    try testing.expectEqualSlices(u8, "bar", index.index.string_lit.value);
+    try testing.expectEqualSlices(u8, "foo", index.left.identifier.value);
+    try testing.expect(index.token.token_type == .period);
 }
 
 test "Array literal" {
@@ -1293,12 +1293,12 @@ test "Array literal" {
     const tree = try parse(allocator, input, &errors);
     defer tree.deinit();
 
-    testing.expect(tree.nodes.len == 1);
+    try testing.expect(tree.nodes.len == 1);
 
     const array = tree.nodes[0].expression.value.data_structure;
-    testing.expect(array.value.?.len == 3);
-    testing.expect(array.value.?[0].int_lit.value == 1);
-    testing.expect(array.value.?[1].infix.operator == .multiply);
+    try testing.expect(array.value.?.len == 3);
+    try testing.expect(array.value.?[0].int_lit.value == 1);
+    try testing.expect(array.value.?[1].infix.operator == .multiply);
 }
 
 test "Array index" {
@@ -1310,11 +1310,11 @@ test "Array index" {
     const tree = try parse(allocator, input, &errors);
     defer tree.deinit();
 
-    testing.expect(tree.nodes.len == 1);
+    try testing.expect(tree.nodes.len == 1);
 
     const index = tree.nodes[0].expression.value.index;
-    testing.expect(index.left == .identifier);
-    testing.expect(index.index.int_lit.value == 1);
+    try testing.expect(index.left == .identifier);
+    try testing.expect(index.index.int_lit.value == 1);
 }
 
 test "Map Literal" {
@@ -1327,10 +1327,10 @@ test "Map Literal" {
     const tree = try parse(allocator, input, &errors);
     defer tree.deinit();
 
-    testing.expect(tree.nodes.len == 1);
+    try testing.expect(tree.nodes.len == 1);
 
     const map = tree.nodes[0].expression.value.data_structure;
-    testing.expect(map.value.?.len == 2);
+    try testing.expect(map.value.?.len == 2);
 
     const expected = .{
         .{ .key = "foo", .value = 1 },
@@ -1339,13 +1339,13 @@ test "Map Literal" {
 
     inline for (expected) |case, i| {
         const pair: *Node.MapPair = map.value.?[i].map_pair;
-        testing.expectEqualSlices(u8, case.key, pair.key.string_lit.value);
-        testing.expect(case.value == pair.value.int_lit.value);
+        try testing.expectEqualSlices(u8, case.key, pair.key.string_lit.value);
+        try testing.expect(case.value == pair.value.int_lit.value);
     }
 
-    testing.expectEqual(Type.map, tree.nodes[0].getType().?);
-    testing.expectEqual(Type.string, tree.nodes[0].getInnerType().?);
-    testing.expectEqual(Type.integer, map.type_def_value.?.getInnerType().?);
+    try testing.expectEqual(Type.map, tree.nodes[0].getType().?);
+    try testing.expectEqual(Type.string, tree.nodes[0].getInnerType().?);
+    try testing.expectEqual(Type.integer, map.type_def_value.?.getInnerType().?);
 }
 
 test "While loop" {
@@ -1357,13 +1357,13 @@ test "While loop" {
     const tree = try parse(allocator, input, &errors);
     defer tree.deinit();
 
-    testing.expect(tree.nodes.len == 1);
+    try testing.expect(tree.nodes.len == 1);
 
     const loop = tree.nodes[0].while_loop;
 
-    testing.expect(loop.condition.infix.operator == .less_than);
-    testing.expect(loop.block.block_statement.nodes.len == 1);
-    testing.expectEqualStrings("x", loop.block.block_statement.nodes[0].expression.value.identifier.value);
+    try testing.expect(loop.condition.infix.operator == .less_than);
+    try testing.expect(loop.block.block_statement.nodes.len == 1);
+    try testing.expectEqualStrings("x", loop.block.block_statement.nodes[0].expression.value.identifier.value);
 }
 
 test "Assignment" {
@@ -1380,8 +1380,8 @@ test "Assignment" {
         const tree = try parse(allocator, case.input, &errors);
         defer tree.deinit();
         const node = tree.nodes[tree.nodes.len - 1].expression.value.assignment;
-        testing.expectEqualSlices(u8, case.id, node.left.identifier.value);
-        testing.expect(case.expected == node.right.int_lit.value);
+        try testing.expectEqualSlices(u8, case.id, node.left.identifier.value);
+        try testing.expect(case.expected == node.right.int_lit.value);
     }
 }
 
@@ -1394,10 +1394,10 @@ test "Comment expression" {
     const tree = try parse(allocator, input, &errors);
     defer tree.deinit();
 
-    testing.expect(tree.nodes.len == 1);
+    try testing.expect(tree.nodes.len == 1);
 
     const comment = tree.nodes[0].comment;
-    testing.expectEqualStrings("This is a comment", comment.value);
+    try testing.expectEqualStrings("This is a comment", comment.value);
 }
 
 test "For loop" {
@@ -1409,16 +1409,16 @@ test "For loop" {
     const tree = try parse(allocator, input, &errors);
     defer tree.deinit();
 
-    testing.expect(tree.nodes.len == 1);
+    try testing.expect(tree.nodes.len == 1);
 
     const loop = tree.nodes[0].for_loop;
 
-    testing.expect(loop.index != null);
-    testing.expectEqualStrings("x", loop.iter.identifier.value);
-    testing.expectEqualStrings("id", loop.capture.identifier.value);
-    testing.expectEqualStrings("i", loop.index.?.identifier.value);
-    testing.expect(loop.block.block_statement.nodes.len == 1);
-    testing.expectEqualStrings("id", loop.block.block_statement.nodes[0].expression.value.identifier.value);
+    try testing.expect(loop.index != null);
+    try testing.expectEqualStrings("x", loop.iter.identifier.value);
+    try testing.expectEqualStrings("id", loop.capture.identifier.value);
+    try testing.expectEqualStrings("i", loop.index.?.identifier.value);
+    try testing.expect(loop.block.block_statement.nodes.len == 1);
+    try testing.expectEqualStrings("id", loop.block.block_statement.nodes[0].expression.value.identifier.value);
 }
 
 test "Enum" {
@@ -1430,13 +1430,13 @@ test "Enum" {
     const tree = try parse(allocator, input, &errors);
     defer tree.deinit();
 
-    testing.expect(tree.nodes.len == 1);
+    try testing.expect(tree.nodes.len == 1);
 
     const enum_val = tree.nodes[0].expression.value.@"enum";
-    testing.expect(enum_val.nodes.len == 3);
-    testing.expectEqualStrings("value", enum_val.nodes[0].identifier.value);
-    testing.expectEqualStrings("another_value", enum_val.nodes[1].identifier.value);
-    testing.expectEqualStrings("third_value", enum_val.nodes[2].identifier.value);
+    try testing.expect(enum_val.nodes.len == 3);
+    try testing.expectEqualStrings("value", enum_val.nodes[0].identifier.value);
+    try testing.expectEqualStrings("another_value", enum_val.nodes[1].identifier.value);
+    try testing.expectEqualStrings("third_value", enum_val.nodes[2].identifier.value);
 }
 
 test "Enum" {
@@ -1457,15 +1457,15 @@ test "Enum" {
     const tree = try parse(allocator, input, &errors);
     defer tree.deinit();
 
-    testing.expect(tree.nodes.len == 1);
+    try testing.expect(tree.nodes.len == 1);
 
     const switch_stmt = tree.nodes[0].switch_statement;
-    testing.expect(switch_stmt.capture == .int_lit);
-    testing.expect(switch_stmt.prongs.len == 3);
+    try testing.expect(switch_stmt.capture == .int_lit);
+    try testing.expect(switch_stmt.prongs.len == 3);
     for (switch_stmt.prongs) |p, i| {
-        testing.expectEqual(@as(u64, i + 1), p.switch_prong.left.int_lit.value);
+        try testing.expectEqual(@as(u64, i + 1), p.switch_prong.left.int_lit.value);
     }
-    testing.expect(switch_stmt.prongs[1].switch_prong.right == .block_statement);
+    try testing.expect(switch_stmt.prongs[1].switch_prong.right == .block_statement);
 }
 
 test "Type definitions" {
@@ -1487,14 +1487,14 @@ test "Type definitions" {
 
     const func_type = function.nodes[0].getInnerType();
     const arg_type = function.nodes[0].expression.value.func_lit.params[0].getType();
-    testing.expectEqual(Type._void, func_type.?);
-    testing.expectEqual(Type.integer, arg_type.?);
+    try testing.expectEqual(Type._void, func_type.?);
+    try testing.expectEqual(Type.integer, arg_type.?);
 
     const declaration = try parse(allocator, cases[1], &errors);
     defer declaration.deinit();
 
     const decl_type = declaration.nodes[0].getType();
-    testing.expectEqual(Type.integer, decl_type.?);
+    try testing.expectEqual(Type.integer, decl_type.?);
 
     const array = try parse(allocator, cases[2], &errors);
     defer array.deinit();
@@ -1502,9 +1502,9 @@ test "Type definitions" {
     const array_type = array.nodes[0].expression.value.func_lit.params[0].getType();
     const scalar_type = array.nodes[0].expression.value.func_lit.params[0].getInnerType();
     const ret_type = array.nodes[0].getInnerType();
-    testing.expectEqual(Type.list, array_type.?);
-    testing.expectEqual(Type.integer, scalar_type.?);
-    testing.expectEqual(Type.string, ret_type.?);
+    try testing.expectEqual(Type.list, array_type.?);
+    try testing.expectEqual(Type.integer, scalar_type.?);
+    try testing.expectEqual(Type.string, ret_type.?);
 
     const optional = try parse(allocator, cases[3], &errors);
     defer optional.deinit();
@@ -1512,8 +1512,8 @@ test "Type definitions" {
     const optional_type = optional.nodes[0].getType();
     const optional_child_type = optional.nodes[0].getInnerType();
 
-    testing.expectEqual(Type.optional, optional_type.?);
-    testing.expectEqual(Type.integer, optional_child_type.?);
+    try testing.expectEqual(Type.optional, optional_type.?);
+    try testing.expectEqual(Type.integer, optional_child_type.?);
 }
 
 test "Parse slice expression" {
@@ -1531,7 +1531,7 @@ test "Parse slice expression" {
         defer parsed.deinit();
 
         const node = parsed.nodes[1].declaration.value.slice;
-        testing.expectEqual(@as(?u64, case.expected[0]), if (node.start) |n| n.int_lit.value else null);
-        testing.expectEqual(@as(?u64, case.expected[1]), if (node.end) |n| n.int_lit.value else null);
+        try testing.expectEqual(@as(?u64, case.expected[0]), if (node.start) |n| n.int_lit.value else null);
+        try testing.expectEqual(@as(?u64, case.expected[1]), if (node.end) |n| n.int_lit.value else null);
     }
 }

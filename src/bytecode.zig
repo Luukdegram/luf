@@ -571,9 +571,7 @@ pub const Instruction = union(Type) {
         entry: u32,
     },
 
-    const Type = enum {
-        op, ptr, integer, string, function
-    };
+    const Type = enum { op, ptr, integer, string, function };
 
     /// Returns the Opcode of the Instruction
     pub fn getOp(self: Instruction) Opcode {
@@ -872,26 +870,26 @@ test "Encoding and decoding of instructions" {
     const load_int = "\x00\x05\x00\x00\x00\x00\x00\x00\x00";
     const load_ptr = "\x0F\x05\x00\x00\x00";
     const load_fn = "\x02\x03add\x02\x00\x00\x00\x02\x01\x00\x00\x00";
-    testing.expectEqualSlices(u8, load_false ++ load_string ++ load_int ++ load_ptr ++ load_fn, code);
-    testing.expectEqualSlices(u8, load_false ++ load_string ++ load_int ++ load_ptr ++ load_fn, stream.getWritten());
+    try testing.expectEqualSlices(u8, load_false ++ load_string ++ load_int ++ load_ptr ++ load_fn, code);
+    try testing.expectEqualSlices(u8, load_false ++ load_string ++ load_int ++ load_ptr ++ load_fn, stream.getWritten());
 
     stream.reset();
     const decoded = try Decoder.decode(stream.reader(), allocator);
     defer allocator.free(decoded);
 
-    testing.expectEqual(instructions.len, decoded.len);
+    try testing.expectEqual(instructions.len, decoded.len);
 
     for (instructions) |inst, i| {
         switch (inst) {
-            .op => testing.expectEqual(inst.op, decoded[i].op),
-            .ptr => testing.expectEqual(inst.ptr.pos, decoded[i].ptr.pos),
-            .string => testing.expectEqualStrings(inst.string, decoded[i].string),
-            .integer => testing.expectEqual(inst.integer, decoded[i].integer),
+            .op => try testing.expectEqual(inst.op, decoded[i].op),
+            .ptr => try testing.expectEqual(inst.ptr.pos, decoded[i].ptr.pos),
+            .string => try testing.expectEqualStrings(inst.string, decoded[i].string),
+            .integer => try testing.expectEqual(inst.integer, decoded[i].integer),
             .function => |func| {
-                testing.expectEqualStrings(func.name, decoded[i].function.name);
-                testing.expectEqual(func.locals, decoded[i].function.locals);
-                testing.expectEqual(func.arg_len, decoded[i].function.arg_len);
-                testing.expectEqual(func.entry, decoded[i].function.entry);
+                try testing.expectEqualStrings(func.name, decoded[i].function.name);
+                try testing.expectEqual(func.locals, decoded[i].function.locals);
+                try testing.expectEqual(func.arg_len, decoded[i].function.arg_len);
+                try testing.expectEqual(func.entry, decoded[i].function.entry);
             },
         }
     }
@@ -915,7 +913,7 @@ fn testInput(input: []const u8, expected: []const Opcode) !void {
     defer result.deinit();
 
     for (expected) |exp, i| {
-        testing.expectEqual(exp, result.instructions[i].getOp());
+        try testing.expectEqual(exp, result.instructions[i].getOp());
     }
 }
 

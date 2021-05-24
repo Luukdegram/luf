@@ -960,8 +960,8 @@ test "Integer arithmetic" {
         defer vm.deinit();
         try vm.compileAndRun(case.input);
 
-        testing.expect(case.expected == vm.peek().toInteger().value);
-        testing.expectEqual(@as(usize, 0), vm.sp);
+        try testing.expect(case.expected == vm.peek().toInteger().value);
+        try testing.expectEqual(@as(usize, 0), vm.sp);
     }
 }
 
@@ -988,8 +988,8 @@ test "Boolean" {
         defer vm.deinit();
         try vm.compileAndRun(case.input);
 
-        testing.expect(case.expected == vm.peek().toBool().value);
-        testing.expectEqual(@as(usize, 0), vm.sp);
+        try testing.expect(case.expected == vm.peek().toBool().value);
+        try testing.expectEqual(@as(usize, 0), vm.sp);
     }
 }
 
@@ -1012,11 +1012,11 @@ test "Conditional expression" {
         try vm.compileAndRun(case.input);
 
         if (@TypeOf(case.expected) == comptime_int) {
-            testing.expectEqual(@as(i64, case.expected), vm.peek().toInteger().value);
+            try testing.expectEqual(@as(i64, case.expected), vm.peek().toInteger().value);
         } else {
-            testing.expectEqual(case.expected, vm.peek());
+            try testing.expectEqual(case.expected, vm.peek());
         }
-        testing.expectEqual(@as(usize, 0), vm.sp);
+        try testing.expectEqual(@as(usize, 0), vm.sp);
     }
 }
 
@@ -1032,8 +1032,8 @@ test "Declaration" {
         defer vm.deinit();
         try vm.compileAndRun(case.input);
 
-        testing.expectEqual(@as(i64, case.expected), vm.peek().toInteger().value);
-        testing.expectEqual(@as(usize, 0), vm.sp);
+        try testing.expectEqual(@as(i64, case.expected), vm.peek().toInteger().value);
+        try testing.expectEqual(@as(usize, 0), vm.sp);
     }
 }
 
@@ -1049,8 +1049,8 @@ test "Strings" {
         defer vm.deinit();
         try vm.compileAndRun(case.input);
 
-        testing.expectEqualStrings(case.expected, vm.peek().toString().value);
-        testing.expectEqual(@as(usize, 0), vm.sp);
+        try testing.expectEqualStrings(case.expected, vm.peek().toString().value);
+        try testing.expectEqual(@as(usize, 0), vm.sp);
     }
 }
 
@@ -1067,12 +1067,12 @@ test "Arrays" {
         try vm.compileAndRun(case.input);
 
         const list = vm.peek().toList();
-        testing.expectEqual(case.expected.len, list.value.items.len);
+        try testing.expectEqual(case.expected.len, list.value.items.len);
         inline for (case.expected) |int, i| {
             const items = list.value.items;
-            testing.expectEqual(int, items[i].toInteger().value);
+            try testing.expectEqual(int, items[i].toInteger().value);
         }
-        testing.expectEqual(@as(usize, 0), vm.sp);
+        try testing.expectEqual(@as(usize, 0), vm.sp);
     }
 }
 
@@ -1089,21 +1089,21 @@ test "Maps" {
         try vm.compileAndRun(case.input);
 
         const map = vm.peek().toMap().value;
-        testing.expect(map.items().len == case.expected.len);
+        try testing.expect(map.items().len == case.expected.len);
         inline for (case.expected) |int, i| {
             const items = map.items();
-            testing.expectEqual(int, items[i].value.toInteger().value);
+            try testing.expectEqual(int, items[i].value.toInteger().value);
         }
 
         inline for (case.keys) |key, i| {
             const item = map.items()[i];
             if (@TypeOf(key) == i64) {
-                testing.expectEqual(key, item.key.toInteger().value);
+                try testing.expectEqual(key, item.key.toInteger().value);
             } else {
-                testing.expectEqualStrings(key, item.key.toString().value);
+                try testing.expectEqualStrings(key, item.key.toString().value);
             }
         }
-        testing.expectEqual(@as(usize, 0), vm.sp);
+        try testing.expectEqual(@as(usize, 0), vm.sp);
     }
 }
 
@@ -1125,13 +1125,13 @@ test "Index" {
         try vm.compileAndRun(case.input);
 
         if (@TypeOf(case.expected) == comptime_int)
-            testing.expectEqual(@as(i64, case.expected), vm.peek().toInteger().value)
+            try testing.expectEqual(@as(i64, case.expected), vm.peek().toInteger().value)
         else if (@TypeOf(case.expected) == *const [1:0]u8)
-            testing.expectEqualStrings(case.expected, vm.peek().toString().value)
+            try testing.expectEqualStrings(case.expected, vm.peek().toString().value)
         else {
-            testing.expectEqual(case.expected, vm.peek());
+            try testing.expectEqual(case.expected, vm.peek());
         }
-        testing.expectEqual(@as(usize, 0), vm.sp);
+        try testing.expectEqual(@as(usize, 0), vm.sp);
     }
 }
 
@@ -1149,11 +1149,11 @@ test "Basic function calls with no arguments" {
         try vm.compileAndRun(case.input);
 
         if (@TypeOf(case.expected) == comptime_int)
-            testing.expectEqual(@as(i64, case.expected), vm.peek().toInteger().value)
+            try testing.expectEqual(@as(i64, case.expected), vm.peek().toInteger().value)
         else {
-            testing.expectEqual(case.expected, vm.peek());
+            try testing.expectEqual(case.expected, vm.peek());
         }
-        testing.expectEqual(@as(usize, 0), vm.sp);
+        try testing.expectEqual(@as(usize, 0), vm.sp);
     }
 }
 
@@ -1167,16 +1167,16 @@ test "Globals vs Locals" {
         var vm = try Vm.init(testing.allocator);
         defer vm.deinit();
         if (i == 0) {
-            testing.expectError(compiler.Compiler.Error.CompilerError, vm.compileAndRun(case.input));
+            try testing.expectError(compiler.Compiler.Error.CompilerError, vm.compileAndRun(case.input));
             continue;
         } else
             try vm.compileAndRun(case.input);
 
         if (@TypeOf(case.expected) == comptime_int)
-            testing.expectEqual(@as(i64, case.expected), vm.peek().toInteger().value)
+            try testing.expectEqual(@as(i64, case.expected), vm.peek().toInteger().value)
         else
-            testing.expectEqual(case.expected, vm.peek());
-        testing.expectEqual(@as(usize, 0), vm.sp);
+            try testing.expectEqual(case.expected, vm.peek());
+        try testing.expectEqual(@as(usize, 0), vm.sp);
     }
 }
 
@@ -1193,10 +1193,10 @@ test "Functions with arguments" {
         try vm.compileAndRun(case.input);
 
         if (@TypeOf(case.expected) == comptime_int)
-            testing.expectEqual(@as(i64, case.expected), vm.peek().toInteger().value)
+            try testing.expectEqual(@as(i64, case.expected), vm.peek().toInteger().value)
         else
-            testing.expectEqual(case.expected, vm.peek());
-        testing.expectEqual(@as(usize, 0), vm.sp);
+            try testing.expectEqual(case.expected, vm.peek());
+        try testing.expectEqual(@as(usize, 0), vm.sp);
     }
 }
 
@@ -1213,8 +1213,8 @@ test "Builtins" {
         defer vm.deinit();
 
         try vm.compileAndRun(case.input);
-        testing.expectEqual(@as(i64, case.expected), vm.peek().toInteger().value);
-        testing.expectEqual(@as(usize, 0), vm.sp);
+        try testing.expectEqual(@as(i64, case.expected), vm.peek().toInteger().value);
+        try testing.expectEqual(@as(usize, 0), vm.sp);
     }
 }
 
@@ -1230,8 +1230,8 @@ test "While loop" {
         defer vm.deinit();
         try vm.compileAndRun(case.input);
 
-        testing.expectEqual(@as(i64, case.expected), vm.peek().toInteger().value);
-        testing.expectEqual(@as(usize, 0), vm.sp);
+        try testing.expectEqual(@as(i64, case.expected), vm.peek().toInteger().value);
+        try testing.expectEqual(@as(usize, 0), vm.sp);
     }
 }
 
@@ -1249,8 +1249,8 @@ test "Tail recursion" {
     defer vm.deinit();
     try vm.compileAndRun(input);
 
-    testing.expectEqual(@as(i64, 10), vm.peek().toInteger().value);
-    testing.expectEqual(@as(usize, 0), vm.sp);
+    try testing.expectEqual(@as(i64, 10), vm.peek().toInteger().value);
+    try testing.expectEqual(@as(usize, 0), vm.sp);
 }
 
 test "Basic For loop" {
@@ -1264,8 +1264,8 @@ test "Basic For loop" {
     var vm = try Vm.init(testing.allocator);
     defer vm.deinit();
     try vm.compileAndRun(input);
-    testing.expectEqual(@as(i64, 25), vm.peek().toInteger().value);
-    testing.expectEqual(@as(usize, 0), vm.sp);
+    try testing.expectEqual(@as(i64, 25), vm.peek().toInteger().value);
+    try testing.expectEqual(@as(usize, 0), vm.sp);
 }
 
 test "For loop continue + break" {
@@ -1285,8 +1285,8 @@ test "For loop continue + break" {
     var vm = try Vm.init(testing.allocator);
     defer vm.deinit();
     try vm.compileAndRun(input);
-    testing.expectEqual(@as(i64, 8), vm.peek().toInteger().value);
-    testing.expectEqual(@as(usize, 0), vm.sp);
+    try testing.expectEqual(@as(i64, 8), vm.peek().toInteger().value);
+    try testing.expectEqual(@as(usize, 0), vm.sp);
 }
 
 test "Range" {
@@ -1304,8 +1304,8 @@ test "Range" {
     defer vm.deinit();
     try vm.compileAndRun(input);
 
-    testing.expectEqual(@as(i64, 4950), vm.peek().toInteger().value);
-    testing.expectEqual(@as(usize, 0), vm.sp);
+    try testing.expectEqual(@as(i64, 4950), vm.peek().toInteger().value);
+    try testing.expectEqual(@as(usize, 0), vm.sp);
 }
 
 test "For loop - String" {
@@ -1314,8 +1314,8 @@ test "For loop - String" {
     defer vm.deinit();
     try vm.compileAndRun(input);
 
-    testing.expectEqualStrings("helloworld", vm.peek().toString().value);
-    testing.expectEqual(@as(usize, 0), vm.sp);
+    try testing.expectEqualStrings("helloworld", vm.peek().toString().value);
+    try testing.expectEqual(@as(usize, 0), vm.sp);
 }
 
 test "Enum expression and comparison" {
@@ -1331,8 +1331,8 @@ test "Enum expression and comparison" {
     defer vm.deinit();
     try vm.compileAndRun(input);
 
-    testing.expectEqual(@as(i64, 1), vm.peek().toInteger().value);
-    testing.expectEqual(@as(usize, 0), vm.sp);
+    try testing.expectEqual(@as(i64, 1), vm.peek().toInteger().value);
+    try testing.expectEqual(@as(usize, 0), vm.sp);
 }
 
 test "Switch case" {
@@ -1350,8 +1350,8 @@ test "Switch case" {
     defer vm.deinit();
     try vm.compileAndRun(input);
 
-    testing.expectEqual(@as(i64, 50), vm.peek().toInteger().value);
-    testing.expectEqual(@as(usize, 0), vm.sp);
+    try testing.expectEqual(@as(i64, 50), vm.peek().toInteger().value);
+    try testing.expectEqual(@as(usize, 0), vm.sp);
 }
 
 test "Forward declared" {
@@ -1368,8 +1368,8 @@ test "Forward declared" {
     var vm = try Vm.init(testing.allocator);
     defer vm.deinit();
     try vm.compileAndRun(input);
-    testing.expectEqual(@as(i64, 8), vm.peek().toInteger().value);
-    testing.expectEqual(@as(usize, 0), vm.sp);
+    try testing.expectEqual(@as(i64, 8), vm.peek().toInteger().value);
+    try testing.expectEqual(@as(usize, 0), vm.sp);
 }
 
 test "Import module" {
@@ -1381,8 +1381,8 @@ test "Import module" {
     var vm = try Vm.init(testing.allocator);
     defer vm.deinit();
     try vm.compileAndRun(input);
-    testing.expectEqual(@as(i64, 30), vm.peek().toInteger().value);
-    testing.expectEqual(@as(usize, 0), vm.sp);
+    try testing.expectEqual(@as(i64, 30), vm.peek().toInteger().value);
+    try testing.expectEqual(@as(usize, 0), vm.sp);
 }
 
 test "Luf function from Zig" {
@@ -1406,9 +1406,9 @@ test "Luf function from Zig" {
     const val = try vm.callFunc("add", .{ 2, 5 });
     const val2 = try vm.callFunc("concat", .{"hello"});
 
-    testing.expectEqual(@as(i64, 7), val.toInteger().value);
-    testing.expectEqualStrings("hello world", val2.toString().value);
-    testing.expectEqual(@as(usize, 0), vm.sp);
+    try testing.expectEqual(@as(i64, 7), val.toInteger().value);
+    try testing.expectEqualStrings("hello world", val2.toString().value);
+    try testing.expectEqual(@as(usize, 0), vm.sp);
 }
 
 test "Inner functions" {
@@ -1426,8 +1426,8 @@ test "Inner functions" {
     var vm = try Vm.init(testing.allocator);
     defer vm.deinit();
     try vm.compileAndRun(input);
-    testing.expectEqual(@as(i64, 60), vm.peek().toInteger().value);
-    testing.expectEqual(@as(usize, 0), vm.sp);
+    try testing.expectEqual(@as(i64, 60), vm.peek().toInteger().value);
+    try testing.expectEqual(@as(usize, 0), vm.sp);
 }
 
 fn testZigFromLuf(a: u32, b: u32) u32 {
@@ -1444,8 +1444,8 @@ test "Zig from Luf" {
     try vm.loadLib("zig", testZigFromLuf);
     defer vm.deinit();
     try vm.compileAndRun(input);
-    testing.expectEqual(@as(i64, 7), vm.peek().toInteger().value);
-    testing.expectEqual(@as(usize, 0), vm.sp);
+    try testing.expectEqual(@as(i64, 7), vm.peek().toInteger().value);
+    try testing.expectEqual(@as(usize, 0), vm.sp);
 }
 
 test "Luf std" {
@@ -1456,8 +1456,8 @@ test "Luf std" {
     var vm = try Vm.init(testing.allocator);
     defer vm.deinit();
     try vm.compileAndRun(input);
-    testing.expectEqual(@as(i64, 3), vm.peek().toInteger().value);
-    testing.expectEqual(@as(usize, 0), vm.sp);
+    try testing.expectEqual(@as(i64, 3), vm.peek().toInteger().value);
+    try testing.expectEqual(@as(usize, 0), vm.sp);
 }
 
 test "Optionals" {
@@ -1472,8 +1472,8 @@ test "Optionals" {
     defer vm.deinit();
 
     try vm.compileAndRun(input);
-    testing.expectEqual(&Value.Nil, vm.peek());
-    testing.expectEqual(@as(usize, 0), vm.sp);
+    try testing.expectEqual(&Value.Nil, vm.peek());
+    try testing.expectEqual(@as(usize, 0), vm.sp);
 }
 
 test "Slices" {
@@ -1490,8 +1490,8 @@ test "Slices" {
         try vm.compileAndRun(case.input);
 
         const list = vm.peek().toList().value;
-        testing.expectEqual(@as(usize, 2), list.items.len);
-        testing.expectEqual(@as(i64, case.expected[0]), list.items[0].toInteger().value);
-        testing.expectEqual(@as(i64, case.expected[1]), list.items[1].toInteger().value);
+        try testing.expectEqual(@as(usize, 2), list.items.len);
+        try testing.expectEqual(@as(i64, case.expected[0]), list.items[0].toInteger().value);
+        try testing.expectEqual(@as(i64, case.expected[1]), list.items[1].toInteger().value);
     }
 }

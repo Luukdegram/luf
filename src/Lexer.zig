@@ -359,8 +359,8 @@ test "All supported tokens" {
     for (tests) |unit| {
         const current_token = lexer.next();
 
-        testing.expectEqual(unit.start, current_token.start);
-        testing.expectEqual(unit.end, current_token.end);
-        testing.expectEqual(unit.token_type, current_token.token_type);
+        try testing.expectEqual(unit.start, current_token.start);
+        try testing.expectEqual(unit.end, current_token.end);
+        try testing.expectEqual(unit.token_type, current_token.token_type);
     }
 }

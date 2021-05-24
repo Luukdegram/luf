@@ -1218,9 +1218,9 @@ fn testInput(input: []const u8, expected: []const lir.Inst.Tag) !void {
     };
     defer result.deinit();
 
-    testing.expectEqual(expected.len, result.instructions.len);
+    try testing.expectEqual(expected.len, result.instructions.len);
     for (result.instructions) |inst, i| {
-        testing.expectEqual(expected[i], inst.tag);
+        try testing.expectEqual(expected[i], inst.tag);
     }
 }
 
@@ -1310,12 +1310,12 @@ test "Declaration" {
 
     var inst = result.instructions[0];
 
-    testing.expectEqual(lir.Inst.Tag.decl, inst.tag);
+    try testing.expectEqual(lir.Inst.Tag.decl, inst.tag);
 
     const decl = inst.as(lir.Inst.Decl);
-    testing.expectEqualStrings("x", decl.name);
-    testing.expectEqual(lir.Inst.Tag.string, decl.value.tag);
-    testing.expectEqualStrings("foo", decl.value.as(lir.Inst.String).value);
+    try testing.expectEqualStrings("x", decl.name);
+    try testing.expectEqual(lir.Inst.Tag.string, decl.value.tag);
+    try testing.expectEqualStrings("foo", decl.value.as(lir.Inst.String).value);
 }
 
 test "Lists" {
@@ -1376,12 +1376,12 @@ test "Loop" {
 
     var inst = result.instructions[0];
 
-    testing.expectEqual(lir.Inst.Tag.@"while", inst.tag);
+    try testing.expectEqual(lir.Inst.Tag.@"while", inst.tag);
 
     const loop = inst.as(lir.Inst.Double);
-    testing.expectEqual(lir.Inst.Tag.primitive, loop.lhs.tag);
-    testing.expectEqual(lir.Inst.Primitive.PrimType.@"true", loop.lhs.as(lir.Inst.Primitive).prim_type);
-    testing.expectEqual(
+    try testing.expectEqual(lir.Inst.Tag.primitive, loop.lhs.tag);
+    try testing.expectEqual(lir.Inst.Primitive.PrimType.@"true", loop.lhs.as(lir.Inst.Primitive).prim_type);
+    try testing.expectEqual(
         @as(u64, 10),
         loop.rhs.as(lir.Inst.Block).instructions[0].as(lir.Inst.Single).rhs.as(lir.Inst.Int).value,
     );

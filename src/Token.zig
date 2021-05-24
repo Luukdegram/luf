@@ -228,7 +228,7 @@ test "Keywords" {
     };
 
     for (keywords) |keyword| {
-        testing.expect(findType(keyword) != .identifier);
+        try testing.expect(findType(keyword) != .identifier);
     }
 }
 
@@ -239,6 +239,6 @@ test "Identifiers" {
         "random",
     };
     for (identifiers) |identifier| {
-        testing.expect(findType(identifier) == .identifier);
+        try testing.expect(findType(identifier) == .identifier);
     }
 }
